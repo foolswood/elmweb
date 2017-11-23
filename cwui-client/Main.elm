@@ -71,13 +71,12 @@ init = (Model Dict.empty Dict.empty "somestring", Cmd.none)
 
 -- Update
 
-type InterfaceEvent = UpPartial String | IfAdd String | IfDrop String
+type InterfaceEvent = UpPartial String | IfAdd String
 
 interfaceUpdate : InterfaceEvent -> Model -> (Model, Cmd Msg)
 interfaceUpdate ie model = case ie of
     (UpPartial s) -> ({model | partialEntry = s}, Cmd.none)
     (IfAdd s) -> (model, WebSocket.send "ws://echo.websocket.org" (String.cons 'a' s))
-    (IfDrop s) -> (model, WebSocket.send "ws://echo.websocket.org" (String.cons 'd' s))
 
 type ErrorMsg = ErrorMsg Path String
 
@@ -180,7 +179,7 @@ subscriptions model = Sub.map NetworkEvent (WebSocket.listen "ws://echo.websocke
 
 eventFromNetwork : String -> UpdateBundle
 eventFromNetwork s = UpdateBundle [] [DataUpdateMsg (MsgAdd {
-    msgPath = "/someplace", msgTime = 0, msgArgs = [], msgInterpolation = IConstant,
+    msgPath = "/someplace", msgTime = 0, msgArgs = [ClString "blah"], msgInterpolation = IConstant,
     msgAttributee = Nothing, msgSite = Nothing})]
 
 -- View
@@ -196,4 +195,10 @@ subControl path = div []
 
 viewPaths : NodeMap -> Html InterfaceEvent
 viewPaths nodes = div [] (
-    List.map (\s -> button [onClick (IfDrop s)] [ text s ]) (Dict.keys nodes))
+    List.map (\(p, n) -> div [] [ text p , viewNode n]) (Dict.toList nodes))
+
+viewNode : ClNode -> Html InterfaceEvent
+viewNode node = table [] (
+    List.map
+    (\(i, vs) -> tr [] (td [] [text (toString i)] :: List.map (\v -> td [] [text (toString v)]) vs))
+    (Dict.toList (.values node)))
