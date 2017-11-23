@@ -76,7 +76,7 @@ type InterfaceEvent = UpPartial String | IfAdd String
 interfaceUpdate : InterfaceEvent -> Model -> (Model, Cmd Msg)
 interfaceUpdate ie model = case ie of
     (UpPartial s) -> ({model | partialEntry = s}, Cmd.none)
-    (IfAdd s) -> (model, WebSocket.send "ws://echo.websocket.org" (String.cons 'a' s))
+    (IfAdd s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, WebSocket.send "ws://echo.websocket.org" s)
 
 type ErrorMsg = ErrorMsg Path String
 
@@ -179,7 +179,7 @@ subscriptions model = Sub.map NetworkEvent (WebSocket.listen "ws://echo.websocke
 
 eventFromNetwork : String -> UpdateBundle
 eventFromNetwork s = UpdateBundle [] [DataUpdateMsg (MsgAdd {
-    msgPath = "/someplace", msgTime = 0, msgArgs = [ClString "blah"], msgInterpolation = IConstant,
+    msgPath = s, msgTime = 0, msgArgs = [ClString "blah"], msgInterpolation = IConstant,
     msgAttributee = Nothing, msgSite = Nothing})]
 
 -- View
