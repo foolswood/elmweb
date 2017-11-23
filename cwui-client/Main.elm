@@ -3,6 +3,7 @@ import Set exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onInput, onClick)
+import Json.Encode as JE
 import WebSocket
 
 main = Html.program {
@@ -71,23 +72,18 @@ init = (Model Dict.empty Dict.empty "somestring", Cmd.none)
 
 -- Update
 
-type InterfaceEvent = UpPartial String | IfAdd String
+type InterfaceEvent = UpPartial String | IfSub String
 
 interfaceUpdate : InterfaceEvent -> Model -> (Model, Cmd Msg)
 interfaceUpdate ie model = case ie of
     (UpPartial s) -> ({model | partialEntry = s}, Cmd.none)
-    (IfAdd s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, WebSocket.send "ws://echo.websocket.org" s)
+    (IfSub s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, WebSocket.send "ws://echo.websocket.org" (serialiseBundle (RequestBundle [MsgSub s] [])))
 
-type ErrorMsg = ErrorMsg Path String
+type SubMsg
+  = MsgSub Path
+  | MsgUnsub Path
 
-type TreeUpdateMsg
-  = MsgAssignType Path Path
-  | MsgDelete Path
-
-handleTreeUpdateMsg : TreeUpdateMsg -> TypeMap -> TypeMap
-handleTreeUpdateMsg tum tm = case tum of
-    (MsgAssignType p tp) -> Dict.insert p tp tm
-    (MsgDelete p) -> Dict.remove p tm
+type RequestBundle = RequestBundle (List SubMsg) (List DataUpdateMsg)
 
 type DataUpdateMsg
   = MsgAdd
@@ -132,6 +128,17 @@ handleDataUpdateMsg dum n = let nv = .values n in case dum of
     (MsgClear {}) -> n  -- FIXME: does nothing because single site
     (MsgSetChildren {}) -> n  -- FIXME: don't have anywhere to put this in the model ATM
 
+type ErrorMsg = ErrorMsg Path String
+
+type TreeUpdateMsg
+  = MsgAssignType Path Path
+  | MsgDelete Path
+
+handleTreeUpdateMsg : TreeUpdateMsg -> TypeMap -> TypeMap
+handleTreeUpdateMsg tum tm = case tum of
+    (MsgAssignType p tp) -> Dict.insert p tp tm
+    (MsgDelete p) -> Dict.remove p tm
+
 type UpdateMsg = TreeUpdateMsg TreeUpdateMsg | DataUpdateMsg DataUpdateMsg
 
 updateNode : (ClNode -> ClNode) -> Path -> NodeMap -> NodeMap
@@ -161,7 +168,10 @@ handleUpdateBundle (UpdateBundle errs updates) maps =
     List.foldl handleUpdateMsg maps updates
     -- FIXME: Ignores errors and doesn't sort types
 
-type Msg = InterfaceEvent InterfaceEvent | NetworkEvent UpdateBundle
+type Msg
+  = GlobalError String
+  | InterfaceEvent InterfaceEvent
+  | NetworkEvent UpdateBundle
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
@@ -171,16 +181,17 @@ update msg model = case msg of
       in
         ({model | nodes = newNodes, types = newTypes}, Cmd.none)
     (InterfaceEvent ie) -> interfaceUpdate ie model
+    (GlobalError s) -> (model, Cmd.none)  -- FIXME: ignoring fatal errors!
 
 -- Subscriptions
 
 subscriptions : Model -> Sub Msg
-subscriptions model = Sub.map NetworkEvent (WebSocket.listen "ws://echo.websocket.org" eventFromNetwork)
+subscriptions model = WebSocket.listen "ws://echo.websocket.org" eventFromNetwork
 
-eventFromNetwork : String -> UpdateBundle
-eventFromNetwork s = UpdateBundle [] [DataUpdateMsg (MsgAdd {
-    msgPath = s, msgTime = 0, msgArgs = [ClString "blah"], msgInterpolation = IConstant,
-    msgAttributee = Nothing, msgSite = Nothing})]
+eventFromNetwork : String -> Msg
+eventFromNetwork s = case parseBundle s of
+    (Ok b) -> NetworkEvent b
+    (Err e) -> GlobalError e
 
 -- View
 
@@ -190,7 +201,7 @@ view {nodes, partialEntry} = Html.map InterfaceEvent (div [] [subControl partial
 subControl : String -> Html InterfaceEvent
 subControl path = div []
   [ input [type_ "text", placeholder "Path", onInput (UpPartial)] []
-  , button [onClick (IfAdd path)] [text "cons"]
+  , button [onClick (IfSub path)] [text "cons"]
   ]
 
 viewPaths : NodeMap -> Html InterfaceEvent
@@ -202,3 +213,19 @@ viewNode node = table [] (
     List.map
     (\(i, vs) -> tr [] (td [] [text (toString i)] :: List.map (\v -> td [] [text (toString v)]) vs))
     (Dict.toList (.values node)))
+
+-- Json serialisation fudge
+
+subMsgToJsonValue : SubMsg -> JE.Value
+subMsgToJsonValue sm = JE.list (List.map JE.string (case sm of
+    (MsgSub p) -> ["s", p]
+    (MsgUnsub p) -> ["u", p]))
+
+serialiseBundle : RequestBundle -> String
+serialiseBundle (RequestBundle subs dums) = JE.encode 2 (JE.list (List.map subMsgToJsonValue subs))
+
+parseBundle : String -> Result String UpdateBundle
+parseBundle s = Ok (
+    UpdateBundle [] [DataUpdateMsg (MsgAdd {
+        msgPath = s, msgTime = 0, msgArgs = [ClString "blah"], msgInterpolation = IConstant,
+        msgAttributee = Nothing, msgSite = Nothing})])
