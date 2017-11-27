@@ -34,3 +34,5 @@ executable cwui-server
                      , bytestring
                      , clapi-hs
                      , cwui-server
+                     , network-simple
+                     , websockets
