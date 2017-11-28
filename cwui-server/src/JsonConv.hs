@@ -3,7 +3,7 @@ module JsonConv (requestBundleToClapi, updateBundleToJson) where
 import qualified Data.Set as Set
 import Data.Aeson (
     FromJSON(..), ToJSON(..), Value, withArray, Value(..), Array(..),
-    withObject, (.:), decode, object, (.=), encode)
+    withObject, (.:), eitherDecode, object, (.=), encode)
 import Data.Aeson.Types (Parser)
 import qualified Data.Vector as Vec
 import qualified Data.ByteString.Lazy as B
@@ -33,7 +33,7 @@ parseTaggedJson td p = withArray "Tagged" (handleTagged . arrayAsList)
             _ -> fail "Tag not single char"
         if t `elem` tagSet
             then p (tdTagToEnum td t) v
-            else fail $ "Bad tag"
+            else fail $ "Bad tag '" ++ [t] ++ "' expecting '" ++ (Set.toList tagSet) ++ "'"
     handleTagged _ = fail "Invalid tagged value"
 
 instance FromJSON Path where
@@ -106,8 +106,8 @@ instance ToJSON DataUpdateMessage where
 instance FromJSON RequestBundle where
     parseJSON = withObject "RequestBundle" $ \b -> RequestBundle <$> b .: "subs" <*> b .: "dums"
 
-requestBundleToClapi :: B.ByteString -> Maybe RequestBundle
-requestBundleToClapi = decode
+requestBundleToClapi :: B.ByteString -> Either String RequestBundle
+requestBundleToClapi = eitherDecode
 
 instance ToJSON TreeUpdateMessage where
     toJSON = buildTaggedJson tumtTaggedData $ \i -> case i of

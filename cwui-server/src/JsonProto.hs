@@ -18,5 +18,5 @@ jsonProto = forever $ waitThen jsonMash jsonUnmash
   where
     jsonMash (FRBClient b) = sendFwd $ LB.toStrict $ updateBundleToJson b
     jsonUnmash bs = case requestBundleToClapi $ LB.fromStrict bs of
-        Nothing -> error "Decode failure"
-        (Just b) -> sendRev $ TRBClient b
+        (Left s) -> error $ "Decode failure: " ++ (show bs) ++ " - " ++ s
+        (Right b) -> sendRev $ TRBClient b
