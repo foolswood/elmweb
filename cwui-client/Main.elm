@@ -9,6 +9,9 @@ import WebSocket
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
 
+wsTarget : String
+wsTarget = "ws://localhost:8004"
+
 -- Model
 
 type alias Path = String
@@ -77,7 +80,7 @@ type InterfaceEvent = UpPartial String | IfSub String
 interfaceUpdate : InterfaceEvent -> Model -> (Model, Cmd Msg)
 interfaceUpdate ie model = case ie of
     (UpPartial s) -> ({model | partialEntry = s}, Cmd.none)
-    (IfSub s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, WebSocket.send "ws://echo.websocket.org" (serialiseBundle (RequestBundle [MsgSub s] [])))
+    (IfSub s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, WebSocket.send wsTarget (serialiseBundle (RequestBundle [MsgSub s] [])))
 
 type SubMsg
   = MsgSub Path
@@ -186,7 +189,7 @@ update msg model = case msg of
 -- Subscriptions
 
 subscriptions : Model -> Sub Msg
-subscriptions model = WebSocket.listen "ws://echo.websocket.org" eventFromNetwork
+subscriptions model = WebSocket.listen wsTarget eventFromNetwork
 
 eventFromNetwork : String -> Msg
 eventFromNetwork s = case parseBundle s of
@@ -218,11 +221,11 @@ viewNode node = table [] (
 
 subMsgToJsonValue : SubMsg -> JE.Value
 subMsgToJsonValue sm = JE.list (List.map JE.string (case sm of
-    (MsgSub p) -> ["s", p]
-    (MsgUnsub p) -> ["u", p]))
+    (MsgSub p) -> ["S", p]
+    (MsgUnsub p) -> ["U", p]))
 
 serialiseBundle : RequestBundle -> String
-serialiseBundle (RequestBundle subs dums) = JE.encode 2 (JE.list (List.map subMsgToJsonValue subs))
+serialiseBundle (RequestBundle subs dums) = JE.encode 2 (JE.object [("subs", (JE.list (List.map subMsgToJsonValue subs))), ("dums", JE.list [])])
 
 parseBundle : String -> Result String UpdateBundle
 parseBundle s = Ok (
