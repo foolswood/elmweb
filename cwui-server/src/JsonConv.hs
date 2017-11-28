@@ -116,8 +116,14 @@ instance ToJSON TreeUpdateMessage where
 instance ToJSON UMsgError where
     toJSON (UMsgError p m) = object ["path" .= p, "msg" .= m]
 
+jsonifyOums :: [OwnerUpdateMessage] -> Value
+jsonifyOums oums = toJSON $ map jsonify oums
+  where
+    jsonify (Left tum) = toJSON tum
+    jsonify (Right dum) = toJSON dum
+
 instance ToJSON UpdateBundle where
-    toJSON (UpdateBundle errs oums) = object ["errs" .= toJSONList errs, "ups" .= toJSONList oums]
+    toJSON (UpdateBundle errs oums) = object ["errs" .= toJSONList errs, "ups" .= jsonifyOums oums]
 
 updateBundleToJson :: UpdateBundle -> B.ByteString
 updateBundleToJson = encode
