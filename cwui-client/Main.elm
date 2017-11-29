@@ -68,10 +68,11 @@ type alias Model =
   { types : TypeMap
   , nodes : NodeMap
   , partialEntry : String
+  , errors : List String
   }
 
 init : (Model, Cmd Msg)
-init = (Model Dict.empty Dict.empty "somestring", Cmd.none)
+init = (Model Dict.empty Dict.empty "somestring" [], Cmd.none)
 
 -- Update
 
@@ -184,7 +185,7 @@ update msg model = case msg of
       in
         ({model | nodes = newNodes, types = newTypes}, Cmd.none)
     (InterfaceEvent ie) -> interfaceUpdate ie model
-    (GlobalError s) -> (model, Cmd.none)  -- FIXME: ignoring fatal errors!
+    (GlobalError s) -> ({model | errors = s :: .errors model}, Cmd.none)
 
 -- Subscriptions
 
@@ -199,7 +200,11 @@ eventFromNetwork s = case parseBundle s of
 -- View
 
 view : Model -> Html Msg
-view {nodes, partialEntry} = Html.map InterfaceEvent (div [] [subControl partialEntry, viewPaths nodes])
+view {errors, nodes, partialEntry} = Html.map InterfaceEvent (
+    div [] [viewErrors errors, subControl partialEntry, viewPaths nodes])
+
+viewErrors : List String -> Html InterfaceEvent
+viewErrors errs = ul [] (List.map (\s -> li [] [text s]) errs)
 
 subControl : String -> Html InterfaceEvent
 subControl path = div []
