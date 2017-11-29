@@ -210,7 +210,7 @@ viewErrors errs = ul [] (List.map (\s -> li [] [text s]) errs)
 subControl : String -> Html InterfaceEvent
 subControl path = div []
   [ input [type_ "text", placeholder "Path", onInput (UpPartial)] []
-  , button [onClick (IfSub path)] [text "cons"]
+  , button [onClick (IfSub path)] [text "sub"]
   ]
 
 viewPaths : NodeMap -> Html InterfaceEvent
