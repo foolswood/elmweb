@@ -35,7 +35,11 @@ type Interpolation
 type alias ClAtomType = String
 
 type ClType
-  = ClTuple {doc : String, names : List String, atomTypes : List ClAtomType, interpolations : Set Interpolation}
+  = ClTuple {
+        doc : String,
+        names : List String,
+        atomTypes : List ClAtomType,
+        interpolations : List Interpolation} -- Can't define own types that go in a set (because comparable)
   | ClStruct {doc : String, childNames: List ChildName, childTypes : List Path, childLiberties : List Liberty}
   | ClArray {doc : String, childType : Path, childLiberty : Liberty}
 
@@ -63,6 +67,9 @@ type alias ClNode =
 emptyNode : ClNode
 emptyNode = ClNode [] Dict.empty Dict.empty
 
+zt : Time
+zt = (0, 0)
+
 type alias TypeMap = DepMap.StringDeps
 type alias NodeMap = Dict Path ClNode
 
@@ -76,6 +83,89 @@ type alias Model =
 
 init : (Model, Cmd Msg)
 init = (Model DepMap.empty Dict.empty "somestring" [], Cmd.none)
+
+-- Equivalent to mapM for Result:
+mapAllFaily : (a -> Result x b) -> List a -> Result x (List b)
+mapAllFaily act vs = List.foldl
+    (\v -> Result.andThen
+        (\acc -> Result.map (\b -> b :: acc) (act v))
+        )
+    (Ok [])
+    vs
+
+clListToStrings : List ClValue -> Result String (List String)
+clListToStrings =
+  let
+    rClString clv = case clv of
+        (ClString s) -> Ok s
+        _ -> Err "Value was not of string type"
+  in
+    mapAllFaily rClString
+
+clListToInterps : List ClValue -> Result String (List Interpolation)
+clListToInterps =
+  let
+    rInterp clv = case clv of
+        (ClEnum e) -> case e of
+            0 -> Ok IConstant
+            1 -> Ok ILinear
+            _ -> Err "Unrecognised interpolation enum value"
+        _ -> Err "Interpolation ClValue not an enum"
+  in
+    mapAllFaily rInterp
+
+clvToLiberty : ClValue -> Result String Liberty
+clvToLiberty clv = case clv of
+    (ClEnum e) -> case e of
+        0 -> Ok Cannot
+        1 -> Ok May
+        2 -> Ok Must
+        _ -> Err "Unrecognised value for liberty enum"
+    _ -> Err "Liberty value not enum"
+
+parseBaseType : Path -> ClNode -> Result String ClType
+parseBaseType tp n = case tp of
+    "/api/types/base/tuple" -> case Dict.get zt (.values n) of
+        (Just [ClString doc, ClList vNames, ClList vAtomTypes, ClList vInterps]) ->
+            Result.map3
+                (\ns ats itps -> ClTuple {
+                    doc = doc, names = ns, atomTypes = ats,
+                    interpolations = itps})
+                (clListToStrings vNames)
+                (clListToStrings vAtomTypes)
+                (clListToInterps vInterps)
+        (Just _) -> Err "Invalid value types for type info"
+        Nothing -> Err "No value at t=0 in type info"
+    "/api/types/base/struct" -> case Dict.get zt (.values n) of
+        (Just [ClString doc, ClList vChildNames, ClList vChildTypes, ClList vChildLibs]) ->
+            Result.map3
+                (\cn ct cl -> ClStruct {
+                    doc = doc, childNames = cn, childTypes = ct,
+                    childLiberties = cl})
+                (clListToStrings vChildNames)
+                (clListToStrings vChildTypes)
+                (mapAllFaily clvToLiberty vChildLibs)
+        (Just _) -> Err "Invalid value types for struct def"
+        Nothing -> Err "No value at t=0 for struct def"
+    "/api/types/base/array" -> case Dict.get zt (.values n) of
+        (Just [ClString doc, ClString childType, ClEnum vLib]) -> Result.map
+            (\l -> ClArray {doc = doc, childType = childType, childLiberty = l})
+            (clvToLiberty (ClEnum vLib))
+        (Just _) -> Err "Invalid value types for array def"
+        Nothing -> Err "No value at t=0 for array def"
+    _ -> Err "Not a base type path"
+
+clTypeAt : Path -> NodeMap -> TypeMap -> Result String ClType
+clTypeAt p nm tm = case DepMap.getDependency p tm of
+    Nothing -> Err "Type not loaded"
+    (Just tp) -> case Dict.get p nm of
+        Nothing -> Err "Type of type missing"
+        (Just n) -> parseBaseType tp n
+
+clTypeOf : Path -> NodeMap -> TypeMap -> Result String ClType
+clTypeOf p nm tm = case DepMap.getDependency p tm of
+    Nothing -> Err "Missing from the type map"
+    (Just tp) -> clTypeAt tp nm tm
 
 -- Update
 
@@ -210,8 +300,8 @@ eventFromNetwork s = case parseBundle s of
 -- View
 
 view : Model -> Html Msg
-view {errors, nodes, partialEntry} = Html.map InterfaceEvent (
-    div [] [viewErrors errors, subControl partialEntry, viewPaths nodes])
+view {errors, types, nodes, partialEntry} = Html.map InterfaceEvent (
+    div [] [viewErrors errors, subControl partialEntry, viewPaths types nodes])
 
 viewErrors : List String -> Html InterfaceEvent
 viewErrors errs = ul [] (List.map (\s -> li [] [text s]) errs)
@@ -222,9 +312,9 @@ subControl path = div []
   , button [onClick (IfSub path)] [text "sub"]
   ]
 
-viewPaths : NodeMap -> Html InterfaceEvent
-viewPaths nodes = div [] (
-    List.map (\(p, n) -> div [] [ text p , viewNode n]) (Dict.toList nodes))
+viewPaths : TypeMap -> NodeMap -> Html InterfaceEvent
+viewPaths types nodes = div [] (
+    List.map (\(p, n) -> div [] [ text p , text (toString (clTypeOf p nodes types)) , viewNode n]) (Dict.toList nodes))
 
 viewNode : ClNode -> Html InterfaceEvent
 viewNode node = table [] (
