@@ -50,6 +50,3 @@ type alias ClNode =
 
 emptyNode : ClNode
 emptyNode = ClNode [] Dict.empty Dict.empty
-
-zt : Time
-zt = (0, 0)
