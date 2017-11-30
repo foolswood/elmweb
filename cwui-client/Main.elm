@@ -51,15 +51,15 @@ type ClValue
 
 type alias ClSeries = Dict Time (List ClValue)
 
--- FIXME: nowhere to put tree structure or errors!
+-- FIXME: nowhere to put tree structure!
 type alias ClNode =
-  { typeInfo : Maybe ClType
+  { errors : List String
   , values : ClSeries
   , pending : ClSeries
   }
 
 emptyNode : ClNode
-emptyNode = ClNode Nothing Dict.empty Dict.empty
+emptyNode = ClNode [] Dict.empty Dict.empty
 
 type alias TypeMap = Dict Path Path
 type alias NodeMap = Dict Path ClNode
@@ -168,10 +168,17 @@ handleUpdateMsg um (nodes, types) = case um of
 
 type UpdateBundle = UpdateBundle (List ErrorMsg) (List UpdateMsg)
 
+handleErrorMsg : ErrorMsg -> NodeMap -> NodeMap
+handleErrorMsg (ErrorMsg p msg) nm = updateNode (\n -> {n | errors = msg :: .errors n}) p nm
+
 handleUpdateBundle : UpdateBundle -> (NodeMap, TypeMap) -> (NodeMap, TypeMap)
 handleUpdateBundle (UpdateBundle errs updates) maps =
-    List.foldl handleUpdateMsg maps updates
-    -- FIXME: Ignores errors and doesn't sort types
+  let
+    (updatedNodes, updatedTypes) = List.foldl handleUpdateMsg maps updates
+    nodesWithErrs = List.foldl handleErrorMsg updatedNodes errs
+  in
+    (nodesWithErrs, updatedTypes)
+    -- FIXME: doesn't sort types
 
 type Msg
   = GlobalError String
