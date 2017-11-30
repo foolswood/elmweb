@@ -7,6 +7,8 @@ import Json.Encode as JE
 import Json.Decode as JD
 import WebSocket
 
+import DepMap
+
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
 
@@ -61,7 +63,7 @@ type alias ClNode =
 emptyNode : ClNode
 emptyNode = ClNode [] Dict.empty Dict.empty
 
-type alias TypeMap = Dict Path Path
+type alias TypeMap = DepMap.StringDeps
 type alias NodeMap = Dict Path ClNode
 
 -- FIXME: Drops site and attribution
@@ -73,7 +75,7 @@ type alias Model =
   }
 
 init : (Model, Cmd Msg)
-init = (Model Dict.empty Dict.empty "somestring" [], Cmd.none)
+init = (Model DepMap.empty Dict.empty "somestring" [], Cmd.none)
 
 -- Update
 
@@ -141,8 +143,8 @@ type TreeUpdateMsg
 
 handleTreeUpdateMsg : TreeUpdateMsg -> TypeMap -> TypeMap
 handleTreeUpdateMsg tum tm = case tum of
-    (MsgAssignType p tp) -> Dict.insert p tp tm
-    (MsgDelete p) -> Dict.remove p tm
+    (MsgAssignType p tp) -> DepMap.addDependency p tp tm
+    (MsgDelete p) -> DepMap.removeDependency p tm
 
 type UpdateMsg = TreeUpdateMsg TreeUpdateMsg | DataUpdateMsg DataUpdateMsg
 
