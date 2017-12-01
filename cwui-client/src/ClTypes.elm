@@ -16,14 +16,30 @@ type Interpolation
   = IConstant
   | ILinear
 
-type alias ClAtomType = String
+type alias Bounds a = {minBound : Maybe a, maxBound : Maybe a}
+
+type AtomDef
+  = ADTime (Bounds Time)
+  | ADEnum (List String)
+  | ADWord32 (Bounds Int)
+  | ADWord64 (Bounds Int)
+  | ADInt32 (Bounds Int)
+  | ADInt64 (Bounds Int)
+  | ADFloat (Bounds Float)
+  | ADDouble (Bounds Float)
+  | ADString String
+  | ADList AtomDef
+  | ADSet AtomDef
+  | ADValidator
+
+type alias ClTupleType = {
+    doc : String,
+    names : List String,
+    atomTypes : List AtomDef,
+    interpolations : List Interpolation} -- Can't define own types that go in a set (because comparable)
 
 type ClType
-  = ClTuple {
-        doc : String,
-        names : List String,
-        atomTypes : List ClAtomType,
-        interpolations : List Interpolation} -- Can't define own types that go in a set (because comparable)
+  = ClTuple ClTupleType
   | ClStruct {doc : String, childNames: List ChildName, childTypes : List Path, childLiberties : List Liberty}
   | ClArray {doc : String, childType : Path, childLiberty : Liberty}
 

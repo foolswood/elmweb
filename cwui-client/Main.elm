@@ -2,13 +2,14 @@ import Dict exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onInput, onClick)
+import WebSocket
+
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
 import ClMsgTypes exposing (..)
 import ClSpecParser exposing (parseBaseType)
-import WebSocket
-
 import DepMap
+import Futility exposing (itemAtIndex, zip)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -140,10 +141,41 @@ subControl path = div []
 
 viewPaths : TypeMap -> NodeMap -> Html InterfaceEvent
 viewPaths types nodes = div [] (
-    List.map (\(p, n) -> div [] [ text p , text (toString (clTypeOf p nodes types)) , viewNode n]) (Dict.toList nodes))
+    List.map (\(p, n) -> div [] [ text p , viewNode (clTypeOf p nodes types) n]) (Dict.toList nodes))
 
-viewNode : ClNode -> Html InterfaceEvent
-viewNode node = table [] (
-    List.map
-    (\(i, vs) -> tr [] (td [] [text (toString i)] :: List.map (\v -> td [] [text (toString v)]) vs))
-    (Dict.toList (.values node)))
+viewNode : Result String ClType -> ClNode -> Html InterfaceEvent
+viewNode rType node = case rType of
+    Err s -> text s
+    Ok (ClTuple tti) -> viewTuple tti node
+    Ok _ -> text "Not implemented"
+
+viewTuple : ClTupleType -> ClNode -> Html InterfaceEvent
+viewTuple {names, atomTypes} node =
+  let
+    tView = tr [] (th [] [text "Time"] :: List.map (\(n, at) -> th [] [text n, text (toString at)]) (zip names atomTypes))
+    vView = List.map
+        (\(i, vs) -> tr [] (td [] [text (toString i)] :: List.map (\(at, v) -> td [] [atomViewer at v]) (zip atomTypes vs)))
+        (Dict.toList (.values node))
+  in
+    table [] (tView :: vView)
+
+atomViewer : AtomDef -> ClValue -> Html InterfaceEvent
+atomViewer ad = case ad of
+    (ADTime _) -> \v -> case v of
+        (ClTime (s, f)) -> text (String.concat [toString s, ":", toString f])
+        _ -> text "Time did not contain time"
+    (ADEnum opts) -> \v -> case v of
+        (ClEnum e) -> text (case itemAtIndex e opts of
+            Nothing -> "Option out of range for enum"
+            Just o -> o)
+        _ -> text "enum did not contain enum"
+    (ADString s) -> \v -> case v of
+        (ClString s) -> text s
+        _ -> text (String.append "Expected string item got: " (toString v))
+    (ADList sad) -> \v -> case v of
+        (ClList items) -> span [] (List.map (atomViewer sad) items)
+        _ -> text "List did not contain list"
+    (ADSet sad) -> \v -> case v of
+        (ClList items) -> span [] (List.map (atomViewer sad) items)
+        _ -> text "Set did not contain set"
+    _ -> text << toString  -- FIXME: this is pants
