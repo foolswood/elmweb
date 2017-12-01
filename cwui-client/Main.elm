@@ -144,10 +144,14 @@ viewPaths types nodes = div [] (
     List.map (\(p, n) -> div [] [ text p , viewNode (clTypeOf p nodes types) n]) (Dict.toList nodes))
 
 viewNode : Result String ClType -> ClNode -> Html InterfaceEvent
-viewNode rType node = case rType of
-    Err s -> text s
-    Ok (ClTuple tti) -> viewTuple tti node
-    Ok _ -> text "Not implemented"
+viewNode rType node =
+  let
+    nv = case rType of
+        Err s -> text s
+        Ok (ClTuple tti) -> viewTuple tti node
+        Ok _ -> text "Not implemented"
+  in
+    div [] [viewErrors (.errors node), nv]
 
 viewTuple : ClTupleType -> ClNode -> Html InterfaceEvent
 viewTuple {names, atomTypes} node =
