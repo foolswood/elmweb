@@ -49,10 +49,15 @@ clTypeOf p nm tm = case DepMap.getDependency p tm of
 
 type InterfaceEvent = UpPartial String | IfSub String
 
+subToCmd : List Path -> Cmd Msg
+subToCmd ps = case ps of
+    [] -> Cmd.none
+    _ -> WebSocket.send wsTarget (serialiseBundle (RequestBundle (List.map MsgSub ps) []))
+
 interfaceUpdate : InterfaceEvent -> Model -> (Model, Cmd Msg)
 interfaceUpdate ie model = case ie of
     (UpPartial s) -> ({model | partialEntry = s}, Cmd.none)
-    (IfSub s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, WebSocket.send wsTarget (serialiseBundle (RequestBundle [MsgSub s] [])))
+    (IfSub s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, subToCmd [s])
 
 handleDataUpdateMsg : DataUpdateMsg -> ClNode -> ClNode
 handleDataUpdateMsg dum n = let nv = .values n in case dum of
@@ -62,10 +67,10 @@ handleDataUpdateMsg dum n = let nv = .values n in case dum of
     (MsgClear {}) -> n  -- FIXME: does nothing because single site
     (MsgSetChildren {}) -> n  -- FIXME: don't have anywhere to put this in the model ATM
 
-handleTreeUpdateMsg : TreeUpdateMsg -> TypeMap -> TypeMap
+handleTreeUpdateMsg : TreeUpdateMsg -> TypeMap -> (TypeMap, Maybe Path)
 handleTreeUpdateMsg tum tm = case tum of
-    (MsgAssignType p tp) -> DepMap.addDependency p tp tm
-    (MsgDelete p) -> DepMap.removeDependency p tm
+    (MsgAssignType p tp) -> (DepMap.addDependency p tp tm, Just tp)
+    (MsgDelete p) -> (DepMap.removeDependency p tm, Nothing)
 
 updateNode : (ClNode -> ClNode) -> Path -> NodeMap -> NodeMap
 updateNode t p m =
@@ -82,22 +87,29 @@ dumPath dum = case dum of
     (MsgClear {msgPath}) -> msgPath
     (MsgSetChildren {msgPath}) -> msgPath
 
-handleUpdateMsg : UpdateMsg -> (NodeMap, TypeMap) -> (NodeMap, TypeMap)
-handleUpdateMsg um (nodes, types) = case um of
-    (TreeUpdateMsg tum) -> (nodes, handleTreeUpdateMsg tum types)
-    (DataUpdateMsg dum) -> (updateNode (handleDataUpdateMsg dum) (dumPath dum) nodes, types)
+handleUpdateMsg : UpdateMsg -> (NodeMap, TypeMap, List Path) -> (NodeMap, TypeMap, List Path)
+handleUpdateMsg um (nodes, types, ntp) = case um of
+    (TreeUpdateMsg tum) ->
+      let
+        (nt, mp) = handleTreeUpdateMsg tum types
+        entp = case mp of
+            Nothing -> ntp
+            Just p -> p :: ntp
+      in
+        (nodes, nt, entp)
+    (DataUpdateMsg dum) -> (updateNode (handleDataUpdateMsg dum) (dumPath dum) nodes, types, ntp)
 
 handleErrorMsg : ErrorMsg -> NodeMap -> NodeMap
 handleErrorMsg (ErrorMsg p msg) nm = updateNode (\n -> {n | errors = msg :: .errors n}) p nm
 
-handleUpdateBundle : UpdateBundle -> (NodeMap, TypeMap) -> (NodeMap, TypeMap)
-handleUpdateBundle (UpdateBundle errs updates) maps =
+handleUpdateBundle : UpdateBundle -> (NodeMap, TypeMap) -> (NodeMap, TypeMap, List Path)
+handleUpdateBundle (UpdateBundle errs updates) (nodes, types) =
   let
-    (updatedNodes, updatedTypes) = List.foldl handleUpdateMsg maps updates
+    (updatedNodes, updatedTypes, newTypePaths) = List.foldl handleUpdateMsg (nodes, types, []) updates
     nodesWithErrs = List.foldl handleErrorMsg updatedNodes errs
+    unsubbedTypes = List.filter (not << flip Dict.member updatedNodes) newTypePaths
   in
-    (nodesWithErrs, updatedTypes)
-    -- FIXME: doesn't sort types
+    (nodesWithErrs, updatedTypes, unsubbedTypes)
 
 type Msg
   = GlobalError String
@@ -108,9 +120,9 @@ update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
     (NetworkEvent b) ->
       let
-        (newNodes, newTypes) = handleUpdateBundle b (.nodes model, .types model)
+        (newNodes, newTypes, unsubbedTypes) = handleUpdateBundle b (.nodes model, .types model)
       in
-        ({model | nodes = newNodes, types = newTypes}, Cmd.none)
+        ({model | nodes = newNodes, types = newTypes}, subToCmd unsubbedTypes)
     (InterfaceEvent ie) -> interfaceUpdate ie model
     (GlobalError s) -> ({model | errors = s :: .errors model}, Cmd.none)
 
