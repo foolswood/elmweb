@@ -59,13 +59,23 @@ interfaceUpdate ie model = case ie of
     (UpPartial s) -> ({model | partialEntry = s}, Cmd.none)
     (IfSub s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, subToCmd [s])
 
+tupleNodeUpdate : (ClSeries -> ClSeries) -> ClNode -> ClNode
+tupleNodeUpdate op n = case .body n of
+    TupleNode tn -> {n | body = TupleNode {tn | values = op (.values tn)}}
+    _ -> tupleNodeUpdate op {n | body = emptyTupleNode}
+
+containerNodeUpdate : List ChildName -> ClNode -> ClNode
+containerNodeUpdate cns n = case .body n of
+    ContainerNode cn -> {n | body = ContainerNode {cn | children = cns}}
+    _ -> containerNodeUpdate cns {n | body = emptyContainerNode}
+
 handleDataUpdateMsg : DataUpdateMsg -> ClNode -> ClNode
-handleDataUpdateMsg dum n = let nv = .values n in case dum of
-    (MsgAdd {msgTime, msgArgs}) -> {n | values = Dict.insert msgTime msgArgs nv}
-    (MsgSet {msgTime, msgArgs}) -> {n | values = Dict.insert msgTime msgArgs nv}
-    (MsgRemove {msgTime}) -> {n | values = Dict.remove msgTime nv}
-    (MsgClear {}) -> n  -- FIXME: does nothing because single site
-    (MsgSetChildren {}) -> n  -- FIXME: don't have anywhere to put this in the model ATM
+handleDataUpdateMsg dum = case dum of
+    (MsgAdd {msgTime, msgArgs}) -> tupleNodeUpdate (Dict.insert msgTime msgArgs)
+    (MsgSet {msgTime, msgArgs}) -> tupleNodeUpdate (Dict.insert msgTime msgArgs)
+    (MsgRemove {msgTime}) -> tupleNodeUpdate (Dict.remove msgTime)
+    (MsgClear {}) -> \n -> n  -- FIXME: does nothing because single site
+    (MsgSetChildren {msgChildren}) -> containerNodeUpdate msgChildren
 
 handleTreeUpdateMsg : TreeUpdateMsg -> TypeMap -> (TypeMap, Maybe Path)
 handleTreeUpdateMsg tum tm = case tum of
@@ -160,12 +170,22 @@ viewNode rType node =
   let
     nv = case rType of
         Err s -> text s
-        Ok (ClTuple tti) -> viewTuple tti node
-        Ok _ -> text "Not implemented"
+        Ok clType -> case .body node of
+            TupleNode tn -> case clType of
+                ClTuple tti -> viewTuple tti tn
+                _ -> text "Tuple definition non-tuple node"
+            ContainerNode cn -> case clType of
+                ClTuple _ -> text "Tuple type for container node"
+                ClStruct {doc} -> viewContainer doc cn
+                ClArray {doc} -> viewContainer doc cn
+            UnpopulatedNode -> text "Unpopulated node of known type"
   in
     div [] [viewErrors (.errors node), nv]
 
-viewTuple : ClTupleType -> ClNode -> Html InterfaceEvent
+viewContainer : String -> ClContainerNode -> Html InterfaceEvent
+viewContainer doc {children} = div [] (text doc :: List.map (\c -> text c) children)
+
+viewTuple : ClTupleType -> ClTupleNode -> Html InterfaceEvent
 viewTuple {names, atomTypes} node =
   let
     tView = tr [] (th [] [text "Time"] :: List.map (\(n, at) -> th [] [text n, text (toString at)]) (zip names atomTypes))

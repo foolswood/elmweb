@@ -1,7 +1,7 @@
 module ClSpecParser exposing (parseBaseType)
 import Dict
 
-import ClTypes exposing (Path, Time, ClNode, ClType(..), ClValue(..), Liberty(..), Interpolation(..), AtomDef(..))
+import ClTypes exposing (Path, Time, ClNode, ClTupleNode, ClNodeT(TupleNode), ClType(..), ClValue(..), Liberty(..), Interpolation(..), AtomDef(..))
 import Futility exposing (mapAllFaily)
 
 zt : Time
@@ -75,8 +75,8 @@ clvToLiberty clv = case clv of
         _ -> Err "Unrecognised value for liberty enum"
     _ -> Err "Liberty value not enum"
 
-parseBaseType : Path -> ClNode -> Result String ClType
-parseBaseType tp n = case tp of
+parseBaseTuple : Path -> ClTupleNode -> Result String ClType
+parseBaseTuple tp n = case tp of
     "/api/types/base/tuple" -> case Dict.get zt (.values n) of
         (Just [ClString doc, ClList vNames, ClList vAtomTypes, ClList vInterps]) ->
             Result.map3
@@ -106,3 +106,8 @@ parseBaseType tp n = case tp of
         (Just _) -> Err "Invalid value types for array def"
         Nothing -> Err "No value at t=0 for array def"
     _ -> Err "Not a base type path"
+
+parseBaseType : Path -> ClNode -> Result String ClType
+parseBaseType p n = case .body n of
+    TupleNode tn -> parseBaseTuple p tn
+    _ -> Err "Type definition not a tuple"

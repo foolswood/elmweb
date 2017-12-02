@@ -58,12 +58,31 @@ type ClValue
 
 type alias ClSeries = Dict Time (List ClValue)
 
--- FIXME: nowhere to put tree structure!
-type alias ClNode =
-  { errors : List String
-  , values : ClSeries
+type alias ClTupleNode =
+  { values : ClSeries
   , pending : ClSeries
   }
 
+type alias ClContainerNode =
+  { children : List ChildName
+  }
+
+type ClNodeT
+  = TupleNode ClTupleNode
+  | ContainerNode ClContainerNode
+  | UnpopulatedNode
+
+-- FIXME: nowhere to put tree structure!
+type alias ClNode =
+  { errors : List String
+  , body : ClNodeT
+  }
+
 emptyNode : ClNode
-emptyNode = ClNode [] Dict.empty Dict.empty
+emptyNode = ClNode [] UnpopulatedNode
+
+emptyTupleNode : ClNodeT
+emptyTupleNode = TupleNode {values = Dict.empty, pending = Dict.empty}
+
+emptyContainerNode : ClNodeT
+emptyContainerNode = ContainerNode {children = []}
