@@ -30,6 +30,7 @@ type AtomDef
   | ADString String
   | ADList AtomDef
   | ADSet AtomDef
+  | ADRef String
   | ADValidator
 
 type alias ClTupleType = {

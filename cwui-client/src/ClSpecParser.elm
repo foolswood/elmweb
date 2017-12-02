@@ -28,6 +28,7 @@ constraintParsers =
     intBounds = timeBounds
     floatBounds = timeBounds
     cRegex s = Ok s
+    parsePath s = Ok s
   in [
     ("time", Result.map ADTime << timeBounds),
     ("enum", Result.map ADEnum << enumOpts),
@@ -40,6 +41,7 @@ constraintParsers =
     ("string", Result.map ADString << cRegex),
     ("list", Result.map ADList << clParseAtomDef),
     ("set", Result.map ADSet << clParseAtomDef),
+    ("ref", Result.map ADRef << parsePath),
     ("validator", \s -> Ok ADValidator)]
 
 clParseAtomDefWith : String -> List ConstraintParser -> Result String AtomDef
