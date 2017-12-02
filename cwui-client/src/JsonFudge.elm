@@ -66,7 +66,7 @@ decodeMsg =
         "C" -> JD.map2
             (\p ns -> DataUpdateMsg (MsgSetChildren {
                 msgPath=p, msgChildren=ns, msgAttributee=Nothing}))
-            decodePathField (JD.field "children" (JD.list JD.string))
+            decodePathField (JD.field "names" (JD.list JD.string))
         "a" -> JD.map4
             (\p t a i -> DataUpdateMsg (MsgAdd {
                 msgPath=p, msgTime=t, msgArgs=a, msgInterpolation=i,
