@@ -42,6 +42,14 @@ type DataUpdateMsg
       , msgAttributee : Maybe Attributee
       }
 
+dumPath : DataUpdateMsg -> Path
+dumPath dum = case dum of
+    (MsgAdd {msgPath}) -> msgPath
+    (MsgSet {msgPath}) -> msgPath
+    (MsgRemove {msgPath}) -> msgPath
+    (MsgClear {msgPath}) -> msgPath
+    (MsgSetChildren {msgPath}) -> msgPath
+
 type ErrorMsg = ErrorMsg Path String
 
 type TreeUpdateMsg

@@ -111,14 +111,6 @@ updateNode t p m =
   in
     Dict.update p wt m
 
-dumPath : DataUpdateMsg -> Path
-dumPath dum = case dum of
-    (MsgAdd {msgPath}) -> msgPath
-    (MsgSet {msgPath}) -> msgPath
-    (MsgRemove {msgPath}) -> msgPath
-    (MsgClear {msgPath}) -> msgPath
-    (MsgSetChildren {msgPath}) -> msgPath
-
 handleUpdateMsg : UpdateMsg -> (NodeMap, TypeMap, List Path) -> (NodeMap, TypeMap, List Path)
 handleUpdateMsg um (nodes, types, ntp) = case um of
     (TreeUpdateMsg tum) ->
