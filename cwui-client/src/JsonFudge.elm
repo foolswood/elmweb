@@ -9,11 +9,56 @@ import ClMsgTypes exposing (..)
 
 subMsgToJsonValue : SubMsg -> JE.Value
 subMsgToJsonValue sm = JE.list (List.map JE.string (case sm of
-    (MsgSub p) -> ["S", p]
-    (MsgUnsub p) -> ["U", p]))
+    MsgSub p -> ["S", p]
+    MsgUnsub p -> ["U", p]))
+
+timeJson : Time -> JE.Value
+timeJson (s, f) = JE.list [JE.int s, JE.int f]
+
+tagged : Char -> JE.Value -> JE.Value
+tagged t v = JE.list [JE.string (String.fromChar t), v]
+
+encodeClValue : ClValue -> JE.Value
+encodeClValue v = case v of
+    (ClTime t) -> tagged 't' (timeJson t)
+    (ClEnum e) -> tagged 'e' (JE.int e)
+    (ClWord32 i) -> tagged 'u' (JE.int i)
+    (ClWord64 i) -> tagged 'U' (JE.int i)
+    (ClInt32 i) -> tagged 'i' (JE.int i)
+    (ClInt64 i) -> tagged 'I' (JE.int i)
+    (ClFloat f) -> tagged 'd' (JE.float f)
+    (ClDouble f) -> tagged 'D' (JE.float f)
+    (ClString s) -> tagged 's' (JE.string s)
+    (ClList l) -> tagged 'l' (JE.list (List.map encodeClValue l))
+
+dumToJsonValue : DataUpdateMsg -> JE.Value
+dumToJsonValue dum =
+  let
+    encodeInterpolation i = case i of
+        IConstant -> tagged 'C' (JE.list [])
+        ILinear -> tagged 'L' (JE.list [])
+    -- FIXME: no site/attributee
+    tpiJson {msgPath, msgTime, msgArgs, msgInterpolation} = JE.object [
+        ("path", JE.string msgPath)
+      , ("time", timeJson msgTime)
+      , ("args", JE.list (List.map encodeClValue msgArgs))
+      , ("interpolation", encodeInterpolation msgInterpolation)]
+    ptasJson {msgPath, msgTime, msgAttributee, msgSite} = JE.object [
+        ("path", JE.string msgPath)
+      , ("time", timeJson msgTime)]
+  in
+    case dum of
+        MsgAdd tpi -> tagged 'a' (tpiJson tpi)
+        MsgSet tpi -> tagged 's' (tpiJson tpi)
+        MsgRemove ptas -> tagged 'r' (ptasJson ptas)
+        MsgClear ptas -> tagged 'c' (ptasJson ptas)
+        MsgSetChildren {msgPath, msgChildren} -> tagged 'S' (JE.object [
+            ("path", JE.string msgPath), ("names", JE.list (List.map JE.string msgChildren))])
 
 serialiseBundle : RequestBundle -> String
-serialiseBundle (RequestBundle subs dums) = JE.encode 2 (JE.object [("subs", (JE.list (List.map subMsgToJsonValue subs))), ("dums", JE.list [])])
+serialiseBundle (RequestBundle subs dums) = JE.encode 2 (JE.object [
+    ("subs", JE.list (List.map subMsgToJsonValue subs)),
+    ("dums", JE.list (List.map dumToJsonValue dums))])
 
 decodePath : JD.Decoder String
 decodePath = JD.string

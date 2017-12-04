@@ -22,10 +22,9 @@ import Clapi.Types (
     OwnerUpdateMessage(..), UMsgError(..), UpdateBundle(..))
 
 parseTaggedJson :: TaggedData e a -> (e -> Value -> Parser a) -> Value -> Parser a
-parseTaggedJson td p = withArray "Tagged" (handleTagged . arrayAsList)
+parseTaggedJson td p = withArray "Tagged" (handleTagged . Vec.toList)
   where
     tagSet = Set.fromList $ tdAllTags td
-    arrayAsList v = Vec.toList v
     handleTagged [jt, v] = do
         ts <- T.unpack <$> parseJSON jt
         t <- case ts of
@@ -48,10 +47,12 @@ instance FromJSON SubMessage where
         SubMsgTUnsub -> fmap UMsgUnsubscribe . parseJSON
 
 instance FromJSON Time where
-    parseJSON = do
-        s <- parseJSON
-        f <- parseJSON
-        return $ Time <$> s <*> f
+    parseJSON = withArray "Time" (\v -> case Vec.toList v of
+        [sv, fv] -> do
+            s <- parseJSON sv
+            f <- parseJSON fv
+            return $ Time s f
+        _ -> fail "not of the form [s, f]")
 
 instance ToJSON Time where
     toJSON (Time s f) = toJSON [toJSON s, toJSON f]
