@@ -2,6 +2,8 @@ import Dict exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onInput, onClick)
+import Time
+import Task
 import WebSocket
 
 import JsonFudge exposing (serialiseBundle, parseBundle)
@@ -11,6 +13,7 @@ import ClSpecParser exposing (parseBaseType)
 import DepMap
 import Futility exposing (..)
 import PathManipulation exposing (splitBasename)
+import MonoTime
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -32,7 +35,7 @@ type alias Model =
   }
 
 init : (Model, Cmd Msg)
-init = (Model DepMap.empty Dict.empty "somestring" [], Cmd.none)
+init = (Model DepMap.empty Dict.empty "somestring" [], Task.perform (GlobalError << toString) MonoTime.now)
 
 clTypeAt : Path -> NodeMap -> TypeMap -> Result String ClType
 clTypeAt p nm tm = case DepMap.getDependency p tm of
