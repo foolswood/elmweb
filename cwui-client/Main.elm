@@ -35,7 +35,7 @@ type alias Model =
   }
 
 init : (Model, Cmd Msg)
-init = (Model DepMap.empty Dict.empty "somestring" [], Task.perform (GlobalError << toString) MonoTime.now)
+init = (Model DepMap.empty Dict.empty "somestring" [], Cmd.none)
 
 clTypeAt : Path -> NodeMap -> TypeMap -> Result String ClType
 clTypeAt p nm tm = case DepMap.getDependency p tm of
@@ -68,7 +68,7 @@ clLibertyOf p nm tm =
 type InterfaceEvent = UpPartial String | IfSub Path | TimePointEdit Path Time (List ClValue)
 
 sendBundle : RequestBundle -> Cmd Msg
-sendBundle = WebSocket.send wsTarget << serialiseBundle
+sendBundle b = timeStamped (WebSocket.send wsTarget << serialiseBundle b)
 
 subToCmd : List Path -> Cmd Msg
 subToCmd ps = case ps of
@@ -142,6 +142,10 @@ type Msg
   = GlobalError String
   | InterfaceEvent InterfaceEvent
   | NetworkEvent UpdateBundle
+  | TimeStamped (Time -> Cmd Msg) Time.Time
+
+timeStamped : (Time -> Cmd Msg) -> Cmd Msg
+timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
@@ -152,6 +156,7 @@ update msg model = case msg of
         ({model | nodes = newNodes, types = newTypes}, subToCmd unsubbedTypes)
     (InterfaceEvent ie) -> interfaceUpdate ie model
     (GlobalError s) -> ({model | errors = s :: .errors model}, Cmd.none)
+    (TimeStamped c t) -> (model, c (fromFloat t))
 
 -- Subscriptions
 

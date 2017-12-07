@@ -55,10 +55,11 @@ dumToJsonValue dum =
         MsgSetChildren {msgPath, msgChildren} -> tagged 'S' (JE.object [
             ("path", JE.string msgPath), ("names", JE.list (List.map JE.string msgChildren))])
 
-serialiseBundle : RequestBundle -> String
-serialiseBundle (RequestBundle subs dums) = JE.encode 2 (JE.object [
+serialiseBundle : RequestBundle -> Time -> String
+serialiseBundle (RequestBundle subs dums) t = JE.encode 2 (JE.object [
     ("subs", JE.list (List.map subMsgToJsonValue subs)),
-    ("dums", JE.list (List.map dumToJsonValue dums))])
+    ("dums", JE.list (List.map dumToJsonValue dums)),
+    ("time", timeJson t)])
 
 decodePath : JD.Decoder String
 decodePath = JD.string

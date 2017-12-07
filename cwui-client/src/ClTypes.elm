@@ -3,9 +3,13 @@ import Dict exposing (..)
 
 type alias Path = String
 type alias ChildName = String
-type alias Time = (Int, Int)
 type alias Attributee = String
 type alias Site = String
+
+type alias Time = (Int, Int)
+
+fromFloat : Float -> Time
+fromFloat ft = let s = floor ft in (s, round ((ft - toFloat s) * 2 ^ 32))
 
 type Liberty
   = Cannot
