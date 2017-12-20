@@ -19,7 +19,7 @@ import Clapi.Types (
     RequestBundle, UpdateBundle, SubMessage(..), Time(..), ClapiValue(..),
     ClapiTypeEnum(..), InterpolationType(..), Interpolation(..),
     DataUpdateMessage(..), RequestBundle(..), TreeUpdateMessage(..),
-    OwnerUpdateMessage(..), UMsgError(..), UpdateBundle(..))
+    OwnerUpdateMessage(..), UMsgError(..), UpdateBundle(..), TimeStamped(..))
 
 parseTaggedJson :: TaggedData e a -> (e -> Value -> Parser a) -> Value -> Parser a
 parseTaggedJson td p = withArray "Tagged" (handleTagged . Vec.toList)
@@ -107,8 +107,11 @@ instance ToJSON DataUpdateMessage where
 instance FromJSON RequestBundle where
     parseJSON = withObject "RequestBundle" $ \b -> RequestBundle <$> b .: "subs" <*> b .: "dums"
 
-requestBundleToClapi :: B.ByteString -> Either String RequestBundle
-requestBundleToClapi = eitherDecode
+instance (FromJSON a) => FromJSON (TimeStamped a) where
+    parseJSON o = withObject "TimeStamped" (\ts -> curry TimeStamped <$> ts .: "time" <*> parseJSON o) o
+
+requestBundleToClapi :: B.ByteString -> Either String (TimeStamped RequestBundle)
+requestBundleToClapi s = eitherDecode s
 
 instance ToJSON TreeUpdateMessage where
     toJSON = buildTaggedJson tumtTaggedData $ \i -> case i of
