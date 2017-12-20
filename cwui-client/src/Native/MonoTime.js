@@ -4,7 +4,7 @@ var _foolswood$elmweb$Native_MonoTime = function() {
 
 var now = _elm_lang$core$Native_Scheduler.nativeBinding(function(callback)
 {
-	callback(_elm_lang$core$Native_Scheduler.succeed(performance.now()));
+	callback(_elm_lang$core$Native_Scheduler.succeed(performance.now() / 1000));
 });
 
 return {now : now};
