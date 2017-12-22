@@ -262,4 +262,13 @@ atomEditor ad = case ad of
             [onInput (ClEnum << Result.withDefault -1 << String.toInt)]
             (List.indexedMap (\i o -> option [value (toString i), selected (i == e)] [text o]) opts)
         _ -> text "Enum did not contain enum"
+    (ADTime opts) -> \v -> case v of
+        (ClTime (s, f)) -> input
+            [ type_ "range"
+            , Html.Attributes.min "0"
+            , Html.Attributes.max "30"
+            , value (toString s)
+            , onInput (\s -> ClTime ((Result.withDefault -1 (String.toInt s)), 0))]
+            []
+        _ -> text "Time did not contain time"
     _ -> atomViewer ad
