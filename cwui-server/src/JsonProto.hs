@@ -16,7 +16,7 @@ jsonProto ::
         m ()
 jsonProto = forever $ waitThen jsonMash jsonUnmash
   where
-    jsonMash (FRBClient b) = sendFwd $ LB.toStrict $ updateBundleToJson b
-    jsonUnmash bs = case requestBundleToClapi $ LB.fromStrict bs of
+    jsonMash (Frcb b) = sendFwd $ LB.toStrict $ fromRelayClientBundleToJson b
+    jsonUnmash bs = case toRelayClientBundleToClapi $ LB.fromStrict bs of
         Left s -> error $ "Decode failure: " ++ (show bs) ++ " - " ++ s
-        Right (TimeStamped (t, b)) -> sendRev $ TimeStamped (t, TRBClient b)
+        Right (TimeStamped (t, b)) -> sendRev $ TimeStamped (t, Trcb b)
