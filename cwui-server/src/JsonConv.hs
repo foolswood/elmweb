@@ -30,13 +30,18 @@ import Clapi.Serialisation
   , dumtTaggedData, DataUpdateMsgType(..), cumtTaggedData
   , ContainerUpdateMsgType(..), errIdxTaggedData, wireValueWireType
   , WireType(..), WireConcreteType(..), WireContainerType(..), Encodable(..)
-  , unpackWireType)
+  , unpackWireType, defMsgTaggedData, ilTaggedData)
+-- FIXME: once clapi PR 66 is in this can go into the above import block
+import Clapi.Serialisation.Definitions (defTaggedData)
 import Clapi.Types
   ( Time(..), Interpolation(..), InterpolationLimit(..), DataUpdateMessage(..)
   , TimeStamped(..), FromRelayClientBundle(..), MsgError(..)
   , ToRelayClientBundle(..), SubMessage(..), ContainerUpdateMessage(..)
   , TypeMessage(..), TypeName(..), Liberty(..), ErrorIndex(..), WireValue(..)
-  , Wireable, Tag, mkTag, unTag, (<|$|>))
+  , Wireable, Tag, mkTag, unTag, (<|$|>)
+  , DefMessage(..), Definition(..), ArrayDefinition(..), StructDefinition(..)
+  , TupleDefinition(..), unAssocList, TreeType)
+import Clapi.TextSerialisation (ttToText)
 
 parseTaggedJson :: TaggedData e a -> (e -> Value -> Parser a) -> Value -> Parser a
 parseTaggedJson td p = withArray "Tagged" (handleTagged . Vec.toList)
@@ -228,11 +233,43 @@ instance ToJSON a => ToJSON (MsgError a) where
 instance ToJSON TypeMessage where
     toJSON (MsgAssignType p tn l) = object ["path" .= p, "typeName" .= tn, "lib" .= l]
 
+instance ToJSON StructDefinition where
+    toJSON (StructDefinition doc al) = object ["doc" .= doc, "stls" .= (asStl <$> unAssocList al)]
+      where
+        asStl (s, (tn, l)) = object ["seg" .= s, "tn" .= tn, "lib" .= l]
+
+instance ToJSON InterpolationLimit where
+    toJSON = buildTaggedJson ilTaggedData $ const $ toJSON (Nothing :: Maybe Text)
+
+instance ToJSON TreeType where
+    toJSON = toJSON . ttToText
+
+instance ToJSON TupleDefinition where
+    toJSON (TupleDefinition doc types interpLim) = object ["doc" .= doc, "types" .= typeOs, "il" .= interpLim]
+      where
+        typeOs = asTypeO <$> unAssocList types
+        asTypeO (s, tt) = object ["seg" .= s, "ty" .= tt]
+
+instance ToJSON ArrayDefinition where
+    toJSON (ArrayDefinition doc cTn cLib) = object ["doc" .= doc, "ctn" .= cTn, "clib" .= cLib]
+
+instance ToJSON Definition where
+    toJSON = buildTaggedJson defTaggedData $ \v -> case v of
+        TupleDef d -> toJSON d
+        StructDef d -> toJSON d
+        ArrayDef d -> toJSON d
+
+instance ToJSON a => ToJSON (DefMessage a) where
+    toJSON = buildTaggedJson defMsgTaggedData $ \v -> case v of
+        MsgDefine a def -> object ["id" .= toJSON a, "def" .= toJSON def]
+        MsgUndefine a -> toJSON a
+
 instance ToJSON FromRelayClientBundle where
     toJSON (FromRelayClientBundle tUnsubs dUnsubs errs defs tas dd co) = object
         [ "tu" .= toJSONList tUnsubs
         , "du" .= toJSONList dUnsubs
         , "errs" .= toJSONList errs
+        , "defs" .= toJSONList defs
         , "tas" .= toJSONList tas
         , "dd" .= toJSONList dd
         , "co" .= toJSONList co
