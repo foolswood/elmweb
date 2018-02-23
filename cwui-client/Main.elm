@@ -22,11 +22,6 @@ wsTarget = "ws://localhost:8004"
 
 -- Model
 
--- type alias TypeNameKey = String
-
--- typeNameKey : TypeName -> TypeNameKey
--- typeNameKey {ns, seg} = ns ++ ":" ++ seg
-
 type alias TypeMap = Dict TypeName Definition
 type alias TypeAssignMap = Dict Path (TypeName, Liberty)
 type alias NodeMap = Dict Path Node
