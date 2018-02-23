@@ -192,9 +192,16 @@ type NodeEdit
   = ConstDataEdit Path TupleEdit
 --  | TimePointEdit Path TpId Time TupleEdit
 
--- FIXME: Not rendering errors!
+withErrorBox : List String -> Html a -> Html a
+withErrorBox errs content = case errs of
+    [] -> content
+    _ -> div []
+      [ text <| toString errs
+      , content
+      ]
+
 renderNode : Liberty -> Definition -> Node -> Html TupleEdit
-renderNode lib def node = case def of
+renderNode lib def node = withErrorBox (.errors node) <| case def of
     StructDef d -> case .body node of
         ContainerNode n -> renderStructNode d n
         _ -> text "Expecting a container for struct"
