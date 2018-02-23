@@ -1,20 +1,6 @@
-module ClSpecParser exposing (parseBaseType)
-import Dict
+module ClSpecParser exposing (parseAtomDef)
 
-import ClTypes exposing (Path, Time, ClNode, ClTupleNode, ClNodeT(TupleNode), ClType(..), ClValue(..), Liberty(..), Interpolation(..), AtomDef(..))
-import Futility exposing (mapAllFaily)
-
-zt : Time
-zt = (0, 0)
-
-clListToStrings : List ClValue -> Result String (List String)
-clListToStrings =
-  let
-    rClString clv = case clv of
-        (ClString s) -> Ok s
-        _ -> Err "Value was not of string type"
-  in
-    mapAllFaily rClString
+import ClTypes exposing (AtomDef(..))
 
 type alias ConstraintParser = (String, (String -> Result String AtomDef))
 
@@ -39,75 +25,16 @@ constraintParsers =
     ("float", Result.map ADFloat << floatBounds),
     ("double", Result.map ADDouble << floatBounds),
     ("string", Result.map ADString << cRegex),
-    ("list", Result.map ADList << clParseAtomDef),
-    ("set", Result.map ADSet << clParseAtomDef),
-    ("ref", Result.map ADRef << parsePath),
-    ("validator", \s -> Ok ADValidator)]
+    ("list", Result.map ADList << parseAtomDef),
+    ("set", Result.map ADSet << parseAtomDef),
+    ("ref", Result.map ADRef << parsePath)]
 
-clParseAtomDefWith : String -> List ConstraintParser -> Result String AtomDef
-clParseAtomDefWith s cps = case cps of
+parseAtomDefWith : String -> List ConstraintParser -> Result String AtomDef
+parseAtomDefWith s cps = case cps of
     [] -> Err (String.append "Unrecognised atom type: " s)
     (prefix, cp)::rcps -> if String.startsWith prefix s
         then cp (String.slice (String.length prefix + 1) (String.length s - 1) s)
-        else clParseAtomDefWith s rcps
+        else parseAtomDefWith s rcps
 
-clParseAtomDef : String -> Result String AtomDef
-clParseAtomDef s = clParseAtomDefWith s constraintParsers
-
-clListToInterps : List ClValue -> Result String (List Interpolation)
-clListToInterps =
-  let
-    rInterp clv = case clv of
-        (ClEnum e) -> case e of
-            0 -> Ok IConstant
-            1 -> Ok ILinear
-            _ -> Err "Unrecognised interpolation enum value"
-        _ -> Err "Interpolation ClValue not an enum"
-  in
-    mapAllFaily rInterp
-
-clvToLiberty : ClValue -> Result String Liberty
-clvToLiberty clv = case clv of
-    (ClEnum e) -> case e of
-        0 -> Ok Cannot
-        1 -> Ok May
-        2 -> Ok Must
-        _ -> Err "Unrecognised value for liberty enum"
-    _ -> Err "Liberty value not enum"
-
-parseBaseTuple : Path -> ClTupleNode -> Result String ClType
-parseBaseTuple tp n = case tp of
-    "/api/types/base/tuple" -> case Dict.get zt (.values n) of
-        (Just [ClString doc, ClList vNames, ClList vAtomTypes, ClList vInterps]) ->
-            Result.map3
-                (\ns ats itps -> ClTuple {
-                    doc = doc, names = ns, atomTypes = ats,
-                    interpolations = itps})
-                (clListToStrings vNames)
-                (Result.andThen (mapAllFaily clParseAtomDef) (clListToStrings vAtomTypes))
-                (clListToInterps vInterps)
-        (Just _) -> Err "Invalid value types for type info"
-        Nothing -> Err "No value at t=0 in type info"
-    "/api/types/base/struct" -> case Dict.get zt (.values n) of
-        (Just [ClString doc, ClList vChildNames, ClList vChildTypes, ClList vChildLibs]) ->
-            Result.map3
-                (\cn ct cl -> ClStruct {
-                    doc = doc, childNames = cn, childTypes = ct,
-                    childLiberties = cl})
-                (clListToStrings vChildNames)
-                (clListToStrings vChildTypes)
-                (mapAllFaily clvToLiberty vChildLibs)
-        (Just _) -> Err "Invalid value types for struct def"
-        Nothing -> Err "No value at t=0 for struct def"
-    "/api/types/base/array" -> case Dict.get zt (.values n) of
-        (Just [ClString doc, ClString childType, ClEnum vLib]) -> Result.map
-            (\l -> ClArray {doc = doc, childType = childType, childLiberty = l})
-            (clvToLiberty (ClEnum vLib))
-        (Just _) -> Err "Invalid value types for array def"
-        Nothing -> Err "No value at t=0 for array def"
-    _ -> Err "Not a base type path"
-
-parseBaseType : Path -> ClNode -> Result String ClType
-parseBaseType p n = case .body n of
-    TupleNode tn -> parseBaseTuple p tn
-    _ -> Err "Type definition not a tuple"
+parseAtomDef : String -> Result String AtomDef
+parseAtomDef s = parseAtomDefWith s constraintParsers

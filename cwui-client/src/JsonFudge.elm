@@ -1,35 +1,80 @@
 module JsonFudge exposing (serialiseBundle, parseBundle)
 import Json.Encode as JE
 import Json.Decode as JD
+import Dict
 
-import ClTypes exposing (Path, Time, Interpolation(..), ClValue(..))
+import ClTypes exposing
+  ( Path, Time, Interpolation(..), TpId, Seg, Attributee
+  , TypeName, Liberty(..), Definition(..), AtomDef, InterpolationLimit(..)
+  , ChildDescription, WireValue(..), WireType(..))
+import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
 
 -- Json serialisation fudging
 
-subMsgToJsonValue : SubMsg -> JE.Value
-subMsgToJsonValue sm = JE.list (List.map JE.string (case sm of
-    MsgSub p -> ["S", p]
-    MsgUnsub p -> ["U", p]))
+encodeNullable : (a -> JE.Value) -> Maybe a -> JE.Value
+encodeNullable encA ma = case ma of
+    Just a -> encA a
+    Nothing -> JE.null
 
-timeJson : Time -> JE.Value
-timeJson (s, f) = JE.list [JE.int s, JE.int f]
+encodeSeg : Seg -> JE.Value
+encodeSeg = JE.string
+
+encodePath : Path -> JE.Value
+encodePath = JE.string
+
+encodeTypeName : TypeName -> JE.Value
+encodeTypeName (ns, seg) = JE.object
+  [ ("ns", encodeSeg ns)
+  , ("seg", encodeSeg seg)]
+
+encodeSubMsg : SubMsg -> JE.Value
+encodeSubMsg sm = JE.list (case sm of
+    MsgSub p -> [JE.string "s", encodePath p]
+    MsgTypeSub tn -> [JE.string "S", encodeTypeName tn]
+    MsgUnsub p -> [JE.string "u", encodePath p]
+    MsgTypeUnsub tn -> [JE.string "U", encodeTypeName tn])
+
+encodeTime : Time -> JE.Value
+encodeTime (s, f) = JE.list [JE.int s, JE.int f]
 
 tagged : Char -> JE.Value -> JE.Value
 tagged t v = JE.list [JE.string (String.fromChar t), v]
 
-encodeClValue : ClValue -> JE.Value
-encodeClValue v = case v of
-    (ClTime t) -> tagged 't' (timeJson t)
-    (ClEnum e) -> tagged 'e' (JE.int e)
-    (ClWord32 i) -> tagged 'u' (JE.int i)
-    (ClWord64 i) -> tagged 'U' (JE.int i)
-    (ClInt32 i) -> tagged 'i' (JE.int i)
-    (ClInt64 i) -> tagged 'I' (JE.int i)
-    (ClFloat f) -> tagged 'd' (JE.float f)
-    (ClDouble f) -> tagged 'D' (JE.float f)
-    (ClString s) -> tagged 's' (JE.string s)
-    (ClList l) -> tagged 'l' (JE.list (List.map encodeClValue l))
+encodeWv : WireType -> WireValue -> JE.Value
+encodeWv wt wv =
+  let
+    encodeWv v = case v of
+        (WvTime t) -> encodeTime t
+        (WvWord8 i) -> JE.int i
+        (WvWord32 i) -> JE.int i
+        (WvWord64 i) -> JE.int i
+        (WvInt32 i) -> JE.int i
+        (WvInt64 i) -> JE.int i
+        (WvFloat f) -> JE.float f
+        (WvDouble f) -> JE.float f
+        (WvString s) -> JE.string s
+        (WvList l) -> JE.list (List.map encodeWv l)
+    typeTag t = case t of
+        WtTime -> "t"
+        WtWord8 -> "b"
+        WtWord32 -> "w"
+        WtWord64 -> "W"
+        WtInt32 -> "i"
+        WtInt64 -> "I"
+        WtFloat -> "f"
+        WtDouble -> "F"
+        WtString -> "s"
+        WtList subT -> "l" ++ typeTag subT
+  in JE.object
+    [ ("type", JE.string (typeTag wt))
+    , ("val", encodeWv wv)]
+
+encodePathField : Path -> (String, JE.Value)
+encodePathField p = ("path", JE.string p)
+
+encodeAttributeeField : Maybe Attributee -> (String, JE.Value)
+encodeAttributeeField ma = ("att", encodeNullable JE.string ma)
 
 dumToJsonValue : DataUpdateMsg -> JE.Value
 dumToJsonValue dum =
@@ -37,60 +82,184 @@ dumToJsonValue dum =
     encodeInterpolation i = case i of
         IConstant -> tagged 'C' (JE.list [])
         ILinear -> tagged 'L' (JE.list [])
-    -- FIXME: no site/attributee
-    tpiJson {msgPath, msgTime, msgArgs, msgInterpolation} = JE.object [
-        ("path", JE.string msgPath)
-      , ("time", timeJson msgTime)
-      , ("args", JE.list (List.map encodeClValue msgArgs))
-      , ("interpolation", encodeInterpolation msgInterpolation)]
-    ptasJson {msgPath, msgTime, msgAttributee, msgSite} = JE.object [
-        ("path", JE.string msgPath)
-      , ("time", timeJson msgTime)]
+    encodeTpIdField tpid = ("tpid", JE.int tpid)
+    encodeArgsField types args = ("args", JE.list (List.map2 encodeWv types args))
+    encodeConstSet {msgPath, msgTypes, msgArgs, msgAttributee} = JE.object
+        [ encodePathField msgPath
+        , encodeArgsField msgTypes msgArgs
+        , encodeAttributeeField msgAttributee
+        ]
+    encodeSet {msgPath, msgTpId, msgTime, msgTypes, msgArgs, msgInterpolation, msgAttributee} = JE.object
+        [ encodePathField msgPath
+        , encodeTpIdField msgTpId
+        , ("time", encodeTime msgTime)
+        , encodeArgsField msgTypes msgArgs
+        , ("interpolation", encodeInterpolation msgInterpolation)
+        , encodeAttributeeField msgAttributee
+        ]
+    encodeRemove {msgPath, msgTpId, msgAttributee} = JE.object
+        [ encodePathField msgPath
+        , encodeTpIdField msgTpId
+        , encodeAttributeeField msgAttributee
+        ]
   in
     case dum of
-        MsgAdd tpi -> tagged 'a' (tpiJson tpi)
-        MsgSet tpi -> tagged 's' (tpiJson tpi)
-        MsgRemove ptas -> tagged 'r' (ptasJson ptas)
-        MsgClear ptas -> tagged 'c' (ptasJson ptas)
-        MsgSetChildren {msgPath, msgChildren} -> tagged 'S' (JE.object [
-            ("path", JE.string msgPath), ("names", JE.list (List.map JE.string msgChildren))])
+        MsgConstSet m -> tagged 'S' (encodeConstSet m)
+        MsgSet m -> tagged 's' (encodeSet m)
+        MsgRemove m -> tagged 'r' (encodeRemove m)
 
-serialiseBundle : RequestBundle -> Time -> String
-serialiseBundle (RequestBundle subs dums) t = JE.encode 2 (JE.object [
-    ("subs", JE.list (List.map subMsgToJsonValue subs)),
-    ("dums", JE.list (List.map dumToJsonValue dums)),
-    ("time", timeJson t)])
+contToJsonValue : ContainerUpdateMsg -> JE.Value
+contToJsonValue m =
+  let
+    encodeTgtField tgt = ("tgt", encodeSeg tgt)
+  in case m of
+    MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} -> JE.object
+      [ encodePathField msgPath
+      , encodeTgtField msgTgt
+      , ("ref", encodeNullable encodeSeg msgRef)
+      , encodeAttributeeField msgAttributee
+      ]
+    MsgAbsent {msgPath, msgTgt, msgAttributee} -> JE.object
+      [ encodePathField msgPath
+      , encodeTgtField msgTgt
+      , encodeAttributeeField msgAttributee
+      ]
+
+serialiseBundle : ToRelayClientBundle -> Time -> String
+serialiseBundle (ToRelayClientBundle subs dums conts) t = JE.encode 2 (JE.object
+  [ ("subs", JE.list (List.map encodeSubMsg subs))
+  , ("data", JE.list (List.map dumToJsonValue dums))
+  , ("cont", JE.list (List.map contToJsonValue conts))
+  , ("time", encodeTime t)])
 
 decodePath : JD.Decoder String
 decodePath = JD.string
 
-decodeErrMsg : JD.Decoder ErrorMsg
-decodeErrMsg = JD.map2 ErrorMsg (JD.field "path" decodePath) (JD.field "msg" JD.string)
+decodeErrIdx : JD.Decoder ErrorIndex
+decodeErrIdx = decodeTagged (Dict.fromList
+    [ ("g", JD.succeed GlobalError)
+    , ("p", JD.map PathError decodePath)
+    , ("t", JD.map2 TimePointError decodePath decodeTpId)
+    , ("n", JD.map TypeError decodeTypeName)
+    ])
+
+decodeErrMsg : JD.Decoder MsgError
+decodeErrMsg = JD.map2 MsgError (JD.field "eIdx" decodeErrIdx) (JD.field "msg" JD.string)
 
 decodeTime : JD.Decoder Time
 decodeTime = JD.map2 (\a b -> (a, b)) (JD.index 0 JD.int) (JD.index 1 JD.int)
 
-decodeClValue : JD.Decoder ClValue
-decodeClValue =
+decodeTagged : Dict.Dict String (JD.Decoder a) -> JD.Decoder a
+decodeTagged dm =
   let
-    decoderForClValueTag t = case t of
-        "t" -> JD.map ClTime decodeTime
-        "e" -> JD.map ClEnum JD.int
-        "u" -> JD.map ClWord32 JD.int
-        "U" -> JD.map ClWord64 JD.int
-        "i" -> JD.map ClInt32 JD.int
-        "I" -> JD.map ClInt64 JD.int
-        "d" -> JD.map ClFloat JD.float
-        "D" -> JD.map ClDouble JD.float
-        "s" -> JD.map ClString JD.string
-        "l" -> JD.map ClList (JD.list decodeClValue)
-        _ -> JD.fail "unrecognised tag"
-  in
-    JD.andThen (JD.index 1 << decoderForClValueTag) (JD.index 0 JD.string)
+    decoderForTag t = case Dict.get t dm of
+        Just d -> d
+        Nothing -> JD.fail ("Unrecognised tag: " ++ t)
+  in JD.andThen (JD.index 1 << decoderForTag) (JD.index 0 JD.string)
+
+decodeDocField : JD.Decoder String
+decodeDocField = JD.field "doc" JD.string
+
+decodeAtomDef : JD.Decoder AtomDef
+decodeAtomDef =
+  let
+    pd s = case parseAtomDef s of
+        Ok ad -> JD.succeed ad
+        Err s -> JD.fail s
+  in JD.andThen pd JD.string
+
+decodeInterpolationLimit : JD.Decoder InterpolationLimit
+decodeInterpolationLimit =
+  let
+    iltd = Dict.fromList
+      [ ("U", JD.succeed ILUninterpolated)
+      , ("C", JD.succeed ILConstant)
+      , ("L", JD.succeed ILLinear)
+      ]
+  in decodeTagged iltd
+
+decodeChildDesc : JD.Decoder ChildDescription
+decodeChildDesc = JD.map3 (\n t l -> {name = n, typeRef = t, lib = l})
+    (JD.field "seg" decodeSeg)
+    (JD.field "tn" decodeTypeName)
+    (JD.field "lib" decodeLiberty)
+
+defTagDecoders : Dict.Dict String (JD.Decoder Definition)
+defTagDecoders = Dict.fromList
+  [ ("T", JD.map3
+      (\d ts il -> TupleDef {doc = d, types = ts, interpLim = il})
+      decodeDocField
+      (JD.field "types" (JD.list (JD.map2 (,) (JD.field "seg" decodeSeg) (JD.field "ty" decodeAtomDef))))
+      (JD.field "il" decodeInterpolationLimit)
+    )
+  , ("S", JD.map2
+      (\d cds -> StructDef {doc = d, childDescs = cds})
+      decodeDocField
+      (JD.field "stls" (JD.list decodeChildDesc)))
+  , ("A", JD.map3
+      (\d ctn ctl -> ArrayDef {doc = d, childType = ctn, childLiberty = ctl})
+      decodeDocField
+      (JD.field "ctn" decodeTypeName)
+      (JD.field "clib" decodeLiberty))
+  ]
+
+decodeDef : JD.Decoder Definition
+decodeDef = decodeTagged defTagDecoders
+
+decodeDefMsg : JD.Decoder DefMsg
+decodeDefMsg = decodeTagged (Dict.fromList
+  [ ("d", JD.map2 MsgDefine (JD.field "id" decodeTypeName) (JD.field "def" decodeDef))
+  , ("u", JD.map MsgUndefine decodeTypeName)
+  ])
+
+decodeLiberty : JD.Decoder Liberty
+decodeLiberty =
+  let
+    libFromString s = case s of
+        "cannot" -> JD.succeed Cannot
+        "may" -> JD.succeed May
+        "must" -> JD.succeed Must
+        _ -> JD.fail ("Unrecognised liberty string: " ++ s)
+  in JD.andThen libFromString JD.string
+
+decodeWv : JD.Decoder (WireType, WireValue)
+decodeWv =
+  let
+    unpackWt wts = case String.uncons wts of
+        Just (awt, rem) -> case awt of
+            't' -> Ok WtTime
+            'b' -> Ok WtWord8
+            'w' -> Ok WtWord32
+            'W' -> Ok WtWord64
+            'i' -> Ok WtInt32
+            'I' -> Ok WtInt64
+            'f' -> Ok WtFloat
+            'F' -> Ok WtDouble
+            's' -> Ok WtString
+            'l' -> Result.map WtList (unpackWt rem)
+            _ -> Err "Unrecognised WireType tag"
+        Nothing -> Err "Abruptly terminated WireType tags string"
+    decodeWt wts = case unpackWt wts of
+        Ok wt -> JD.succeed wt
+        Err msg -> JD.fail msg
+    wvd wt = case wt of
+        WtTime -> JD.map WvTime decodeTime
+        WtWord8 -> JD.map WvWord8 JD.int
+        WtWord32 -> JD.map WvWord32 JD.int
+        WtWord64 -> JD.map WvWord64 JD.int
+        WtInt32 -> JD.map WvInt32 JD.int
+        WtInt64 -> JD.map WvInt64 JD.int
+        WtFloat -> JD.map WvFloat JD.float
+        WtDouble -> JD.map WvFloat JD.float
+        WtString -> JD.map WvString JD.string
+        WtList swt -> JD.map WvList (JD.list (wvd swt))
+    dwv wt = JD.map (\wv -> (wt, wv)) (wvd wt)
+  in JD.andThen (JD.field "val" << dwv) (JD.andThen decodeWt (JD.field "type" JD.string))
 
 decodeInterpolation : JD.Decoder Interpolation
 decodeInterpolation =
   let
+    -- FIXME: Use decodeTagged?
     decoderForTag t = case t of
         "C" -> JD.succeed IConstant
         "L" -> JD.succeed ILinear
@@ -98,34 +267,96 @@ decodeInterpolation =
   in
     JD.andThen decoderForTag (JD.index 0 JD.string)
 
-decodeMsg : JD.Decoder UpdateMsg
-decodeMsg =
+decodeTpId : JD.Decoder TpId
+decodeTpId = JD.int
+
+decodeAttributee : JD.Decoder Attributee
+decodeAttributee = JD.string
+
+decodePathField : JD.Decoder Path
+decodePathField = JD.field "path" decodePath
+
+decodeAttributeeField : JD.Decoder (Maybe Attributee)
+decodeAttributeeField = JD.field "att" (JD.nullable decodeAttributee)
+
+decodeSeg : JD.Decoder Seg
+decodeSeg = JD.string
+
+decodeTypeName : JD.Decoder TypeName
+decodeTypeName = JD.map2 (,)
+    (JD.field "ns" decodeSeg) (JD.field "seg" decodeSeg)
+
+decodeTypeMsg : JD.Decoder TypeMsg
+decodeTypeMsg = JD.map3 MsgAssignType
+    decodePathField
+    (JD.field "typeName" decodeTypeName)
+    (JD.field "lib" decodeLiberty)
+
+decodeDum : JD.Decoder DataUpdateMsg
+decodeDum =
   let
-    decodePathField = JD.field "path" decodePath
-    decodeTimeField = JD.field "time" decodeTime
-    decodeArgsField = JD.field "args" (JD.list decodeClValue)
+    decodeArgsField = JD.field "args" (JD.map List.unzip (JD.list decodeWv))
+    decodeTpIdField = JD.field "tpid" decodeTpId
     decodeInterpolationField = JD.field "interpolation" decodeInterpolation
+    -- FIXME: Use decodeTagged?
     decoderForTag t = case t of
-        "A" -> JD.map2
-            (\p tp -> TreeUpdateMsg (MsgAssignType p tp))
-            decodePathField (JD.field "type" decodePath)
-        "C" -> JD.map2
-            (\p ns -> DataUpdateMsg (MsgSetChildren {
-                msgPath=p, msgChildren=ns, msgAttributee=Nothing}))
-            decodePathField (JD.field "names" (JD.list JD.string))
-        "a" -> JD.map4
-            (\p t a i -> DataUpdateMsg (MsgAdd {
-                msgPath=p, msgTime=t, msgArgs=a, msgInterpolation=i,
-                msgAttributee=Nothing, msgSite=Nothing}))
-            decodePathField decodeTimeField decodeArgsField decodeInterpolationField
-        "s" -> JD.map4
-            (\p t a i -> DataUpdateMsg (MsgSet {
-                msgPath=p, msgTime=t, msgArgs=a, msgInterpolation=i,
-                msgAttributee=Nothing, msgSite=Nothing}))
-            decodePathField decodeTimeField decodeArgsField decodeInterpolationField
+        "S" -> JD.map3
+            (\p (ts, vs) att -> MsgConstSet
+              { msgPath = p
+              , msgTypes = ts
+              , msgArgs = vs
+              , msgAttributee = att})
+            decodePathField
+            decodeArgsField
+            decodeAttributeeField
+        "s" -> JD.map6
+            (\p tpid t (ts, vs) i a -> MsgSet
+              { msgPath=p, msgTpId=tpid, msgTime=t, msgTypes=ts
+              , msgArgs=vs, msgInterpolation=i, msgAttributee=a})
+            decodePathField
+            decodeTpIdField
+            (JD.field "time" decodeTime)
+            decodeArgsField
+            decodeInterpolationField
+            decodeAttributeeField
+        "r" -> JD.map3
+            (\p tpid att -> MsgRemove
+              {msgPath = p, msgTpId = tpid, msgAttributee = att})
+            decodePathField
+            decodeTpIdField
+            decodeAttributeeField
         _ -> JD.fail "unrecognised msg tag"
   in
     JD.andThen (JD.index 1 << decoderForTag) (JD.index 0 JD.string)
 
-parseBundle : String -> Result String UpdateBundle
-parseBundle = JD.decodeString (JD.map2 UpdateBundle (JD.field "errs" (JD.list decodeErrMsg)) (JD.field "ups" (JD.list decodeMsg)))
+decodeCm : JD.Decoder ContainerUpdateMsg
+decodeCm =
+  let
+    decodeTgtField = JD.field "tgt" decodeSeg
+    -- FIXME: decodeTagged
+    cmDecoders = Dict.fromList
+      [ (">", JD.map4
+            (\p t r a -> MsgPresentAfter
+              {msgPath = p, msgTgt = t, msgRef = r, msgAttributee = a})
+            decodePathField
+            decodeTgtField
+            (JD.field "ref" (JD.nullable decodeSeg))
+            decodeAttributeeField)
+      , ("-", JD.map3
+            (\p t a -> MsgAbsent
+              {msgPath = p, msgTgt = t, msgAttributee = a})
+            decodePathField
+            decodeTgtField
+            decodeAttributeeField)
+      ]
+  in decodeTagged cmDecoders
+
+parseBundle : String -> Result String FromRelayClientBundle
+parseBundle = JD.decodeString (JD.map7 FromRelayClientBundle
+    (JD.field "tu" (JD.list decodeTypeName))
+    (JD.field "du" (JD.list decodePath))
+    (JD.field "errs" (JD.list decodeErrMsg))
+    (JD.field "defs" (JD.list decodeDefMsg))
+    (JD.field "tas" (JD.list decodeTypeMsg))
+    (JD.field "dd" (JD.list decodeDum))
+    (JD.field "co" (JD.list decodeCm)))

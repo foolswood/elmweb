@@ -1,61 +1,72 @@
 module ClMsgTypes exposing (..)
-import ClTypes exposing (Path, Attributee, Site, Time, Interpolation, ChildName, ClValue)
+import ClTypes exposing (Path, Seg, TypeName, Attributee, TpId, Time, Interpolation, Definition, Liberty, WireValue, WireType)
 
 type SubMsg
   = MsgSub Path
+  | MsgTypeSub TypeName
   | MsgUnsub Path
+  | MsgTypeUnsub TypeName
 
-type RequestBundle = RequestBundle (List SubMsg) (List DataUpdateMsg)
+-- Note: unlike the haskell one this is always TypeName
+type ErrorIndex
+  = GlobalError
+  | PathError Path
+  | TimePointError Path TpId
+  | TypeError TypeName
+
+type MsgError = MsgError ErrorIndex String
 
 type DataUpdateMsg
-  = MsgAdd
+  = MsgConstSet
       { msgPath : Path
-      , msgTime : Time
-      , msgArgs : (List ClValue)
-      , msgInterpolation : Interpolation
+      , msgTypes : (List WireType)
+      , msgArgs : (List WireValue)
       , msgAttributee : (Maybe Attributee)
-      , msgSite : (Maybe Site)
       }
   | MsgSet
       { msgPath : Path
+      , msgTpId : TpId
       , msgTime : Time
-      , msgArgs : List ClValue
+      , msgTypes : (List WireType)
+      , msgArgs : (List WireValue)
       , msgInterpolation : Interpolation
-      , msgAttributee : Maybe Attributee
-      , msgSite : Maybe Site
+      , msgAttributee : (Maybe Attributee)
       }
   | MsgRemove
       { msgPath : Path
-      , msgTime : Time
-      , msgAttributee : Maybe Attributee
-      , msgSite : Maybe Site
-      }
-  | MsgClear
-      { msgPath : Path
-      , msgTime : Time
-      , msgAttributee : Maybe Attributee
-      , msgSite : Maybe Site
-      }
-  | MsgSetChildren
-      { msgPath : Path
-      , msgChildren : List ChildName
-      , msgAttributee : Maybe Attributee
+      , msgTpId : TpId
+      , msgAttributee : (Maybe Attributee)
       }
 
 dumPath : DataUpdateMsg -> Path
 dumPath dum = case dum of
-    (MsgAdd {msgPath}) -> msgPath
-    (MsgSet {msgPath}) -> msgPath
-    (MsgRemove {msgPath}) -> msgPath
-    (MsgClear {msgPath}) -> msgPath
-    (MsgSetChildren {msgPath}) -> msgPath
+    MsgConstSet {msgPath} -> msgPath
+    MsgSet {msgPath} -> msgPath
+    MsgRemove {msgPath} -> msgPath
 
-type ErrorMsg = ErrorMsg Path String
+type ContainerUpdateMsg
+  = MsgPresentAfter
+      { msgPath : Path
+      , msgTgt : Seg
+      , msgRef : (Maybe Seg)
+      , msgAttributee : (Maybe Attributee)
+      }
+  | MsgAbsent
+      { msgPath : Path
+      , msgTgt : Seg
+      , msgAttributee : (Maybe Attributee)
+      }
 
-type TreeUpdateMsg
-  = MsgAssignType Path Path
-  | MsgDelete Path
+type ToRelayClientBundle = ToRelayClientBundle
+    (List SubMsg) (List DataUpdateMsg) (List ContainerUpdateMsg)
 
-type UpdateMsg = TreeUpdateMsg TreeUpdateMsg | DataUpdateMsg DataUpdateMsg
+-- Note: equivalent to haskell side `DefMessage TypeName`
+type DefMsg
+  = MsgDefine TypeName Definition
+  | MsgUndefine TypeName
 
-type UpdateBundle = UpdateBundle (List ErrorMsg) (List UpdateMsg)
+type TypeMsg = MsgAssignType Path TypeName Liberty
+
+type FromRelayClientBundle = FromRelayClientBundle
+    (List TypeName) (List Path) (List MsgError) (List DefMsg) (List TypeMsg)
+    (List DataUpdateMsg) (List ContainerUpdateMsg)

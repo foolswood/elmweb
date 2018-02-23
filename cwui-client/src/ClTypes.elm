@@ -1,11 +1,13 @@
 module ClTypes exposing (..)
 import Dict exposing (..)
 
+type alias Seg = String
 type alias Path = String
-type alias ChildName = String
-type alias Attributee = String
-type alias Site = String
+type alias TypeName = (Seg, Seg)
 
+type alias Attributee = String
+
+type alias TpId = Int
 type alias Time = (Int, Int)
 
 fromFloat : Float -> Time
@@ -15,6 +17,11 @@ type Liberty
   = Cannot
   | May
   | Must
+
+type InterpolationLimit
+  = ILUninterpolated
+  | ILConstant
+  | ILLinear
 
 type Interpolation
   = IConstant
@@ -32,61 +39,44 @@ type AtomDef
   | ADFloat (Bounds Float)
   | ADDouble (Bounds Float)
   | ADString String
+  | ADRef String
   | ADList AtomDef
   | ADSet AtomDef
-  | ADRef String
-  | ADValidator
 
-type alias ClTupleType = {
-    doc : String,
-    names : List String,
-    atomTypes : List AtomDef,
-    interpolations : List Interpolation} -- Can't define own types that go in a set (because comparable)
+type alias TupleDefinition =
+  { doc : String
+  , types : List (Seg, AtomDef)
+  , interpLim : InterpolationLimit}
 
-type ClType
-  = ClTuple ClTupleType
-  | ClStruct {doc : String, childNames: List ChildName, childTypes : List Path, childLiberties : List Liberty}
-  | ClArray {doc : String, childType : Path, childLiberty : Liberty}
+type alias ChildDescription = {name : Seg, typeRef : TypeName, lib : Liberty}
+type alias StructDefinition = {doc : String, childDescs : List ChildDescription}
+type alias ArrayDefinition = {doc : String, childType : TypeName, childLiberty : Liberty}
 
-type ClValue
-  = ClTime Time
-  | ClEnum Int
-  | ClWord32 Int
-  | ClWord64 Int
-  | ClInt32 Int
-  | ClInt64 Int
-  | ClFloat Float
-  | ClDouble Float
-  | ClString String
-  | ClList (List ClValue)
+type Definition
+  = TupleDef TupleDefinition
+  | StructDef StructDefinition
+  | ArrayDef ArrayDefinition
 
-type alias ClSeries = Dict Time (List ClValue)
+type WireValue
+  = WvTime Time
+  | WvWord8 Int
+  | WvWord32 Int
+  | WvWord64 Int
+  | WvInt32 Int
+  | WvInt64 Int
+  | WvFloat Float
+  | WvDouble Float
+  | WvString String
+  | WvList (List WireValue)
 
-type alias ClTupleNode =
-  { values : ClSeries
-  , pending : ClSeries
-  }
-
-type alias ClContainerNode =
-  { children : List ChildName
-  }
-
-type ClNodeT
-  = TupleNode ClTupleNode
-  | ContainerNode ClContainerNode
-  | UnpopulatedNode
-
--- FIXME: nowhere to put tree structure!
-type alias ClNode =
-  { errors : List String
-  , body : ClNodeT
-  }
-
-emptyNode : ClNode
-emptyNode = ClNode [] UnpopulatedNode
-
-emptyTupleNode : ClNodeT
-emptyTupleNode = TupleNode {values = Dict.empty, pending = Dict.empty}
-
-emptyContainerNode : ClNodeT
-emptyContainerNode = ContainerNode {children = []}
+type WireType
+  = WtTime
+  | WtWord8
+  | WtWord32
+  | WtWord64
+  | WtInt32
+  | WtInt64
+  | WtFloat
+  | WtDouble
+  | WtString
+  | WtList WireType
