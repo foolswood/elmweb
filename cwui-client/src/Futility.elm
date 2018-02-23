@@ -1,5 +1,6 @@
 module Futility exposing (..)
 -- Functional utility bits absent from elm std lib
+import Dict exposing (Dict)
 
 -- Equivalent to mapM for Result:
 mapAllFaily : (a -> Result x b) -> List a -> Result x (List b)
@@ -21,8 +22,7 @@ firstMatching pred l = case l of
     [] -> Nothing
     item :: rl -> if pred item then Just item else firstMatching pred rl
 
-fst : (a, b) -> a
-fst (a, b) = a
-
-snd : (a , b) -> b
-snd (a, b) = b
+dropKeys : List comparable -> Dict comparable v -> Dict comparable v
+dropKeys l = case l of
+    [] -> identity
+    (k :: ks) -> Dict.remove k << dropKeys ks

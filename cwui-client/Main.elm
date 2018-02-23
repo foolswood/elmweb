@@ -8,9 +8,8 @@ import WebSocket
 
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
+import ClNodes exposing (..)
 import ClMsgTypes exposing (..)
-import ClSpecParser exposing (parseBaseType)
-import DepMap
 import Futility exposing (..)
 import PathManipulation exposing (splitBasename)
 import MonoTime
@@ -23,125 +22,114 @@ wsTarget = "ws://localhost:8004"
 
 -- Model
 
-type alias TypeMap = DepMap.StringDeps
-type alias NodeMap = Dict Path ClNode
+-- type alias TypeNameKey = String
 
--- FIXME: Drops site and attribution
+-- typeNameKey : TypeName -> TypeNameKey
+-- typeNameKey {ns, seg} = ns ++ ":" ++ seg
+
+type alias TypeMap = Dict TypeName Definition
+type alias TypeAssignMap = Dict Path (TypeName, Liberty)
+type alias NodeMap = Dict Path Node
+
 type alias Model =
   { types : TypeMap
+  , tyAssns : TypeAssignMap
   , nodes : NodeMap
-  , partialEntry : String
   , errors : List String
+  -- FIXME: This is pants, need a better story for UI state
+  , partialEntry : String
   }
 
 init : (Model, Cmd Msg)
-init = (Model DepMap.empty Dict.empty "somestring" [], Cmd.none)
-
-clTypeAt : Path -> NodeMap -> TypeMap -> Result String ClType
-clTypeAt p nm tm = case DepMap.getDependency p tm of
-    Nothing -> Err "Type not loaded"
-    (Just tp) -> case Dict.get p nm of
-        Nothing -> Err "Type of type missing"
-        (Just n) -> parseBaseType tp n
-
-clTypeOf : Path -> NodeMap -> TypeMap -> Result String ClType
-clTypeOf p nm tm = case DepMap.getDependency p tm of
-    Nothing -> Err "Missing from the type map"
-    (Just tp) -> clTypeAt tp nm tm
-
-clLibertyOf : Path -> NodeMap -> TypeMap -> Result String Liberty
-clLibertyOf p nm tm =
-  let
-    rTypeP pp = Result.fromMaybe (String.append "Parent type not in map: " pp) (DepMap.getDependency pp tm)
-    rTypeAt tp = clTypeAt tp nm tm
-    rChildLib cn tn = case tn of
-        (ClStruct {childNames, childLiberties}) -> Result.fromMaybe "No matching child" (
-            Maybe.map snd (firstMatching (\(icn, _) -> cn == icn) (zip childNames childLiberties)))
-        (ClArray {childLiberty}) -> Ok childLiberty
-        ClTuple _ -> Err "Parent was a tuple"
-  in
-    case splitBasename p of
-        Nothing -> Ok Cannot  -- Root
-        Just (pp, cn) -> Result.andThen (rChildLib cn) (Result.andThen rTypeAt (rTypeP pp))
+init = (Model Dict.empty Dict.empty Dict.empty [] "somestring", Cmd.none)
 
 -- Update
-type InterfaceEvent = UpPartial String | IfSub Path | TimePointEdit Path Time (List ClValue)
+type InterfaceEvent
+  = UpPartial String
+  | IfSub Path
+  | DataChange NodeEdit
 
-sendBundle : RequestBundle -> Cmd Msg
+sendBundle : ToRelayClientBundle -> Cmd Msg
 sendBundle b = timeStamped (WebSocket.send wsTarget << serialiseBundle b)
 
 subToCmd : List Path -> Cmd Msg
 subToCmd ps = case ps of
     [] -> Cmd.none
-    _ -> sendBundle (RequestBundle (List.map MsgSub ps) [])
+    _ -> sendBundle (ToRelayClientBundle (List.map MsgSub ps) [] [])
 
 interfaceUpdate : InterfaceEvent -> Model -> (Model, Cmd Msg)
 interfaceUpdate ie model = case ie of
-    (UpPartial s) -> ({model | partialEntry = s}, Cmd.none)
-    (IfSub s) -> ({model | nodes = Dict.insert s emptyNode (.nodes model)}, subToCmd [s])
-    -- FIXME: always sends sets, no pending
-    (TimePointEdit p t vs) -> (model, sendBundle (RequestBundle [] [MsgSet {
-        msgPath = p, msgTime = t, msgArgs = vs, msgInterpolation = IConstant,
-        msgAttributee = Nothing, msgSite = Nothing}]))
+    UpPartial s -> ({model | partialEntry = s}, Cmd.none)
+    IfSub s -> ({model | nodes = Dict.insert s unpopulatedNode (.nodes model)}, subToCmd [s])
+    -- FIXME: DOES NOTHING!
+    DataChange dc -> (model, Cmd.none)
 
-tupleNodeUpdate : (ClSeries -> ClSeries) -> ClNode -> ClNode
-tupleNodeUpdate op n = case .body n of
-    TupleNode tn -> {n | body = TupleNode {tn | values = op (.values tn)}}
-    _ -> tupleNodeUpdate op {n | body = emptyTupleNode}
-
-containerNodeUpdate : List ChildName -> ClNode -> ClNode
-containerNodeUpdate cns n = case .body n of
-    ContainerNode cn -> {n | body = ContainerNode {cn | children = cns}}
-    _ -> containerNodeUpdate cns {n | body = emptyContainerNode}
-
-handleDataUpdateMsg : DataUpdateMsg -> ClNode -> ClNode
+handleDataUpdateMsg : DataUpdateMsg -> Node -> Node
 handleDataUpdateMsg dum = case dum of
-    (MsgAdd {msgTime, msgArgs}) -> tupleNodeUpdate (Dict.insert msgTime msgArgs)
-    (MsgSet {msgTime, msgArgs}) -> tupleNodeUpdate (Dict.insert msgTime msgArgs)
-    (MsgRemove {msgTime}) -> tupleNodeUpdate (Dict.remove msgTime)
-    (MsgClear {}) -> \n -> n  -- FIXME: does nothing because single site
-    (MsgSetChildren {msgChildren}) -> containerNodeUpdate msgChildren
+    MsgConstSet {msgTypes, msgArgs, msgAttributee} ->
+        setConstData msgTypes (msgAttributee, msgArgs)
+    (MsgSet
+      { msgTpId, msgTime, msgTypes, msgArgs, msgInterpolation
+      , msgAttributee}) ->
+        setTimePoint msgTypes msgTpId msgTime msgAttributee msgArgs msgInterpolation
+    (MsgRemove {msgTpId, msgAttributee}) ->
+        removeTimePoint msgTpId msgAttributee
 
-handleTreeUpdateMsg : TreeUpdateMsg -> TypeMap -> (TypeMap, Maybe Path)
-handleTreeUpdateMsg tum tm = case tum of
-    (MsgAssignType p tp) -> (DepMap.addDependency p tp tm, Just tp)
-    (MsgDelete p) -> (DepMap.removeDependency p tm, Nothing)
-
-updateNode : (ClNode -> ClNode) -> Path -> NodeMap -> NodeMap
+updateNode : (Node -> Node) -> Path -> NodeMap -> NodeMap
 updateNode t p m =
   let
-    wt mn = Just (t (Maybe.withDefault emptyNode mn))
+    -- FIXME: Doesn't note stuff from the blue anywhere?
+    wt mn = Just (t (Maybe.withDefault unpopulatedNode mn))
   in
     Dict.update p wt m
 
-handleUpdateMsg : UpdateMsg -> (NodeMap, TypeMap, List Path) -> (NodeMap, TypeMap, List Path)
-handleUpdateMsg um (nodes, types, ntp) = case um of
-    (TreeUpdateMsg tum) ->
-      let
-        (nt, mp) = handleTreeUpdateMsg tum types
-        entp = case mp of
-            Nothing -> ntp
-            Just p -> p :: ntp
-      in
-        (nodes, nt, entp)
-    (DataUpdateMsg dum) -> (updateNode (handleDataUpdateMsg dum) (dumPath dum) nodes, types, ntp)
+handleDums : List DataUpdateMsg -> NodeMap -> NodeMap
+handleDums dums nodeMap = List.foldl (\dum nm -> updateNode (handleDataUpdateMsg dum) (dumPath dum) nm) nodeMap dums
 
-handleErrorMsg : ErrorMsg -> NodeMap -> NodeMap
-handleErrorMsg (ErrorMsg p msg) nm = updateNode (\n -> {n | errors = msg :: .errors n}) p nm
-
-handleUpdateBundle : UpdateBundle -> (NodeMap, TypeMap) -> (NodeMap, TypeMap, List Path)
-handleUpdateBundle (UpdateBundle errs updates) (nodes, types) =
+handleCms : List ContainerUpdateMsg -> NodeMap -> NodeMap
+handleCms cms nodeMap =
   let
-    (updatedNodes, updatedTypes, newTypePaths) = List.foldl handleUpdateMsg (nodes, types, []) updates
-    nodesWithErrs = List.foldl handleErrorMsg updatedNodes errs
-    unsubbedTypes = List.filter (not << flip Dict.member updatedNodes) newTypePaths
-  in
-    (nodesWithErrs, updatedTypes, unsubbedTypes)
+    handleCm cm = case cm of
+        MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} ->
+            updateNode (childPresentAfter msgAttributee msgTgt msgRef) msgPath
+        MsgAbsent {msgPath, msgTgt, msgAttributee} ->
+            updateNode (childAbsent msgAttributee msgTgt) msgPath
+  in List.foldl handleCm nodeMap cms
+
+handleDefOps : List DefMsg -> TypeMap -> TypeMap
+handleDefOps defs types =
+  let
+    applyDefOp o = case o of
+        MsgDefine tn def -> Dict.insert tn def
+        MsgUndefine tn -> Dict.remove tn
+  in List.foldl applyDefOp types defs
+
+digestTypeMsgs : List TypeMsg -> TypeAssignMap
+digestTypeMsgs tms =
+  let
+    applyTypeMsg (MsgAssignType p tn l) = (p, (tn, l))
+  in Dict.fromList <| List.map applyTypeMsg tms
+
+handleFromRelayBundle
+  :  FromRelayClientBundle -> NodeMap -> TypeAssignMap -> TypeMap
+  -> (NodeMap, TypeAssignMap, TypeMap, List String)
+handleFromRelayBundle
+    (FromRelayClientBundle typeUnsubs dataUnsubs errs defs typeAssns dms cms)
+    nodes assigns types =
+  let
+    updatedTypes = handleDefOps defs <| dropKeys typeUnsubs types
+    newAssigns = digestTypeMsgs typeAssns
+    updatedAssigns = Dict.union newAssigns <| dropKeys dataUnsubs assigns
+    -- FIXME: Should we insert empty nodes at the fresh assignments?
+    updatedNodes = handleCms cms <| handleDums dms <| dropKeys dataUnsubs nodes
+    -- FIXME: Crappy error handling
+    globalErrs = List.map toString errs
+  in (updatedNodes, updatedAssigns, updatedTypes, globalErrs)
 
 type Msg
   = GlobalError String
   | InterfaceEvent InterfaceEvent
-  | NetworkEvent UpdateBundle
+  | NetworkEvent FromRelayClientBundle
   | TimeStamped (Time -> Cmd Msg) Time.Time
 
 timeStamped : (Time -> Cmd Msg) -> Cmd Msg
@@ -151,9 +139,9 @@ update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
     (NetworkEvent b) ->
       let
-        (newNodes, newTypes, unsubbedTypes) = handleUpdateBundle b (.nodes model, .types model)
+        (newNodes, newAssns, newTypes, globalErrs) = handleFromRelayBundle b (.nodes model) (.tyAssns model) (.types model)
       in
-        ({model | nodes = newNodes, types = newTypes}, subToCmd unsubbedTypes)
+        ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, errors = globalErrs ++ .errors model}, Cmd.none)
     (InterfaceEvent ie) -> interfaceUpdate ie model
     (GlobalError s) -> ({model | errors = s :: .errors model}, Cmd.none)
     (TimeStamped c t) -> (model, c (fromFloat t))
@@ -171,8 +159,12 @@ eventFromNetwork s = case parseBundle s of
 -- View
 
 view : Model -> Html Msg
-view {errors, types, nodes, partialEntry} = Html.map InterfaceEvent (
-    div [] [viewErrors errors, subControl partialEntry, viewPaths types nodes])
+view {errors, types, tyAssns, nodes, partialEntry} = Html.map InterfaceEvent <|
+    div []
+      [ viewErrors errors
+      , subControl partialEntry
+      , Html.map DataChange <| viewPaths types tyAssns nodes
+      ]
 
 viewErrors : List String -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text s]) errs)
@@ -183,83 +175,91 @@ subControl path = div []
   , button [onClick (IfSub path)] [text "sub"]
   ]
 
-viewPaths : TypeMap -> NodeMap -> Html InterfaceEvent
-viewPaths types nodes = div [] (List.map
-    (\(p, n) -> div [] [
-        h2 [] [text p]
-      , Html.map (uncurry (TimePointEdit p)) (viewNode (clLibertyOf p nodes types) (clTypeOf p nodes types) n)])
-    (Dict.toList nodes))
-
-viewNode : Result String Liberty -> Result String ClType -> ClNode -> Html TupleEdit
-viewNode rLiberty rType node =
+viewPaths : TypeMap -> TypeAssignMap -> NodeMap -> Html NodeEdit
+viewPaths types tyAssns nodes =
   let
-    (liberty, allErrors) = case rLiberty of
-        Err s -> (Cannot, s :: .errors node)
-        Ok l -> (l, .errors node)
-    nv = case rType of
-        Err s -> text s
-        Ok clType -> case .body node of
-            TupleNode tn -> case clType of
-                ClTuple tti -> viewTuple liberty tti tn
-                _ -> text "Tuple definition non-tuple node"
-            ContainerNode cn -> case clType of
-                ClTuple _ -> text "Tuple type for container node"
-                ClStruct {doc} -> viewContainer doc cn
-                ClArray {doc} -> viewContainer doc cn
-            UnpopulatedNode -> text "Unpopulated node of known type"
-  in
-    div [] [viewErrors allErrors, nv]
+    renderPath p n = case Dict.get p tyAssns of
+        Nothing -> text <| "Path missing from assignment map: " ++ p
+        Just (tn, lib) -> case Dict.get tn types of
+            Nothing -> text <| "Type missing from map: " ++ toString tn
+            Just ty -> div []
+              [ h2 [] [text p] 
+              , Html.map (ConstDataEdit p) <| renderNode lib ty n
+              ]
+  in div [] <| List.map (uncurry renderPath) (Dict.toList nodes)
 
-viewContainer : String -> ClContainerNode -> Html TupleEdit
-viewContainer doc {children} = div [] (text doc :: List.map (\c -> text c) children)
+type NodeEdit
+  = ConstDataEdit Path TupleEdit
+--  | TimePointEdit Path TpId Time TupleEdit
 
-type alias AtomEdit = ClValue
-type alias TupleEdit = (Time, List AtomEdit)
+-- FIXME: Not rendering errors!
+renderNode : Liberty -> Definition -> Node -> Html TupleEdit
+renderNode lib def node = case def of
+    StructDef d -> case .body node of
+        ContainerNode n -> renderStructNode d n
+        _ -> text "Expecting a container for struct"
+    ArrayDef d -> case .body node of
+        ContainerNode n -> renderArrayNode lib d n
+        _ -> text "Expecting a container for array"
+    TupleDef d -> case .body node of
+        ConstDataNode n -> renderConstDataNode lib d n
+        TimeSeriesNode n -> renderTimeSeriesDataNode lib d n
+        _ -> text "Expecting a data node for tuple"
 
-viewTuple : Liberty -> ClTupleType -> ClTupleNode -> Html TupleEdit
-viewTuple liberty {names, atomTypes} node =
+type alias AtomEdit = WireValue
+type alias TupleEdit = List AtomEdit
+
+renderArrayNode : Liberty -> ArrayDefinition -> ContainerNodeT -> Html a
+renderArrayNode lib ad cn = text "Array node rendering not implemented yet"
+
+renderStructNode : StructDefinition -> ContainerNodeT -> Html a
+renderStructNode sd cn = text "Struct node rendering not implemented yet"
+
+renderTimeSeriesDataNode : Liberty -> TupleDefinition -> TimeSeriesNodeT -> Html a
+renderTimeSeriesDataNode lib td tsn = text "Time series rendering not implemented yet"
+
+renderConstDataNode : Liberty -> TupleDefinition -> ConstDataNodeT -> Html TupleEdit
+renderConstDataNode l td n =
   let
-    atomRenderer = case liberty of
-        Cannot -> atomViewer
-        May -> atomEditor
-        Must -> atomEditor
-    updateItem idx vs nv = List.indexedMap (\i v -> if i == idx then nv else v) vs
-    tupleRenderer : List ClValue -> List (Html (List AtomEdit))
-    tupleRenderer vs = List.indexedMap
-        (\idx (v, at) -> td [] [Html.map (updateItem idx vs) (atomRenderer at v)])
-        (zip vs atomTypes)
-    tpRenderer t vs = tr [] (td [] [text (toString t)] :: List.map (Html.map (\tup -> (t, tup))) (tupleRenderer vs))
-    tView = tr [] (th [] [text "Time"] :: List.map (\(n, at) -> th [] [text n, text (toString at)]) (zip names atomTypes))
-    vView = List.map (uncurry tpRenderer) (Dict.toList (.values node))
-  in
-    table [] (tView :: vView)
+    defs = List.map Tuple.second <| .types td
+    wvs = Tuple.second <| .values n
+    updateValue idx nv = List.indexedMap (\i v -> if i == idx then nv else v) wvs
+    editorFor idx def wv = Html.map (updateValue idx) <| atomEditor def wv
+    indices = List.range 0 <| List.length wvs
+    atomRenderers = case l of
+        Cannot -> List.map2 atomViewer defs wvs
+        _ -> List.map3 editorFor indices defs wvs
+  in span [] atomRenderers
 
-atomViewer : AtomDef -> ClValue -> Html a
+atomViewer : AtomDef -> WireValue -> Html a
 atomViewer ad = case ad of
     (ADTime _) -> \v -> case v of
-        (ClTime (s, f)) -> text (String.concat [toString s, ":", toString f])
+        (WvTime (s, f)) -> text (String.concat [toString s, ":", toString f])
         _ -> text "Time did not contain time"
     (ADEnum opts) -> \v -> case v of
-        (ClEnum e) -> text (case itemAtIndex e opts of
+        (WvWord8 e) -> text (case itemAtIndex e opts of
             Nothing -> "Option out of range for enum"
             Just o -> o)
         _ -> text "enum did not contain enum"
     (ADString s) -> \v -> case v of
-        (ClString s) -> text s
+        (WvString s) -> text s
         _ -> text (String.append "Expected string item got: " (toString v))
     (ADList sad) -> \v -> case v of
-        (ClList items) -> span [] (List.map (atomViewer sad) items)
+        (WvList items) -> span [] (List.map (atomViewer sad) items)
         _ -> text "List did not contain list"
     (ADSet sad) -> \v -> case v of
-        (ClList items) -> span [] (List.map (atomViewer sad) items)
+        (WvList items) -> span [] (List.map (atomViewer sad) items)
         _ -> text "Set did not contain set"
     _ -> text << toString  -- FIXME: this is pants
 
-atomEditor : AtomDef -> ClValue -> Html AtomEdit
+atomEditor : AtomDef -> WireValue -> Html AtomEdit
 atomEditor ad = case ad of
     (ADEnum opts) -> \v -> case v of
-        (ClEnum e) -> select
-            [onInput (ClEnum << Result.withDefault -1 << String.toInt)]
-            (List.indexedMap (\i o -> option [value (toString i), selected (i == e)] [text o]) opts)
-        _ -> text "Enum did not contain enum"
+        (WvWord8 e) -> Html.map WvWord8 <| enumEditor opts e
+        _ -> text "Enum value not word8"
     _ -> atomViewer ad
+
+enumEditor : List String -> Int -> Html Int
+enumEditor opts e = select
+    [onInput (Result.withDefault -1 << String.toInt)]
+    (List.indexedMap (\i o -> option [value (toString i), selected (i == e)] [text o]) opts)
