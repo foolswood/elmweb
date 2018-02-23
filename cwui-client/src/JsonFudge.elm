@@ -257,15 +257,10 @@ decodeWv =
   in JD.andThen (JD.field "val" << dwv) (JD.andThen decodeWt (JD.field "type" JD.string))
 
 decodeInterpolation : JD.Decoder Interpolation
-decodeInterpolation =
-  let
-    -- FIXME: Use decodeTagged?
-    decoderForTag t = case t of
-        "C" -> JD.succeed IConstant
-        "L" -> JD.succeed ILinear
-        _ -> JD.fail "unrecognised interpolation tag"
-  in
-    JD.andThen decoderForTag (JD.index 0 JD.string)
+decodeInterpolation = decodeTagged <| Dict.fromList
+  [ ("C", JD.succeed IConstant)
+  , ("L", JD.succeed ILinear)
+  ]
 
 decodeTpId : JD.Decoder TpId
 decodeTpId = JD.int
@@ -298,58 +293,53 @@ decodeDum =
     decodeArgsField = JD.field "args" (JD.map List.unzip (JD.list decodeWv))
     decodeTpIdField = JD.field "tpid" decodeTpId
     decodeInterpolationField = JD.field "interpolation" decodeInterpolation
-    -- FIXME: Use decodeTagged?
-    decoderForTag t = case t of
-        "S" -> JD.map3
-            (\p (ts, vs) att -> MsgConstSet
-              { msgPath = p
-              , msgTypes = ts
-              , msgArgs = vs
-              , msgAttributee = att})
-            decodePathField
-            decodeArgsField
-            decodeAttributeeField
-        "s" -> JD.map6
-            (\p tpid t (ts, vs) i a -> MsgSet
-              { msgPath=p, msgTpId=tpid, msgTime=t, msgTypes=ts
-              , msgArgs=vs, msgInterpolation=i, msgAttributee=a})
-            decodePathField
-            decodeTpIdField
-            (JD.field "time" decodeTime)
-            decodeArgsField
-            decodeInterpolationField
-            decodeAttributeeField
-        "r" -> JD.map3
-            (\p tpid att -> MsgRemove
-              {msgPath = p, msgTpId = tpid, msgAttributee = att})
-            decodePathField
-            decodeTpIdField
-            decodeAttributeeField
-        _ -> JD.fail "unrecognised msg tag"
-  in
-    JD.andThen (JD.index 1 << decoderForTag) (JD.index 0 JD.string)
+  in decodeTagged <| Dict.fromList
+    [ ("S", JD.map3
+        (\p (ts, vs) att -> MsgConstSet
+          { msgPath = p
+          , msgTypes = ts
+          , msgArgs = vs
+          , msgAttributee = att})
+        decodePathField
+        decodeArgsField
+        decodeAttributeeField)
+    , ("s", JD.map6
+        (\p tpid t (ts, vs) i a -> MsgSet
+          { msgPath=p, msgTpId=tpid, msgTime=t, msgTypes=ts
+          , msgArgs=vs, msgInterpolation=i, msgAttributee=a})
+        decodePathField
+        decodeTpIdField
+        (JD.field "time" decodeTime)
+        decodeArgsField
+        decodeInterpolationField
+        decodeAttributeeField)
+    , ("r", JD.map3
+        (\p tpid att -> MsgRemove
+          {msgPath = p, msgTpId = tpid, msgAttributee = att})
+        decodePathField
+        decodeTpIdField
+        decodeAttributeeField)
+    ]
 
 decodeCm : JD.Decoder ContainerUpdateMsg
 decodeCm =
   let
     decodeTgtField = JD.field "tgt" decodeSeg
-    -- FIXME: decodeTagged
-    cmDecoders = Dict.fromList
-      [ (">", JD.map4
-            (\p t r a -> MsgPresentAfter
-              {msgPath = p, msgTgt = t, msgRef = r, msgAttributee = a})
-            decodePathField
-            decodeTgtField
-            (JD.field "ref" (JD.nullable decodeSeg))
-            decodeAttributeeField)
-      , ("-", JD.map3
-            (\p t a -> MsgAbsent
-              {msgPath = p, msgTgt = t, msgAttributee = a})
-            decodePathField
-            decodeTgtField
-            decodeAttributeeField)
-      ]
-  in decodeTagged cmDecoders
+  in decodeTagged <| Dict.fromList
+    [ (">", JD.map4
+          (\p t r a -> MsgPresentAfter
+            {msgPath = p, msgTgt = t, msgRef = r, msgAttributee = a})
+          decodePathField
+          decodeTgtField
+          (JD.field "ref" (JD.nullable decodeSeg))
+          decodeAttributeeField)
+    , ("-", JD.map3
+          (\p t a -> MsgAbsent
+            {msgPath = p, msgTgt = t, msgAttributee = a})
+          decodePathField
+          decodeTgtField
+          decodeAttributeeField)
+    ]
 
 parseBundle : String -> Result String FromRelayClientBundle
 parseBundle = JD.decodeString (JD.map7 FromRelayClientBundle
