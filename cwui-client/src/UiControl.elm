@@ -1,7 +1,5 @@
 module UiControl exposing (..)
 
-import Dict exposing (Dict)
-
 import ClTypes exposing (Path)
 import Futility exposing (itemAtIndex)
 
@@ -73,19 +71,11 @@ widgetUpdate evt fv = case evt of
 
 type alias LayoutPath = List Int
 
-type ControlPath
-  = CpApi Path
-  | CpLayout LayoutPath
+type Layout p
+  = LayoutContainer (List (Layout p))
+  | LayoutLeaf p
 
-type Layout
-  = LayoutContainer (List Layout)
-  | LayoutLeaf ControlPath
-
-type ViewMode
-  = ViewEdit
-  | ViewShow
-
-setLeafBinding : LayoutPath -> ControlPath -> Layout -> Result String Layout
+setLeafBinding : LayoutPath -> p -> Layout p -> Result String (Layout p)
 setLeafBinding p tgt l = case p of
     (idx :: leftOver) -> case l of
         LayoutContainer kids -> Result.map LayoutContainer <|
@@ -94,7 +84,7 @@ setLeafBinding p tgt l = case p of
     [] -> Ok <| LayoutLeaf tgt
 
 -- FIXME: Common traversal code
-initContainer : LayoutPath -> Layout -> Result String Layout
+initContainer : LayoutPath -> Layout p -> Result String (Layout p)
 initContainer p l = case p of
     (idx :: leftOver) -> case l of
         LayoutContainer kids -> Result.map LayoutContainer <|
@@ -102,18 +92,19 @@ initContainer p l = case p of
         LayoutLeaf _ -> Err "Attempting to init container below leaf"
     [] -> Ok <| LayoutContainer []
 
-layoutEditorForm : Layout -> FormView LayoutPath
-layoutEditorForm =
+layoutEditorForm : (LayoutPath -> p -> FormView LayoutPath) -> Layout p -> FormView LayoutPath
+layoutEditorForm f =
   let
     go lp l = case l of
         LayoutContainer kids ->
             FormContainer <| List.indexedMap (\i -> go (lp ++ [i])) kids
-        LayoutLeaf cp -> FormWidget lp [EsText <| toString cp]
+        LayoutLeaf cp -> f lp cp
   in go []
 
-handleLayoutEdit : LayoutPath -> FormState -> Layout -> Result String Layout
-handleLayoutEdit p fs = case fs of
-    [EsText tgt] -> setLeafBinding p (CpApi tgt)
-    _ -> always <| Err "Layout update pattern match failed"
+-- FIXME: May well be pointless
+mapLayout : (a -> b) -> Layout a -> Layout b
+mapLayout f l = case l of
+    LayoutContainer kids -> LayoutContainer <| List.map (mapLayout f) kids
+    LayoutLeaf a -> LayoutLeaf <| f a
 
 -- toFormState : Definition -> Node -> Result String FormState
