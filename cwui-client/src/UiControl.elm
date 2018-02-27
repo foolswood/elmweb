@@ -15,13 +15,22 @@ type alias FormState = List EntryState
 type FormWidgetEvent
   = FwUpdate FormPath FormState
   | FwSubmit FormPath
+  | FwError String
 
 type FormEvent extIdx
   = FormUpdate extIdx FormState
   | FormError String
   | FormNoop
 
-type FormView extIdx = FormView extIdx FormState (List (FormView extIdx))
+type FormView extIdx
+  = FormWidget extIdx FormState
+  | FormContainer (List (FormView extIdx))
+
+-- FIXME: good or bad idea?
+mapFormView : (a -> b) -> FormView a -> FormView b
+mapFormView f v = case v of
+    FormWidget a fs -> FormWidget (f a) fs
+    FormContainer kids -> FormContainer <| List.map (mapFormView f) kids
 
 updateIdx : (a -> Result String a) -> Int -> List a -> Result String (List a)
 updateIdx f idx l =
@@ -33,31 +42,78 @@ widgetUpdate : FormWidgetEvent -> FormView extIdx -> (FormView extIdx, FormEvent
 widgetUpdate evt fv = case evt of
     FwUpdate fp fs ->
       let
-        updateFormView p (FormView extIdx parentFs children) = case p of
-            (idx :: subP) -> Result.map (FormView extIdx parentFs) <|
-                updateIdx (updateFormView subP) idx children
-            [] -> Ok <| FormView extIdx fs children
+        updateFormView p v = case p of
+            (idx :: subP) -> case v of
+                FormWidget _ _ -> Err "Attempted to update child of leaf"
+                FormContainer children -> Result.map FormContainer <|
+                    updateIdx (updateFormView subP) idx children
+            [] -> case v of
+                FormWidget extIdx _ -> Ok <| FormWidget extIdx fs
+                FormContainer _ -> Err "Attempted to set value of container"
       in case updateFormView fp fv of
         Ok newFv -> (newFv, FormNoop)
         Err msg -> (fv, FormError msg)
     FwSubmit fp ->
       let
-        getFormState p (FormView extIdx fs children) = case p of
-            (idx :: subP) -> Maybe.andThen (getFormState subP) <|
-                itemAtIndex idx children
-            [] -> Just (extIdx, fs)
+        getFormState p v = case p of
+            (idx :: subP) -> case v of
+                FormWidget _ _ -> Nothing
+                FormContainer children -> Maybe.andThen (getFormState subP) <|
+                    itemAtIndex idx children
+            [] -> case v of
+                FormWidget extIdx fs -> Just (extIdx, fs)
+                FormContainer _ -> Nothing
       in case getFormState fp fv of
         Just (extIdx, fs) -> (fv, FormUpdate extIdx fs)
         Nothing -> (fv, FormError "Bad submit path")
+    FwError msg -> (fv, FormError msg)
 
 
 -- How would above be useful?
 
-toFormState : Definition -> Node -> Result String FormState
+type alias LayoutPath = List Int
 
--- Dumping ground:
+type ControlPath
+  = CpApi Path
+  | CpLayout LayoutPath
 
-replaceIdx : Int -> a -> List a -> Result String (List a)
-replaceIdx idx v l = if List.length l > idx
-  then Ok <| List.take idx l ++ v :: List.drop (idx + 1) l
-  else Err "Index out of range"
+type Layout
+  = LayoutContainer (List Layout)
+  | LayoutLeaf ControlPath
+
+type ViewMode
+  = ViewEdit
+  | ViewShow
+
+setLeafBinding : LayoutPath -> ControlPath -> Layout -> Result String Layout
+setLeafBinding p tgt l = case p of
+    (idx :: leftOver) -> case l of
+        LayoutContainer kids -> Result.map LayoutContainer <|
+            updateIdx (setLeafBinding leftOver tgt) idx kids
+        LayoutLeaf _ -> Err "Attempting to set leaf below leaf"
+    [] -> Ok <| LayoutLeaf tgt
+
+-- FIXME: Common traversal code
+initContainer : LayoutPath -> Layout -> Result String Layout
+initContainer p l = case p of
+    (idx :: leftOver) -> case l of
+        LayoutContainer kids -> Result.map LayoutContainer <|
+            updateIdx (initContainer leftOver) idx kids
+        LayoutLeaf _ -> Err "Attempting to init container below leaf"
+    [] -> Ok <| LayoutContainer []
+
+layoutEditorForm : Layout -> FormView LayoutPath
+layoutEditorForm =
+  let
+    go lp l = case l of
+        LayoutContainer kids ->
+            FormContainer <| List.indexedMap (\i -> go (lp ++ [i])) kids
+        LayoutLeaf cp -> FormWidget lp [EsText <| toString cp]
+  in go []
+
+handleLayoutEdit : LayoutPath -> FormState -> Layout -> Result String Layout
+handleLayoutEdit p fs = case fs of
+    [EsText tgt] -> setLeafBinding p (CpApi tgt)
+    _ -> always <| Err "Layout update pattern match failed"
+
+-- toFormState : Definition -> Node -> Result String FormState
