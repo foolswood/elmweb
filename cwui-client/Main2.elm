@@ -54,6 +54,12 @@ initModel =
 sendDataChange : Path -> String -> Cmd Evt
 sendDataChange p d = Cmd.none
 
+feHandler : Model -> FormEvent k v -> (k -> v -> (Model, Cmd Evt)) -> (Model, Cmd Evt)
+feHandler m fe submitHandler = case fe of
+    FeNoop -> (m, Cmd.none)
+    FeError msg -> update (GlobalErrEvt msg) m
+    FeSubmit k v -> submitHandler k v
+
 update : Evt -> Model -> (Model, Cmd Evt)
 update evt m = case evt of
     GlobalErrEvt msg -> ({m | globalErrs = msg :: .globalErrs m}, Cmd.none)
@@ -64,20 +70,14 @@ update evt m = case evt of
       let
         (newLayoutFs, fe) = formUiUpdate fue <| .layoutFs m
         newM = {m | layoutFs = newLayoutFs}
-      in case fe of
-        FeNoop -> (newM, Cmd.none)
-        FeError msg -> update (GlobalErrEvt msg) newM
-        FeSubmit lp p -> case setLeafBinding lp p <| .layout m of
-            Err msg -> update (GlobalErrEvt msg) newM
-            Ok newLayout -> ({newM | layout = newLayout, layoutFs = formClear lp <| .layoutFs m}, Cmd.none)
+      in feHandler newM fe <| \lp p -> case setLeafBinding lp p <| .layout m of
+        Err msg -> update (GlobalErrEvt msg) newM
+        Ok newLayout -> ({newM | layout = newLayout, layoutFs = formClear lp <| .layoutFs m}, Cmd.none)
     DataUiEvt fue ->
       let
         (newDataFs, fe) = formUiUpdate fue <| .dataFs m
         newM = {m | dataFs = newDataFs}
-      in case fe of
-        FeNoop -> (newM, Cmd.none)
-        FeError msg -> update (GlobalErrEvt msg) newM
-        FeSubmit p d -> (newM, sendDataChange p d)
+      in feHandler newM fe <| \p d -> (newM, sendDataChange p d)
 
 subscriptions : Model -> Sub Evt
 subscriptions m = Sub.none
