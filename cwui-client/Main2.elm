@@ -5,7 +5,8 @@ import Html.Attributes as Hattr
 import Html.Events as Hevt
 
 import ClTypes exposing (Path)
-import UiControl exposing (..)
+import Form exposing (..)
+import Layout exposing (..)
 
 type UiMode
   = UmEdit
