@@ -8,22 +8,19 @@ type Layout p
   = LayoutContainer (List (Layout p))
   | LayoutLeaf p
 
-setLeafBinding : LayoutPath -> p -> Layout p -> Result String (Layout p)
-setLeafBinding p tgt l = case p of
+setLayout : Layout p -> LayoutPath -> Layout p -> Result String (Layout p)
+setLayout v p l = case p of
     (idx :: leftOver) -> case l of
         LayoutContainer kids -> Result.map LayoutContainer <|
-            updateIdx (setLeafBinding leftOver tgt) idx kids
-        LayoutLeaf _ -> Err "Attempting to set leaf below leaf"
-    [] -> Ok <| LayoutLeaf tgt
+            updateIdx (setLayout v leftOver) idx kids
+        LayoutLeaf _ -> Err "Attempting to update layout path below leaf"
+    [] -> Ok <| v
 
--- FIXME: Common traversal code
+setLeafBinding : LayoutPath -> p -> Layout p -> Result String (Layout p)
+setLeafBinding p tgt l = setLayout (LayoutLeaf tgt) p l
+
 initContainer : LayoutPath -> Layout p -> Result String (Layout p)
-initContainer p l = case p of
-    (idx :: leftOver) -> case l of
-        LayoutContainer kids -> Result.map LayoutContainer <|
-            updateIdx (initContainer leftOver) idx kids
-        LayoutLeaf _ -> Err "Attempting to init container below leaf"
-    [] -> Ok <| LayoutContainer []
+initContainer = setLayout <| LayoutContainer []
 
 -- FIXME: May well be pointless
 mapLayout : (a -> b) -> Layout a -> Layout b
