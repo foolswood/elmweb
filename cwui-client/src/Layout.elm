@@ -1,5 +1,6 @@
 module Layout exposing (..)
 
+import Set exposing (Set)
 import Html exposing (Html)
 
 import Futility exposing (updateIdx)
@@ -24,6 +25,11 @@ setLeafBinding p tgt l = setLayout (LayoutLeaf tgt) p l
 
 initContainer : LayoutPath -> Layout p -> Result String (Layout p)
 initContainer = setLayout <| LayoutContainer []
+
+layoutRequires : Layout comparable -> Set comparable
+layoutRequires l = case l of
+    LayoutContainer kids -> List.foldl (\k acc -> Set.union acc <| layoutRequires k) Set.empty kids
+    LayoutLeaf p -> Set.singleton p
 
 -- FIXME: May well be pointless
 mapLayout : (a -> b) -> Layout a -> Layout b

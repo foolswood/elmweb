@@ -1,3 +1,4 @@
+import Set exposing (Set)
 import Dict exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
@@ -13,6 +14,8 @@ import ClMsgTypes exposing (FromRelayClientBundle, ToRelayClientBundle(..), SubM
 import Futility exposing (..)
 import RelayState exposing (..)
 import MonoTime
+import Layout exposing (Layout(..), LayoutPath, setLeafBinding, viewEditLayout, viewLayout, layoutRequires)
+import Form exposing (FormStore, formStoreEmpty, FormUiEvent(..), formClear, formUiUpdate, FormEvent(..), FormState(..))
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -22,58 +25,107 @@ wsTarget = "ws://localhost:8004"
 
 -- Model
 
+type UiMode
+  = UmEdit
+  | UmView
+
+type NodeEdit
+  = NeConst List WireValue
+
 type alias Model =
-  { types : TypeMap
+  -- Global:
+  { globalErrs : List String
+  , viewMode : UiMode
+  -- Layout:
+  , layout : Layout Path
+  , layoutFs : FormStore LayoutPath Path
+  -- Data:
+  , subs : Set Path
+  , types : TypeMap
   , tyAssns : TypeAssignMap
   , nodes : NodeMap
-  , errors : List String
-  -- FIXME: This is pants, need a better story for UI state
-  , partialEntry : String
+  , nodeFs : FormStore Path NodeEdit
   }
 
 init : (Model, Cmd Msg)
-init = (Model Dict.empty Dict.empty Dict.empty [] "somestring", Cmd.none)
+init =
+  let
+    initialLayout = LayoutContainer [LayoutLeaf "/relay/self"]
+    initialSubs = layoutRequires initialLayout
+    initialModel =
+      { globalErrs = []
+      , viewMode = UmEdit
+      , layout = LayoutContainer [LayoutLeaf "/relay/self"]
+      , layoutFs = formStoreEmpty
+      , subs = initialSubs
+      , types = Dict.empty
+      , tyAssns = Dict.empty
+      , nodes = Dict.empty
+      , nodeFs = formStoreEmpty
+      }
+  in (initialModel, subDiffToCmd Set.empty initialSubs)
 
 -- Update
-type InterfaceEvent
-  = UpPartial String
-  | IfSub Path
-  | DataChange NodeEdit
 
 sendBundle : ToRelayClientBundle -> Cmd Msg
 sendBundle b = timeStamped (WebSocket.send wsTarget << serialiseBundle b)
 
-subToCmd : List Path -> Cmd Msg
-subToCmd ps = case ps of
-    [] -> Cmd.none
-    _ -> sendBundle (ToRelayClientBundle (List.map MsgSub ps) [] [])
-
-interfaceUpdate : InterfaceEvent -> Model -> (Model, Cmd Msg)
-interfaceUpdate ie model = case ie of
-    UpPartial s -> ({model | partialEntry = s}, Cmd.none)
-    IfSub s -> ({model | nodes = Dict.insert s unpopulatedNode (.nodes model)}, subToCmd [s])
-    -- FIXME: DOES NOTHING!
-    DataChange dc -> (model, Cmd.none)
+subDiffToCmd : Set Path -> Set Path -> Cmd Msg
+subDiffToCmd old new =
+  let
+    subToCmd ps = case ps of
+        [] -> Cmd.none
+        _ -> sendBundle (ToRelayClientBundle (List.map MsgSub ps) [] [])
+  in if old == new
+    then Cmd.none
+    -- FIXME: Not efficient and leaks.
+    else subToCmd <| Set.toList new
 
 type Msg
   = GlobalError String
-  | InterfaceEvent InterfaceEvent
+  | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | TimeStamped (Time -> Cmd Msg) Time.Time
+  | LayoutUiEvent (FormUiEvent LayoutPath Path)
+  | NodeUiEvent (FormUiEvent Path NodeEdit)
 
 timeStamped : (Time -> Cmd Msg) -> Cmd Msg
 timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 
+feHandler : Model -> FormEvent k v -> (k -> v -> (Model, Cmd Msg)) -> (Model, Cmd Msg)
+feHandler m fe submitHandler = case fe of
+    FeNoop -> (m, Cmd.none)
+    FeError msg -> update (GlobalError msg) m
+    FeSubmit k v -> submitHandler k v
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
-    (NetworkEvent b) ->
+    GlobalError s -> ({model | globalErrs = s :: .globalErrs model}, Cmd.none)
+    NetworkEvent b ->
       let
         (newNodes, newAssns, newTypes, globalErrs) = handleFromRelayBundle b (.nodes model) (.tyAssns model) (.types model)
       in
-        ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, errors = globalErrs ++ .errors model}, Cmd.none)
-    (InterfaceEvent ie) -> interfaceUpdate ie model
-    (GlobalError s) -> ({model | errors = s :: .errors model}, Cmd.none)
-    (TimeStamped c t) -> (model, c (fromFloat t))
+        ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, globalErrs = globalErrs ++ .globalErrs model}, Cmd.none)
+    TimeStamped c t -> (model, c (fromFloat t))
+    SwapViewMode -> case .viewMode model of
+        UmEdit -> ({model | viewMode = UmView}, Cmd.none)
+        UmView -> ({model | viewMode = UmEdit}, Cmd.none)
+    LayoutUiEvent fue ->
+      let
+        (newLayoutFs, fe) = formUiUpdate fue <| .layoutFs model
+        newM = {model | layoutFs = newLayoutFs}
+      in feHandler newM fe <| \lp p -> case setLeafBinding lp p <| .layout model of
+        Err msg -> update (GlobalError msg) newM
+        Ok newLayout ->
+          let
+            editProcessedFs = formClear lp <| .layoutFs newM
+            subs = layoutRequires newLayout
+          in ({newM | layout = newLayout, layoutFs = editProcessedFs, subs = subs}, subDiffToCmd (.subs newM) subs)
+    NodeUiEvent fue ->
+      let
+        (newNodeFs, fe) = formUiUpdate fue <| .nodeFs model
+        newM = {model | nodeFs = newNodeFs}
+      in feHandler newM fe <| \p n -> update (GlobalError "Node edit not implemented") newM
 
 -- Subscriptions
 
@@ -88,38 +140,34 @@ eventFromNetwork s = case parseBundle s of
 -- View
 
 view : Model -> Html Msg
-view {errors, types, tyAssns, nodes, partialEntry} = Html.map InterfaceEvent <|
-    div []
-      [ viewErrors errors
-      , subControl partialEntry
-      , Html.map DataChange <| viewPaths types tyAssns nodes
-      ]
+view m = div []
+  [ viewErrors <| .globalErrs m
+  , button [onClick SwapViewMode] [text "switcheroo"]
+  , case .viewMode m of
+    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout pathEditView (.layoutFs m) (.layout m)
+    UmView -> Html.map NodeUiEvent <| viewLayout (viewPath (.types m) (.tyAssns m) (.nodes m)) (.layout m)
+  ]
 
 viewErrors : List String -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text s]) errs)
 
-subControl : String -> Html InterfaceEvent
-subControl path = div []
-  [ input [type_ "text", placeholder "Path", onInput (UpPartial)] []
-  , button [onClick (IfSub path)] [text "sub"]
-  ]
+pathEditView : LayoutPath -> Path -> FormState Path -> Html (FormUiEvent LayoutPath Path)
+pathEditView lp p fs = case fs of
+    FsViewing -> span [onClick <| FuePartial lp p] [text p]
+    FsEditing partial -> Html.span []
+      [ button [onClick <| FueSubmit lp] [text <| "Replace " ++ p]
+      , input [value partial, type_ "text", onInput <| FuePartial lp] []
+      ]
+    FsPending pending -> span [onClick <| FuePartial lp pending] [text <| p ++ " -> " ++ pending]
 
-viewPaths : TypeMap -> TypeAssignMap -> NodeMap -> Html NodeEdit
-viewPaths types tyAssns nodes =
-  let
-    renderPath p n = case Dict.get p tyAssns of
-        Nothing -> text <| "Path missing from assignment map: " ++ p
-        Just (tn, lib) -> case Dict.get tn types of
-            Nothing -> text <| "Type missing from map: " ++ toString tn
-            Just ty -> div []
-              [ h2 [] [text p] 
-              , Html.map (ConstDataEdit p) <| renderNode lib ty n
-              ]
-  in div [] <| List.map (uncurry renderPath) (Dict.toList nodes)
-
-type NodeEdit
-  = ConstDataEdit Path TupleEdit
---  | TimePointEdit Path TpId Time TupleEdit
+viewPath : TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (FormUiEvent Path NodeEdit)
+viewPath types tyAssns nodes p = case Dict.get p tyAssns of
+    Nothing -> text <| "Loading type info: " ++ p
+    Just (tn, lib) -> case Dict.get tn types of
+        Nothing -> text <| "Type missing from map: " ++ toString tn
+        Just ty -> case Dict.get p nodes of
+            Nothing -> text <| "No data for: " ++ p
+            Just n -> Html.map (FuePartial p) <| viewNode lib ty n
 
 withErrorBox : List String -> Html a -> Html a
 withErrorBox errs content = case errs of
@@ -129,80 +177,8 @@ withErrorBox errs content = case errs of
       , content
       ]
 
-renderNode : Liberty -> Definition -> Node -> Html TupleEdit
-renderNode lib def node = withErrorBox (.errors node) <| case def of
-    StructDef d -> case .body node of
-        ContainerNode n -> renderStructNode d n
-        _ -> text "Expecting a container for struct"
-    ArrayDef d -> case .body node of
-        ContainerNode n -> renderArrayNode lib d n
-        _ -> text "Expecting a container for array"
-    TupleDef d -> case .body node of
-        ConstDataNode n -> renderConstDataNode lib d n
-        TimeSeriesNode n -> renderTimeSeriesDataNode lib d n
-        _ -> text "Expecting a data node for tuple"
-
-type alias AtomEdit = WireValue
-type alias TupleEdit = List AtomEdit
-
-renderArrayNode : Liberty -> ArrayDefinition -> ContainerNodeT -> Html a
-renderArrayNode lib ad cn = text "Array node rendering not implemented yet"
-
-renderStructNode : StructDefinition -> ContainerNodeT -> Html a
-renderStructNode sd cn = text "Struct node rendering not implemented yet"
-
-renderTimeSeriesDataNode : Liberty -> TupleDefinition -> TimeSeriesNodeT -> Html a
-renderTimeSeriesDataNode lib td tsn = text "Time series rendering not implemented yet"
-
-renderConstDataNode : Liberty -> TupleDefinition -> ConstDataNodeT -> Html TupleEdit
-renderConstDataNode l td n =
-  let
-    defs = List.map Tuple.second <| .types td
-    wvs = Tuple.second <| .values n
-    updateValue idx nv = List.indexedMap (\i v -> if i == idx then nv else v) wvs
-    editorFor idx def wv = Html.map (updateValue idx) <| atomEditor def wv
-    indices = List.range 0 <| List.length wvs
-    atomRenderers = case l of
-        Cannot -> List.map2 atomViewer defs wvs
-        _ -> List.map3 editorFor indices defs wvs
-  in span [] atomRenderers
-
-atomViewer : AtomDef -> WireValue -> Html a
-atomViewer ad = case ad of
-    (ADTime _) -> \v -> case v of
-        (WvTime (s, f)) -> text (String.concat [toString s, ":", toString f])
-        _ -> text "Time did not contain time"
-    (ADEnum opts) -> \v -> case v of
-        (WvWord8 e) -> text (case itemAtIndex e opts of
-            Nothing -> "Option out of range for enum"
-            Just o -> o)
-        _ -> text "enum did not contain enum"
-    (ADString s) -> \v -> case v of
-        (WvString s) -> text s
-        _ -> text (String.append "Expected string item got: " (toString v))
-    (ADList sad) -> \v -> case v of
-        (WvList items) -> span [] (List.map (atomViewer sad) items)
-        _ -> text "List did not contain list"
-    (ADSet sad) -> \v -> case v of
-        (WvList items) -> span [] (List.map (atomViewer sad) items)
-        _ -> text "Set did not contain set"
-    _ -> text << toString  -- FIXME: this is pants
-
-atomEditor : AtomDef -> WireValue -> Html AtomEdit
-atomEditor ad = case ad of
-    (ADEnum opts) -> \v -> case v of
-        (WvWord8 e) -> Html.map WvWord8 <| enumEditor opts e
-        _ -> text "Enum value not word8"
-    (ADTime opts) -> \v -> case v of
-        (WvTime (s, f)) -> input
-            [ type_ "range"
-            , Html.Attributes.min "0"
-            , Html.Attributes.max "30"
-            , value (toString s)
-            , onInput (\s -> WvTime ((Result.withDefault -1 (String.toInt s)), 0))]
-            []
-        _ -> text "Time did not contain time"
-    _ -> atomViewer ad
+viewNode : Liberty -> Definition -> Node -> Html NodeEdit
+viewNode lib def node = withErrorBox (.errors node) <| text <| toString (lib, def, node)
 
 enumEditor : List String -> Int -> Html Int
 enumEditor opts e = select
