@@ -7,24 +7,22 @@ import Html.Events as Hevt
 import ClTypes exposing (Path)
 import UiControl exposing (..)
 
-type ControlPath
-  = CpApi Path
-  | CpLayout LayoutPath
-
 type UiMode
   = UmEdit
   | UmView
 
 type alias Model =
-  { layout : Layout Path
-  , formView : FormView ControlPath
-  , viewMode : UiMode
+  { viewMode : UiMode
   , globalErrs : List String
-  , data : Dict Path FormState
+  , layout : Layout Path
+  , layoutFs : FormStore LayoutPath Path
+  , data : Dict Path String
+  , dataFs : FormStore Path String
   }
 
 type Evt
-  = FormWidgetEvt FormWidgetEvent
+  = LayoutUiEvt (FormUiEvent LayoutPath Path)
+  | DataUiEvt (FormUiEvent Path String)
   | GlobalErrEvt String
   | SwapViewMode
 
@@ -43,68 +41,53 @@ initModel =
       , LayoutLeaf "/boo"
       ]
   in
-    { layout = initialLayout
-    , formView = layoutEdit initialLayout
-    , viewMode = UmEdit
+    { viewMode = UmEdit
     , globalErrs = []
+    , layout = initialLayout
+    , layoutFs = formStoreEmpty
     , data = Dict.empty
+    , dataFs = formStoreEmpty
     }
 
-pEditForm : LayoutPath -> Path -> FormView LayoutPath
-pEditForm lp p = FormWidget lp [EsText p]
-
-layoutEdit : Layout Path -> FormView ControlPath
-layoutEdit = mapFormView CpLayout << layoutEditorForm pEditForm
-
-handleLayoutEdit : LayoutPath -> FormState -> Layout Path -> Result String (Layout Path)
-handleLayoutEdit p fs = case fs of
-    [EsText tgt] -> setLeafBinding p tgt
-    _ -> always <| Err "Layout update pattern match failed"
+-- FIXME: Doesn't go anywhere
+sendDataChange : Path -> String -> Cmd Evt
+sendDataChange p d = Cmd.none
 
 update : Evt -> Model -> (Model, Cmd Evt)
 update evt m = case evt of
     GlobalErrEvt msg -> ({m | globalErrs = msg :: .globalErrs m}, Cmd.none)
     SwapViewMode -> case .viewMode m of
-        UmEdit -> ({m | viewMode = UmView, formView = dataEdit (.data m) <| .layout m}, Cmd.none)
-        UmView -> ({m | viewMode = UmEdit, formView = layoutEdit <| .layout m}, Cmd.none)
-    FormWidgetEvt e ->
+        UmEdit -> ({m | viewMode = UmView}, Cmd.none)
+        UmView -> ({m | viewMode = UmEdit}, Cmd.none)
+    LayoutUiEvt fue ->
       let
-        (fv, fe) = widgetUpdate e <| .formView m
-        newM = {m | formView = fv}
+        (newLayoutFs, fe) = formUiUpdate fue <| .layoutFs m
+        newM = {m | layoutFs = newLayoutFs}
       in case fe of
-        FormNoop -> (newM, Cmd.none)
-        FormError msg -> update (GlobalErrEvt msg) newM
-        FormUpdate idx fs -> case idx of
-            CpLayout lp -> case handleLayoutEdit lp fs (.layout m) of
-                Ok newLayout ->
-                  ( {m
-                    | layout = newLayout
-                    , formView = layoutEdit newLayout}
-                  , Cmd.none)
-                Err msg -> update (GlobalErrEvt msg) newM
-            CpApi p -> case handleDataEdit p fs (.data m) of
-                Ok newData -> ({newM | data = newData, formView = dataEdit newData (.layout m)}, Cmd.none)
-                Err msg -> update (GlobalErrEvt msg) newM
+        FeNoop -> (newM, Cmd.none)
+        FeError msg -> update (GlobalErrEvt msg) newM
+        FeSubmit lp p -> case setLeafBinding lp p <| .layout m of
+            Err msg -> update (GlobalErrEvt msg) newM
+            Ok newLayout -> ({newM | layout = newLayout, layoutFs = formClear lp <| .layoutFs m}, Cmd.none)
+    DataUiEvt fue ->
+      let
+        (newDataFs, fe) = formUiUpdate fue <| .dataFs m
+        newM = {m | dataFs = newDataFs}
+      in case fe of
+        FeNoop -> (newM, Cmd.none)
+        FeError msg -> update (GlobalErrEvt msg) newM
+        FeSubmit p d -> (newM, sendDataChange p d)
 
 subscriptions : Model -> Sub Evt
 subscriptions m = Sub.none
-
-dataEdit : Dict Path FormState -> Layout Path -> FormView ControlPath
-dataEdit d = mapFormView CpApi << dataEditorForm d
-
-dataEditorForm : Dict Path FormState -> Layout Path -> FormView Path
-dataEditorForm d l = case l of
-    LayoutContainer kids -> FormContainer <| List.map (dataEditorForm d) kids
-    LayoutLeaf p -> FormWidget p <| Maybe.withDefault [EsText "a", EsText "b"] <| Dict.get p d
-
-handleDataEdit : Path -> FormState -> Dict Path FormState -> Result String (Dict Path FormState)
-handleDataEdit p fs = Ok << Dict.insert p fs
 
 view : Model -> Html Evt
 view m = Html.div []
   [ Html.text <| toString <| .globalErrs m
   , Html.button [Hevt.onClick SwapViewMode] [Html.text "switcheroo"]
-  , Html.map FormWidgetEvt <| viewForm [] <| .formView m
+  , case .viewMode m of
+    UmEdit -> Html.map LayoutUiEvt <| layoutEditView (.layoutFs m) (.layout m)
+    UmView -> Html.map DataUiEvt <| dataEditView (.dataFs m) (.data m) (.layout m)
   ]
 
 replaceIdx : Int -> a -> List a -> Result String (List a)
@@ -112,18 +95,26 @@ replaceIdx idx v l = if List.length l > idx
   then Ok <| List.take idx l ++ v :: List.drop (idx + 1) l
   else Err "Index out of range"
 
-viewForm : FormPath -> FormView a -> Html FormWidgetEvent
-viewForm fp fv = case fv of
-    FormWidget _ fs ->
-      let
-        wotsit i newS = case replaceIdx i newS fs of
-            Ok newFs -> FwUpdate fp newFs
-            Err msg -> FwError msg
-        thingy i s = Html.map (wotsit i) <| viewEntryState s
-      in
-        Html.span [] <| Html.button [Hevt.onClick <| FwSubmit fp] [Html.text "submit"] :: List.indexedMap thingy fs
-    FormContainer kids -> Html.div [] <| List.indexedMap (\i -> viewForm (fp ++ [i])) kids
+layoutEditView : FormStore LayoutPath Path -> Layout Path -> Html (FormUiEvent LayoutPath Path)
+layoutEditView fs =
+  let
+    go lp l = case l of
+        LayoutContainer kids -> Html.div [] <| List.indexedMap (\i -> go (lp ++ [i])) kids
+        LayoutLeaf p -> case formState lp fs of
+            FsViewing -> Html.span [Hevt.onClick <| FuePartial lp p] [Html.text p]
+            FsEditing partial -> Html.span []
+              [ Html.button [Hevt.onClick <| FueSubmit lp] [Html.text <| "Replace " ++ p]
+              , Html.input [ Hattr.value partial, Hattr.type_ "text", Hevt.onInput <| FuePartial lp] []
+              ]
+            FsPending pending -> Html.span [Hevt.onClick <| FuePartial lp pending] [Html.text <| p ++ " -> " ++ pending]
+  in go []
 
-viewEntryState : EntryState -> Html EntryState
-viewEntryState es = case es of
-    EsText s -> Html.input [Hattr.value s, Hattr.type_ "text", Hevt.onInput EsText] []
+dataEditView : FormStore Path String -> Dict Path String -> Layout Path -> Html (FormUiEvent Path String)
+dataEditView fs d l = case l of
+    LayoutContainer kids -> Html.div [] <| List.map (dataEditView fs d) kids
+    LayoutLeaf p -> case Dict.get p d of
+        Nothing -> Html.text "Awaiting data..."
+        Just v -> case formState p fs of
+            FsViewing -> Html.text "viewing: "
+            FsEditing partial -> Html.text "editing: "
+            FsPending pending -> Html.text "pending: "

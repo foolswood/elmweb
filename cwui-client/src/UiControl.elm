@@ -1,73 +1,54 @@
 module UiControl exposing (..)
 
+import Dict exposing (Dict)
+
 import ClTypes exposing (Path)
 import Futility exposing (itemAtIndex)
 
-type alias FormPath = List Int
+type FormUiEvent k v
+  = FuePartial k v
+  | FueSubmit k
 
-type EntryState
-  = EsText String
+type FormState v
+  = FsViewing
+  | FsEditing v
+  | FsPending v
 
-type alias FormState = List EntryState
+type alias FormStore k v = Dict k (FormState v)
 
-type FormWidgetEvent
-  = FwUpdate FormPath FormState
-  | FwSubmit FormPath
-  | FwError String
+formStoreEmpty : FormStore k v
+formStoreEmpty = Dict.empty
 
-type FormEvent extIdx
-  = FormUpdate extIdx FormState
-  | FormError String
-  | FormNoop
+type FormEvent k v
+  = FeSubmit k v
+  | FeError String
+  | FeNoop
 
-type FormView extIdx
-  = FormWidget extIdx FormState
-  | FormContainer (List (FormView extIdx))
+formState : comparable -> FormStore comparable v -> FormState v
+formState k = Maybe.withDefault FsViewing << Dict.get k
 
--- FIXME: good or bad idea?
-mapFormView : (a -> b) -> FormView a -> FormView b
-mapFormView f v = case v of
-    FormWidget a fs -> FormWidget (f a) fs
-    FormContainer kids -> FormContainer <| List.map (mapFormView f) kids
+formUiUpdate : FormUiEvent comparable v -> FormStore comparable v -> (FormStore comparable v, FormEvent comparable v)
+formUiUpdate fe fs =
+  let
+    err msg = (fs, FeError msg)
+  in case fe of
+    FuePartial k v -> (Dict.insert k (FsEditing v) fs, FeNoop)
+    FueSubmit k -> case Dict.get k fs of
+        Nothing -> err "Can't submit: no form state"
+        Just s -> case s of
+            FsViewing -> err "Can't submit: viewing"
+            FsEditing v -> (Dict.insert k (FsPending v) fs, FeSubmit k v)
+            FsPending v -> (fs, FeNoop)
 
+formClear : comparable -> FormStore comparable v -> FormStore comparable v
+formClear = Dict.remove
+
+-- FIXME: Useful?
 updateIdx : (a -> Result String a) -> Int -> List a -> Result String (List a)
 updateIdx f idx l =
     Result.map ((++) <| List.take idx l) <| case List.drop idx l of
         (oldA :: leftOver) -> Result.map (\newA -> newA :: leftOver) <| f oldA
         [] -> Err "Index out of range"
-
-widgetUpdate : FormWidgetEvent -> FormView extIdx -> (FormView extIdx, FormEvent extIdx)
-widgetUpdate evt fv = case evt of
-    FwUpdate fp fs ->
-      let
-        updateFormView p v = case p of
-            (idx :: subP) -> case v of
-                FormWidget _ _ -> Err "Attempted to update child of leaf"
-                FormContainer children -> Result.map FormContainer <|
-                    updateIdx (updateFormView subP) idx children
-            [] -> case v of
-                FormWidget extIdx _ -> Ok <| FormWidget extIdx fs
-                FormContainer _ -> Err "Attempted to set value of container"
-      in case updateFormView fp fv of
-        Ok newFv -> (newFv, FormNoop)
-        Err msg -> (fv, FormError msg)
-    FwSubmit fp ->
-      let
-        getFormState p v = case p of
-            (idx :: subP) -> case v of
-                FormWidget _ _ -> Nothing
-                FormContainer children -> Maybe.andThen (getFormState subP) <|
-                    itemAtIndex idx children
-            [] -> case v of
-                FormWidget extIdx fs -> Just (extIdx, fs)
-                FormContainer _ -> Nothing
-      in case getFormState fp fv of
-        Just (extIdx, fs) -> (fv, FormUpdate extIdx fs)
-        Nothing -> (fv, FormError "Bad submit path")
-    FwError msg -> (fv, FormError msg)
-
-
--- How would above be useful?
 
 type alias LayoutPath = List Int
 
@@ -91,15 +72,6 @@ initContainer p l = case p of
             updateIdx (initContainer leftOver) idx kids
         LayoutLeaf _ -> Err "Attempting to init container below leaf"
     [] -> Ok <| LayoutContainer []
-
-layoutEditorForm : (LayoutPath -> p -> FormView LayoutPath) -> Layout p -> FormView LayoutPath
-layoutEditorForm f =
-  let
-    go lp l = case l of
-        LayoutContainer kids ->
-            FormContainer <| List.indexedMap (\i -> go (lp ++ [i])) kids
-        LayoutLeaf cp -> f lp cp
-  in go []
 
 -- FIXME: May well be pointless
 mapLayout : (a -> b) -> Layout a -> Layout b
