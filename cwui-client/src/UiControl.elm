@@ -43,13 +43,6 @@ formUiUpdate fe fs =
 formClear : comparable -> FormStore comparable v -> FormStore comparable v
 formClear = Dict.remove
 
--- FIXME: Useful?
-updateIdx : (a -> Result String a) -> Int -> List a -> Result String (List a)
-updateIdx f idx l =
-    Result.map ((++) <| List.take idx l) <| case List.drop idx l of
-        (oldA :: leftOver) -> Result.map (\newA -> newA :: leftOver) <| f oldA
-        [] -> Err "Index out of range"
-
 type alias LayoutPath = List Int
 
 type Layout p

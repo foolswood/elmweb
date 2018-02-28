@@ -90,11 +90,6 @@ view m = Html.div []
     UmView -> Html.map DataUiEvt <| dataEditView (.dataFs m) (.data m) (.layout m)
   ]
 
-replaceIdx : Int -> a -> List a -> Result String (List a)
-replaceIdx idx v l = if List.length l > idx
-  then Ok <| List.take idx l ++ v :: List.drop (idx + 1) l
-  else Err "Index out of range"
-
 layoutEditView : FormStore LayoutPath Path -> Layout Path -> Html (FormUiEvent LayoutPath Path)
 layoutEditView fs =
   let

@@ -14,6 +14,17 @@ mapAllFaily act vs = List.foldr
 itemAtIndex : Int -> List a -> Maybe a
 itemAtIndex idx l = List.head (List.drop idx l)
 
+replaceIdx : Int -> a -> List a -> Result String (List a)
+replaceIdx idx v l = if List.length l > idx
+  then Ok <| List.take idx l ++ v :: List.drop (idx + 1) l
+  else Err "Index out of range"
+
+updateIdx : (a -> Result String a) -> Int -> List a -> Result String (List a)
+updateIdx f idx l =
+    Result.map ((++) <| List.take idx l) <| case List.drop idx l of
+        (oldA :: leftOver) -> Result.map (\newA -> newA :: leftOver) <| f oldA
+        [] -> Err "Index out of range"
+
 zip : List a -> List b -> List (a, b)
 zip = List.map2 (,)
 
