@@ -91,29 +91,19 @@ view m = Html.div []
     UmView -> Html.map DataUiEvt <| dataEditView (.dataFs m) (.data m) (.layout m)
   ]
 
-containerHtml : List (Html a) -> Html a
-containerHtml = Html.div []
-
 layoutEditView : FormStore LayoutPath Path -> Layout Path -> Html (FormUiEvent LayoutPath Path)
-layoutEditView fs =
-  let
-    go lp l = case l of
-        LayoutContainer kids -> containerHtml <| List.indexedMap (\i -> go (lp ++ [i])) kids
-        LayoutLeaf p -> case formState lp fs of
-            FsViewing -> Html.span [Hevt.onClick <| FuePartial lp p] [Html.text p]
-            FsEditing partial -> Html.span []
-              [ Html.button [Hevt.onClick <| FueSubmit lp] [Html.text <| "Replace " ++ p]
-              , Html.input [ Hattr.value partial, Hattr.type_ "text", Hevt.onInput <| FuePartial lp] []
-              ]
-            FsPending pending -> Html.span [Hevt.onClick <| FuePartial lp pending] [Html.text <| p ++ " -> " ++ pending]
-  in go []
+layoutEditView = viewEditLayout <| \lp p s -> case s of
+    FsViewing -> Html.span [Hevt.onClick <| FuePartial lp p] [Html.text p]
+    FsEditing partial -> Html.span []
+      [ Html.button [Hevt.onClick <| FueSubmit lp] [Html.text <| "Replace " ++ p]
+      , Html.input [ Hattr.value partial, Hattr.type_ "text", Hevt.onInput <| FuePartial lp] []
+      ]
+    FsPending pending -> Html.span [Hevt.onClick <| FuePartial lp pending] [Html.text <| p ++ " -> " ++ pending]
 
 dataEditView : FormStore Path String -> Dict Path String -> Layout Path -> Html (FormUiEvent Path String)
-dataEditView fs d l = case l of
-    LayoutContainer kids -> containerHtml <| List.map (dataEditView fs d) kids
-    LayoutLeaf p -> case Dict.get p d of
-        Nothing -> Html.text "Awaiting data..."
-        Just v -> case formState p fs of
-            FsViewing -> Html.text "viewing: "
-            FsEditing partial -> Html.text "editing: "
-            FsPending pending -> Html.text "pending: "
+dataEditView fs d = viewLayout <| \p -> case Dict.get p d of
+    Nothing -> Html.text "Awaiting data..."
+    Just v -> case formState p fs of
+        FsViewing -> Html.text "viewing: "
+        FsEditing partial -> Html.text "editing: "
+        FsPending pending -> Html.text "pending: "

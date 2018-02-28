@@ -1,6 +1,9 @@
 module Layout exposing (..)
 
+import Html exposing (Html)
+
 import Futility exposing (updateIdx)
+import Form exposing (FormState, formState, FormStore, FormUiEvent)
 
 type alias LayoutPath = List Int
 
@@ -27,3 +30,24 @@ mapLayout : (a -> b) -> Layout a -> Layout b
 mapLayout f l = case l of
     LayoutContainer kids -> LayoutContainer <| List.map (mapLayout f) kids
     LayoutLeaf a -> LayoutLeaf <| f a
+
+-- Html generating:
+
+containerHtml : List (Html a) -> Html a
+containerHtml = Html.div []
+
+viewLayout : (p -> Html a) -> Layout p -> Html a
+viewLayout h l = case l of
+    LayoutContainer kids -> containerHtml <| List.map (viewLayout h) kids
+    LayoutLeaf p -> h p
+
+-- FIXME: 2nd arg of h should be (Maybe p) and editing of containers
+viewEditLayout
+   : (LayoutPath -> p -> FormState p -> Html (FormUiEvent LayoutPath p))
+   -> FormStore LayoutPath p -> Layout p -> Html (FormUiEvent LayoutPath p)
+viewEditLayout h fs =
+  let
+    go lp l = case l of
+        LayoutContainer kids -> containerHtml <| List.indexedMap (\i -> go (lp ++ [i])) kids
+        LayoutLeaf p -> h lp p (formState lp fs)
+  in go []
