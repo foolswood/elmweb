@@ -3,45 +3,48 @@ module RelayState exposing (TypeMap, TypeAssignMap, NodeMap, handleFromRelayBund
 import Dict exposing (Dict)
 
 import Futility exposing (dropKeys)
-import ClTypes exposing (Definition, TypeName, Liberty, Path)
+import ClTypes exposing (Definition, TypeName, Liberty, Path, TpId)
 import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath)
-import ClNodes exposing (Node, childAbsent, childPresentAfter, unpopulatedNode, removeTimePoint, setTimePoint, setConstData)
+import ClNodes exposing (Node, childAbsent, childPresentAfter, removeTimePoint, setTimePoint, setConstData)
 
 type alias TypeMap = Dict TypeName Definition
 type alias TypeAssignMap = Dict Path (TypeName, Liberty)
 type alias NodeMap = Dict Path Node
 
-handleDataUpdateMsg : DataUpdateMsg -> Node -> Node
+handleDataUpdateMsg : DataUpdateMsg -> Maybe Node -> Result (Maybe TpId, String) Node
 handleDataUpdateMsg dum = case dum of
-    MsgConstSet {msgTypes, msgArgs, msgAttributee} ->
+    MsgConstSet {msgTypes, msgArgs, msgAttributee} -> Result.mapError (\s -> (Nothing, s)) <<
         setConstData msgTypes (msgAttributee, msgArgs)
     (MsgSet
       { msgTpId, msgTime, msgTypes, msgArgs, msgInterpolation
-      , msgAttributee}) ->
+      , msgAttributee}) -> Result.mapError (\s -> (Just msgTpId, s)) <<
         setTimePoint msgTypes msgTpId msgTime msgAttributee msgArgs msgInterpolation
-    (MsgRemove {msgTpId, msgAttributee}) ->
+    (MsgRemove {msgTpId, msgAttributee}) -> Result.mapError (\s -> (Just msgTpId, s)) <<
         removeTimePoint msgTpId msgAttributee
 
-updateNode : (Node -> Node) -> Path -> NodeMap -> NodeMap
-updateNode t p m =
-  let
-    -- FIXME: Doesn't note stuff from the blue anywhere?
-    wt mn = Just (t (Maybe.withDefault unpopulatedNode mn))
-  in
-    Dict.update p wt m
+failyUpdate
+   : (Maybe a -> Result e a) -> comparable
+   -> (List (comparable, e), Dict comparable a)
+   -> (List (comparable, e), Dict comparable a)
+failyUpdate f k (es, d) = case f <| Dict.get k d of
+    Ok v -> (es, Dict.insert k v d)
+    Err e -> ((k, e) :: es, d)
 
-handleDums : List DataUpdateMsg -> NodeMap -> NodeMap
-handleDums dums nodeMap = List.foldl (\dum nm -> updateNode (handleDataUpdateMsg dum) (dumPath dum) nm) nodeMap dums
+handleDums : List DataUpdateMsg -> NodeMap -> (List (Path, (Maybe TpId, String)), NodeMap)
+handleDums dums nodeMap = List.foldl
+    (\dum -> failyUpdate (handleDataUpdateMsg dum) (dumPath dum))
+    ([], nodeMap)
+    dums
 
-handleCms : List ContainerUpdateMsg -> NodeMap -> NodeMap
+handleCms : List ContainerUpdateMsg -> NodeMap -> (List (Path, String), NodeMap)
 handleCms cms nodeMap =
   let
     handleCm cm = case cm of
         MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} ->
-            updateNode (childPresentAfter msgAttributee msgTgt msgRef) msgPath
+            failyUpdate (childPresentAfter msgAttributee msgTgt msgRef) msgPath
         MsgAbsent {msgPath, msgTgt, msgAttributee} ->
-            updateNode (childAbsent msgAttributee msgTgt) msgPath
-  in List.foldl handleCm nodeMap cms
+            failyUpdate (childAbsent msgAttributee msgTgt) msgPath
+  in List.foldl handleCm ([], nodeMap) cms
 
 handleDefOps : List DefMsg -> TypeMap -> TypeMap
 handleDefOps defs types =
@@ -67,8 +70,9 @@ handleFromRelayBundle
     updatedTypes = handleDefOps defs <| dropKeys typeUnsubs types
     newAssigns = digestTypeMsgs typeAssns
     updatedAssigns = Dict.union newAssigns <| dropKeys dataUnsubs assigns
-    -- FIXME: Should we insert empty nodes at the fresh assignments?
-    updatedNodes = handleCms cms <| handleDums dms <| dropKeys dataUnsubs nodes
+    -- FIXME: Clear nodes whose types have changed
+    (dataErrs, updatedDataNodes) = handleDums dms <| dropKeys dataUnsubs nodes
+    (contErrs, updatedNodes) = handleCms cms updatedDataNodes
     -- FIXME: Crappy error handling
-    globalErrs = List.map toString errs
+    globalErrs = [toString (errs, dataErrs, contErrs)]
   in (updatedNodes, updatedAssigns, updatedTypes, globalErrs)

@@ -169,16 +169,8 @@ viewPath types tyAssns nodes p = case Dict.get p tyAssns of
             Nothing -> text <| "No data for: " ++ p
             Just n -> Html.map (FuePartial p) <| viewNode lib ty n
 
-withErrorBox : List String -> Html a -> Html a
-withErrorBox errs content = case errs of
-    [] -> content
-    _ -> div []
-      [ text <| toString errs
-      , content
-      ]
-
 viewNode : Liberty -> Definition -> Node -> Html NodeEdit
-viewNode lib def node = withErrorBox (.errors node) <| text <| toString (lib, def, node)
+viewNode lib def node = text <| toString (lib, def, node)
 
 enumEditor : List String -> Int -> Html Int
 enumEditor opts e = select

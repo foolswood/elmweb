@@ -11,112 +11,81 @@ type alias TimePoint =
   , attributee : Maybe Attributee
   , wvs : List WireValue
   , interpolation : Interpolation
-  , errors : List String
   }
 type alias TimeSeries a = Dict TpId a
 
 type alias ConstDataNodeT =
   { types : List WireType
   , values : ConstData
-  , pending : Maybe ConstData
   }
 
 type alias TimeSeriesNodeT =
   { types : List WireType
   , values : TimeSeries TimePoint
-  , pending : TimeSeries TimePoint
   , removed : Dict TpId (Maybe Attributee)
   }
 
--- FIXME: This should have pending stuff, or it should be elsewhere?
-type alias ContainerNodeT =
-  { children : List Seg
-  }
+type alias ContainerNodeT = List Seg
 
-type NodeT
+type Node
   = ConstDataNode ConstDataNodeT
   | TimeSeriesNode TimeSeriesNodeT
   | ContainerNode ContainerNodeT
-  | UnpopulatedNode
 
-type alias Node =
-  { errors : List String
-  , body : NodeT
-  }
-
-unpopulatedNode : Node
-unpopulatedNode = Node [] UnpopulatedNode
-
-setConstData : List WireType -> ConstData -> Node -> Node
-setConstData wts cd n =
+setConstData : List WireType -> ConstData -> Maybe Node -> Result String Node
+setConstData wts cd mn =
   let
-    fromEmptyWithErr msg = setConstData
-        wts cd {unpopulatedNode | errors = msg :: .errors n}
-    newBody = {n | body = ConstDataNode
-      { types = wts
-      , values = cd
-      , pending = Nothing
-      }}
-  in case .body n of
-    UnpopulatedNode -> newBody
-    ConstDataNode cdn ->
-      if .types cdn == wts then
-        newBody
-      else
-        fromEmptyWithErr "Const node unexpectedly changed wire type"
-    _ -> fromEmptyWithErr "Const set on non-const node, dropped existing data"
+    new = ConstDataNode {types = wts, values = cd}
+  in case mn of
+    Nothing -> Ok new
+    Just n -> case n of
+        ConstDataNode cdn ->
+          if .types cdn == wts
+          then Ok new
+          else Err "Const node unexpectedly changed wire type"
+        _ -> Err "Const set on non-const node"
 
 setTimePoint
   :  List WireType -> TpId -> Time -> Maybe Attributee -> List WireValue
-  -> Interpolation -> Node -> Node
-setTimePoint wts tpid t ma wvs i n =
+  -> Interpolation -> Maybe Node -> Result String Node
+setTimePoint wts tpid t ma wvs i mn =
   let
-    fromEmptyWithErr msg = setTimePoint
-        wts tpid t ma wvs i {unpopulatedNode | errors = msg :: .errors n}
-    tp errs = 
+    tp =
       { time = t
       , attributee = ma
       , wvs = wvs
       , interpolation = i
-      , errors = errs
       }
-    replaceVal motp = Just <| case motp of
-        Nothing -> tp []
-        Just otp -> tp <| .errors otp
-  in case .body n of
-    UnpopulatedNode ->
-      {n | body = TimeSeriesNode
+  in case mn of
+    Nothing -> Ok <| TimeSeriesNode
         { types = wts
-        , values = Dict.singleton tpid <| tp []
-        , pending = Dict.empty
+        , values = Dict.singleton tpid tp
         , removed = Dict.empty
         }
-      }
-    TimeSeriesNode tsn ->
-      if .types tsn == wts then
-        { errors = .errors n
-        , body = TimeSeriesNode
-            {tsn | values = Dict.update tpid replaceVal <| .values tsn}
-        }
-      else
-        fromEmptyWithErr "Adding timepoint of different WireType dropped previous series"
-    _ -> fromEmptyWithErr "Node type change dropped existing data"
+    Just n -> case n of
+        TimeSeriesNode tsn ->
+          if .types tsn == wts
+            then Ok <| TimeSeriesNode
+                {tsn | values = Dict.insert tpid tp <| .values tsn}
+          else Err "TimePoint WireType differs"
+        _ -> Err "TimePoint set on non-series"
 
-removeTimePoint : TpId -> Maybe Attributee -> Node -> Node
-removeTimePoint tpid ma n = case .body n of
-    TimeSeriesNode tsn -> {n | body = TimeSeriesNode {tsn
-      | values = Dict.remove tpid <| .values tsn
-      , removed = Dict.insert tpid ma <| .removed tsn
-      }}
-    _ -> {n | errors = "Attempted to remove timepoint from non-series" :: .errors n}
+removeTimePoint : TpId -> Maybe Attributee -> Maybe Node -> Result String Node
+removeTimePoint tpid ma mn = case mn of
+    Nothing -> Err "Time point remove on missing node"
+    Just n -> case n of
+        TimeSeriesNode tsn -> Ok <| TimeSeriesNode
+          { tsn
+          | values = Dict.remove tpid <| .values tsn
+          , removed = Dict.insert tpid ma <| .removed tsn
+          }
+        _ -> Err "Attempted to remove timepoint from non-series"
 
 -- FIXME: The attributee is currently dropped in the child* functions
 
-childPresentAfter : Maybe Attributee -> Seg -> Maybe Seg -> Node -> Node
-childPresentAfter att tgt mRef n =
+childPresentAfter : Maybe Attributee -> Seg -> Maybe Seg -> Maybe Node -> Result String Node
+childPresentAfter att tgt mRef mn =
   let
-    fromEmptyWithErr msg = {n
-      | body = ContainerNode {children = [tgt]}, errors = msg :: .errors n}
     insertAfter ref acc remaining = case remaining of
         (v :: leftover) -> if v == ref
             then Ok <| acc ++ (tgt :: remaining)
@@ -126,21 +95,15 @@ childPresentAfter att tgt mRef n =
     presentAfter existing = case mRef of
         Nothing -> Ok <| tgt :: tgtRemoved existing
         Just ref -> insertAfter ref [] existing
-    nodeWithKids kids = {n | body = ContainerNode {children = kids}}
-  in
-    case .body n of
-        UnpopulatedNode -> case presentAfter [] of
-            Ok kids -> nodeWithKids kids
-            Err msg -> fromEmptyWithErr msg
-        ContainerNode {children} -> case presentAfter children of
-            Ok kids -> nodeWithKids kids
-            Err msg -> {n
-              | body = ContainerNode {children = tgt :: tgtRemoved children}
-              , errors = msg :: .errors n}
-        _ -> fromEmptyWithErr "Child present applied to non-container type"
+  in case mn of
+    Nothing -> Result.map ContainerNode <| presentAfter []
+    Just n -> case n of
+        ContainerNode kids -> Result.map ContainerNode <| presentAfter kids
+        _ -> Err "Child present applied to non-container"
 
-childAbsent : Maybe Attributee -> Seg -> Node -> Node
-childAbsent att tgt n = case .body n of
-    ContainerNode {children} ->
-        {n | body = ContainerNode {children = List.filter ((/=) tgt) children}}
-    _ -> {n | errors = "Attempted to remove child from non-container" :: .errors n}
+childAbsent : Maybe Attributee -> Seg -> Maybe Node -> Result String Node
+childAbsent att tgt mn = case mn of
+    Nothing -> Err "Child remove on missing node"
+    Just n -> case n of
+        ContainerNode children -> Ok <| ContainerNode <| List.filter ((/=) tgt) children
+        _ -> Err "Attempted to remove child from non-container"
