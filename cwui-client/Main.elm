@@ -15,7 +15,7 @@ import Futility exposing (..)
 import RelayState exposing (..)
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, setLeafBinding, viewEditLayout, viewLayout, layoutRequires)
-import Form exposing (FormStore, formStoreEmpty, FormUiEvent(..), formClear, formUiUpdate, FormEvent(..), FormState(..), formState)
+import Form exposing (FormStore, formStoreEmpty, FormUiEvent(..), formClear, formUiUpdate, FormEvent(..), FormState(..), formState, AtomEditState(..), castAes, UnboundFui(..), mapUfui, bindFui, castFormState)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -166,21 +166,6 @@ pathEditView lp p fs = case fs of
       ]
     FsPending pending -> span [onClick <| FuePartial lp pending] [text <| p ++ " -> " ++ pending]
 
--- FIXME: Other one is a wrapper around this really?
-type UnboundFui v
-  = UfPartial v
-  | UfSubmit
-
-mapUfui : (a -> b) -> UnboundFui a -> UnboundFui b
-mapUfui f e = case e of
-    UfPartial a -> UfPartial <| f a
-    UfSubmit -> UfSubmit
-
-bindFui : k -> UnboundFui v -> FormUiEvent k v
-bindFui k e = case e of
-    UfPartial v -> FuePartial k v
-    UfSubmit -> FueSubmit k
-
 viewPath : FormStore Path NodeEdit -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (FormUiEvent Path NodeEdit)
 viewPath fs types tyAssns nodes p = case Dict.get p tyAssns of
     Nothing -> text <| "Loading type info: " ++ p
@@ -189,12 +174,6 @@ viewPath fs types tyAssns nodes p = case Dict.get p tyAssns of
         Just ty -> case Dict.get p nodes of
             Nothing -> text <| "No data for: " ++ p
             Just n -> Html.map (bindFui p) <| viewNode lib ty n <| formState p fs
-
-castFormState : (a -> Result String b) -> FormState a -> Result String (FormState b)
-castFormState c f = case f of
-    FsViewing -> Ok FsViewing
-    FsEditing a -> Result.map FsEditing <| c a
-    FsPending a -> Result.map FsPending <| c a
 
 viewNode : Liberty -> Definition -> Node -> FormState NodeEdit -> Html (UnboundFui NodeEdit)
 viewNode lib def node formState = case (lib, def, node) of
@@ -228,12 +207,6 @@ viewAtom ma def wv =
 viewConstNodeEdit : TupleDefinition -> ConstDataNodeT -> FormState NeConstT -> Html (UnboundFui NeConstT)
 viewConstNodeEdit d n s = viewConstTupleEdit (List.map Tuple.second <| .types d) (Just <| Tuple.second <| .values n) s
 
--- FIXME: Move to Form?
-type AtomEditState a
-  = AesViewing
-  | AesUnfilled
-  | AesEditing a
-
 viewConstTupleEdit
    : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT
    -> Html (UnboundFui NeConstT)
@@ -262,11 +235,6 @@ viewConstTupleEdit defs mv s =
 viewAtomEdit : AtomDef -> Maybe WireValue -> AtomEditState WireValue -> Html WireValue
 viewAtomEdit d =
   let
-    castAes : (a -> Result String b) -> AtomEditState a -> Result String (AtomEditState b)
-    castAes c s = case s of
-        AesViewing -> Ok AesViewing
-        AesUnfilled -> Ok AesUnfilled
-        AesEditing v -> Result.map AesEditing <| c v
     castMaybe : (a -> Result String b) -> Maybe a -> Result String (Maybe b)
     castMaybe c m = case m of
         Nothing -> Ok Nothing
