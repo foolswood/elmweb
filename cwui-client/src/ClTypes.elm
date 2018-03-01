@@ -39,7 +39,7 @@ type AtomDef
   | ADFloat (Bounds Float)
   | ADDouble (Bounds Float)
   | ADString String
-  | ADRef String
+  | ADRef TypeName
   | ADList AtomDef
   | ADSet AtomDef
 
@@ -68,6 +68,16 @@ type WireValue
   | WvDouble Float
   | WvString String
   | WvList (List WireValue)
+
+asWord8 : WireValue -> Result String Int
+asWord8 wv = case wv of
+    WvWord8 i -> Ok i
+    _ -> Err "Not a Word8"
+
+asString : WireValue -> Result String String
+asString wv = case wv of
+    WvString s -> Ok s
+    _ -> Err "Not a string"
 
 type WireType
   = WtTime

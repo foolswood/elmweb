@@ -15,6 +15,9 @@ constraintParsers =
     floatBounds = timeBounds
     cRegex s = Ok s
     parsePath s = Ok s
+    parseTypeName s = case String.split ":" s of
+        [ns, seg] -> Ok (ns, seg)
+        _ -> Err "Bad TypeName"
   in [
     ("time", Result.map ADTime << timeBounds),
     ("enum", Result.map ADEnum << enumOpts),
@@ -27,7 +30,7 @@ constraintParsers =
     ("string", Result.map ADString << cRegex),
     ("list", Result.map ADList << parseAtomDef),
     ("set", Result.map ADSet << parseAtomDef),
-    ("ref", Result.map ADRef << parsePath)]
+    ("ref", Result.map ADRef << parseTypeName)]
 
 parseAtomDefWith : String -> List ConstraintParser -> Result String AtomDef
 parseAtomDefWith s cps = case cps of
