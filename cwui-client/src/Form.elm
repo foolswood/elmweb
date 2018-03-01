@@ -13,7 +13,6 @@ castAes c s = case s of
     AesUnfilled -> Ok AesUnfilled
     AesEditing v -> Result.map AesEditing <| c v
 
--- FIXME: Other one is a wrapper around this really?
 type UnboundFui v
   = UfPartial v
   | UfSubmit
@@ -23,14 +22,10 @@ mapUfui f e = case e of
     UfPartial a -> UfPartial <| f a
     UfSubmit -> UfSubmit
 
-type FormUiEvent k v
-  = FuePartial k v
-  | FueSubmit k
+type alias FormUiEvent k v = (k, UnboundFui v)
 
 bindFui : k -> UnboundFui v -> FormUiEvent k v
-bindFui k e = case e of
-    UfPartial v -> FuePartial k v
-    UfSubmit -> FueSubmit k
+bindFui k e = (k, e)
 
 type FormState v
   = FsViewing
@@ -57,12 +52,12 @@ formState : comparable -> FormStore comparable v -> FormState v
 formState k = Maybe.withDefault FsViewing << Dict.get k
 
 formUiUpdate : FormUiEvent comparable v -> FormStore comparable v -> (FormStore comparable v, FormEvent comparable v)
-formUiUpdate fe fs =
+formUiUpdate (k, fue) fs =
   let
     err msg = (fs, FeError msg)
-  in case fe of
-    FuePartial k v -> (Dict.insert k (FsEditing v) fs, FeNoop)
-    FueSubmit k -> case Dict.get k fs of
+  in case fue of
+    UfPartial v -> (Dict.insert k (FsEditing v) fs, FeNoop)
+    UfSubmit -> case Dict.get k fs of
         Nothing -> err "Can't submit: no form state"
         Just s -> case s of
             FsViewing -> err "Can't submit: viewing"

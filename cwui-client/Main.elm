@@ -16,7 +16,7 @@ import Futility exposing (..)
 import RelayState exposing (..)
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEditEvent)
-import Form exposing (FormStore, formStoreEmpty, FormUiEvent(..), formClear, formUiUpdate, FormEvent(..), FormState(..), formState, AtomEditState(..), castAes, UnboundFui(..), mapUfui, bindFui, castFormState)
+import Form exposing (FormStore, formStoreEmpty, FormUiEvent, formClear, formUiUpdate, FormEvent(..), FormState(..), formState, AtomEditState(..), castAes, UnboundFui(..), mapUfui, bindFui, castFormState)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
