@@ -1,3 +1,4 @@
+import Array
 import Set exposing (Set)
 import Dict exposing (..)
 import Html exposing (..)
@@ -56,12 +57,12 @@ type alias Model =
 init : (Model, Cmd Msg)
 init =
   let
-    initialLayout = LayoutContainer [LayoutLeaf "/relay/self"]
+    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self"]
     initialSubs = layoutRequires initialLayout
     initialModel =
       { globalErrs = []
       , viewMode = UmEdit
-      , layout = LayoutContainer [LayoutLeaf "/relay/self"]
+      , layout = initialLayout
       , layoutFs = formStoreEmpty
       , subs = initialSubs
       , types = Dict.empty

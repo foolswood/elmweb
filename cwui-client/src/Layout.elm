@@ -1,15 +1,21 @@
 module Layout exposing (..)
 
+import Array exposing (Array)
 import Set exposing (Set)
 import Html exposing (Html)
 
-import Futility exposing (updateIdx)
 import Form exposing (FormState(..), formState, FormStore, FormUiEvent, UnboundFui, bindFui, mapUfui)
 
 type alias LayoutPath = List Int
 
+-- FIXME: The one in Futility is for lists, probably eventually drop that and replace with this
+updateIdx : (a -> Result String a) -> Int -> Array a -> Result String (Array a)
+updateIdx f idx arr = case Array.get idx arr of
+    Nothing -> Err "Index out of range"
+    Just a -> Result.map (\newA -> Array.set idx newA arr) <| f a
+
 type Layout p
-  = LayoutContainer (List (Layout p))
+  = LayoutContainer (Array (Layout p))
   | LayoutLeaf p
 
 updateLayoutPath : (Layout p -> Result String (Layout p)) -> LayoutPath -> Layout p -> Result String (Layout p)
@@ -32,32 +38,32 @@ setLeafBinding : LayoutPath -> p -> Layout p -> Result String (Layout p)
 setLeafBinding p tgt l = setLayout (LayoutLeaf tgt) p l
 
 initContainer : LayoutPath -> Layout p -> Result String (Layout p)
-initContainer = setLayout <| LayoutContainer []
+initContainer = setLayout <| LayoutContainer Array.empty
 
 addLeaf : p -> LayoutPath -> Layout p -> Result String (Layout p)
 addLeaf p = updateLayoutPath <| \l -> case l of
-    LayoutContainer kids -> Ok <| LayoutContainer <| LayoutLeaf p :: kids
+    LayoutContainer kids -> Ok <| LayoutContainer <| Array.push (LayoutLeaf p) kids
     LayoutLeaf p -> Err "Attempting to add leaf to leaf"
 
 layoutRequires : Layout comparable -> Set comparable
 layoutRequires l = case l of
-    LayoutContainer kids -> List.foldl (\k acc -> Set.union acc <| layoutRequires k) Set.empty kids
+    LayoutContainer kids -> Array.foldl (\k acc -> Set.union acc <| layoutRequires k) Set.empty kids
     LayoutLeaf p -> Set.singleton p
 
 -- FIXME: May well be pointless
 mapLayout : (a -> b) -> Layout a -> Layout b
 mapLayout f l = case l of
-    LayoutContainer kids -> LayoutContainer <| List.map (mapLayout f) kids
+    LayoutContainer kids -> LayoutContainer <| Array.map (mapLayout f) kids
     LayoutLeaf a -> LayoutLeaf <| f a
 
 -- Html generating:
 
-containerHtml : List (Html a) -> Html a
-containerHtml = Html.div []
+containerHtml : Array (Html a) -> Html a
+containerHtml = Html.div [] << Array.toList
 
 viewLayout : (p -> Html a) -> Layout p -> Html a
 viewLayout h l = case l of
-    LayoutContainer kids -> containerHtml <| List.map (viewLayout h) kids
+    LayoutContainer kids -> containerHtml <| Array.map (viewLayout h) kids
     LayoutLeaf p -> h p
 
 type alias LayoutTargetEditor p = Maybe p -> FormState p -> Html (UnboundFui p)
@@ -104,6 +110,6 @@ viewEditLayout editInitial h fs =
         s = formState lp fs
       in case l of
         LayoutContainer kids -> containerHtml <|
-            containerAddControls editInitial h lp s :: List.indexedMap (\i -> go (lp ++ [i])) kids
+            Array.push (containerAddControls editInitial h lp s) <| Array.indexedMap (\i -> go (lp ++ [i])) kids
         LayoutLeaf p -> Html.map (bindFui lp << mapUfui LeeSet) <| h (Just p) (mapFormState getP s)
   in go []
