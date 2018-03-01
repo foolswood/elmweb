@@ -4,15 +4,10 @@ import Array exposing (Array)
 import Set exposing (Set)
 import Html exposing (Html)
 
+import Futility exposing (updateIdx)
 import Form exposing (FormState(..), formState, FormStore, FormUiEvent, UnboundFui, bindFui, mapUfui)
 
 type alias LayoutPath = List Int
-
--- FIXME: The one in Futility is for lists, probably eventually drop that and replace with this
-updateIdx : (a -> Result String a) -> Int -> Array a -> Result String (Array a)
-updateIdx f idx arr = case Array.get idx arr of
-    Nothing -> Err "Index out of range"
-    Just a -> Result.map (\newA -> Array.set idx newA arr) <| f a
 
 type Layout p
   = LayoutContainer (Array (Layout p))

@@ -1,6 +1,8 @@
 module Futility exposing (..)
 -- Functional utility bits absent from elm std lib
+
 import Dict exposing (Dict)
+import Array exposing (Array)
 
 -- Equivalent to mapM for Result:
 mapAllFaily : (a -> Result x b) -> List a -> Result x (List b)
@@ -19,11 +21,10 @@ replaceIdx idx v l = if List.length l > idx
   then Ok <| List.take idx l ++ v :: List.drop (idx + 1) l
   else Err "Index out of range"
 
-updateIdx : (a -> Result String a) -> Int -> List a -> Result String (List a)
-updateIdx f idx l =
-    Result.map ((++) <| List.take idx l) <| case List.drop idx l of
-        (oldA :: leftOver) -> Result.map (\newA -> newA :: leftOver) <| f oldA
-        [] -> Err "Index out of range"
+updateIdx : (a -> Result String a) -> Int -> Array a -> Result String (Array a)
+updateIdx f idx arr = case Array.get idx arr of
+    Nothing -> Err "Index out of range"
+    Just a -> Result.map (\newA -> Array.set idx newA arr) <| f a
 
 zip : List a -> List b -> List (a, b)
 zip = List.map2 (,)
