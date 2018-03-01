@@ -16,6 +16,7 @@ mapAllFaily act vs = List.foldr
 itemAtIndex : Int -> List a -> Maybe a
 itemAtIndex idx l = List.head (List.drop idx l)
 
+-- FIXME: Would be better to use arrays for efficiency
 replaceIdx : Int -> a -> List a -> Result String (List a)
 replaceIdx idx v l = if List.length l > idx
   then Ok <| List.take idx l ++ v :: List.drop (idx + 1) l
