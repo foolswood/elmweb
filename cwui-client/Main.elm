@@ -14,7 +14,7 @@ import ClMsgTypes exposing (FromRelayClientBundle, ToRelayClientBundle(..), SubM
 import Futility exposing (..)
 import RelayState exposing (..)
 import MonoTime
-import Layout exposing (Layout(..), LayoutPath, setLeafBinding, viewEditLayout, viewLayout, layoutRequires)
+import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEditEvent)
 import Form exposing (FormStore, formStoreEmpty, FormUiEvent(..), formClear, formUiUpdate, FormEvent(..), FormState(..), formState, AtomEditState(..), castAes, UnboundFui(..), mapUfui, bindFui, castFormState)
 
 main = Html.program {
@@ -44,7 +44,7 @@ type alias Model =
   , viewMode : UiMode
   -- Layout:
   , layout : Layout Path
-  , layoutFs : FormStore LayoutPath Path
+  , layoutFs : FormStore LayoutPath (LayoutEditEvent Path)
   -- Data:
   , subs : Set Path
   , types : TypeMap
@@ -92,7 +92,7 @@ type Msg
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | TimeStamped (Time -> Cmd Msg) Time.Time
-  | LayoutUiEvent (FormUiEvent LayoutPath Path)
+  | LayoutUiEvent (FormUiEvent LayoutPath (LayoutEditEvent Path))
   | NodeUiEvent (FormUiEvent Path NodeEdit)
 
 timeStamped : (Time -> Cmd Msg) -> Cmd Msg
@@ -120,7 +120,7 @@ update msg model = case msg of
       let
         (newLayoutFs, fe) = formUiUpdate fue <| .layoutFs model
         newM = {model | layoutFs = newLayoutFs}
-      in feHandler newM fe <| \lp p -> case setLeafBinding lp p <| .layout model of
+      in feHandler newM fe <| \lp p -> case updateLayout lp p <| .layout model of
         Err msg -> update (GlobalError msg) newM
         Ok newLayout ->
           let
@@ -150,21 +150,34 @@ view m = div []
   [ viewErrors <| .globalErrs m
   , button [onClick SwapViewMode] [text "switcheroo"]
   , case .viewMode m of
-    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout pathEditView (.layoutFs m) (.layout m)
+    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
     UmView -> Html.map NodeUiEvent <| viewLayout (viewPath (.nodeFs m) (.types m) (.tyAssns m) (.nodes m)) (.layout m)
   ]
 
 viewErrors : List String -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text s]) errs)
 
-pathEditView : LayoutPath -> Path -> FormState Path -> Html (FormUiEvent LayoutPath Path)
-pathEditView lp p fs = case fs of
-    FsViewing -> span [onClick <| FuePartial lp p] [text p]
-    FsEditing partial -> Html.span []
-      [ button [onClick <| FueSubmit lp] [text <| "Replace " ++ p]
-      , input [value partial, type_ "text", onInput <| FuePartial lp] []
-      ]
-    FsPending pending -> span [onClick <| FuePartial lp pending] [text <| p ++ " -> " ++ pending]
+pathEditView : Maybe Path -> FormState Path -> Html (UnboundFui Path)
+pathEditView mp fs = case fs of
+    FsViewing -> case mp of
+        Nothing -> text "Attempting to view unfilled path"
+        Just p -> span [onClick <| UfPartial p] [text p]
+    FsEditing partial ->
+      let
+        buttonText = case mp of
+            Nothing -> "Set"
+            Just p -> "Replace " ++ p
+      in Html.span []
+        [ button [onClick <| UfSubmit] [text buttonText]
+        , input [value partial, type_ "text", onInput <| UfPartial] []
+        ]
+    FsPending pending ->
+      let
+        oldValStr = case mp of
+            Nothing -> ""
+            Just p -> p
+      in
+        span [onClick <| UfPartial pending] [text <| oldValStr ++ " -> " ++ pending]
 
 viewPath : FormStore Path NodeEdit -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (FormUiEvent Path NodeEdit)
 viewPath fs types tyAssns nodes p = case Dict.get p tyAssns of
