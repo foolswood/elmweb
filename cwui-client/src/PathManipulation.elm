@@ -1,4 +1,4 @@
-module PathManipulation exposing (splitBasename)
+module PathManipulation exposing (splitBasename, appendSeg)
 import ClTypes exposing (Path, Seg)
 
 s : String
@@ -14,3 +14,6 @@ splitBasename : Path -> Maybe (Path, Seg)
 splitBasename p = case List.reverse (pathToSegs p) of
     cn :: rSegs -> Just (segsToPath (List.reverse rSegs), cn)
     [] -> Nothing
+
+appendSeg : Path -> Seg -> Path
+appendSeg p s = p ++ "/" ++ s
