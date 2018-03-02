@@ -23,12 +23,7 @@ updateLayoutPath u p l = case p of
     [] -> u l
 
 setLayout : Layout p -> LayoutPath -> Layout p -> Result String (Layout p)
-setLayout v p l = case p of
-    (idx :: leftOver) -> case l of
-        LayoutContainer kids -> Result.map LayoutContainer <|
-            updateIdx (setLayout v leftOver) idx kids
-        LayoutLeaf _ -> Err "Attempting to update layout path below leaf"
-    [] -> Ok <| v
+setLayout v = updateLayoutPath <| always <| Ok v
 
 setLeafBinding : LayoutPath -> p -> Layout p -> Result String (Layout p)
 setLeafBinding p tgt l = setLayout (LayoutLeaf tgt) p l
