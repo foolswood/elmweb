@@ -57,12 +57,15 @@ type alias Model =
   , nodeFs : FormStore Path NodeEdit NodeEditEvent
   }
 
+requiredPaths : NodeMap -> Layout Path -> Set Path
+requiredPaths nm = layoutRequires (++) (dynamicLayout nm) (always Array.empty)
+
 init : (Model, Cmd Msg)
 init =
   let
     initialNodes = Dict.empty
-    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutDynamic "/api"]
-    initialSubs = layoutRequires (dynamicLayout initialNodes) initialLayout
+    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutChildChoice "/" <| LayoutLeaf "/version"]
+    initialSubs = requiredPaths initialNodes initialLayout
     initialModel =
       { globalErrs = []
       , viewMode = UmEdit
@@ -115,7 +118,7 @@ update msg model = case msg of
     NetworkEvent b ->
       let
         (newNodes, newAssns, newTypes, globalErrs) = handleFromRelayBundle b (.nodes model) (.tyAssns model) (.types model)
-        subs = layoutRequires (dynamicLayout <| newNodes) (.layout model)
+        subs = requiredPaths newNodes (.layout model)
       in
         ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, globalErrs = globalErrs ++ .globalErrs model, subs = subs}, subDiffToCmd (.subs model) subs)
     TimeStamped c t -> (model, c (fromFloat t))
@@ -131,7 +134,7 @@ update msg model = case msg of
         Ok newLayout ->
           let
             editProcessedFs = formClear lp <| .layoutFs newM
-            subs = layoutRequires (dynamicLayout <| .nodes newM) newLayout
+            subs = requiredPaths (.nodes newM) newLayout
           in ({newM | layout = newLayout, layoutFs = editProcessedFs, subs = subs}, subDiffToCmd (.subs newM) subs)
     NodeUiEvent fue ->
       let
@@ -166,7 +169,9 @@ view m = div []
   , case .viewMode m of
     UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
     UmView -> Html.map NodeUiEvent <| viewLayout
+        (++)
         (dynamicLayout <| .nodes m)
+        (always Array.empty)
         (viewPath (.nodeFs m) (.types m) (.tyAssns m) (.nodes m))
         (.layout m)
   ]
