@@ -3,9 +3,10 @@ module Layout exposing (..)
 import Array exposing (Array)
 import Set exposing (Set)
 import Html exposing (Html)
+import Html.Events as Hevt
 
 import Futility exposing (updateIdx)
-import Form exposing (FormState(..), formState, FormStore, FormUiEvent, UnboundFui, bindFui, mapUfui, castFormState)
+import Form exposing (FormState(..), formState, FormStore, FormUiEvent, UnboundFui(..), bindFui, mapUfui, castFormState)
 
 type alias LayoutPath = List Int
 
@@ -51,7 +52,7 @@ splitLast =
 
 removeIdx : Int -> Array a -> Array a
 removeIdx idx a = Array.append
-    (Array.slice 0 idx a) (Array.slice idx (Array.length a) a)
+    (Array.slice 0 idx a) (Array.slice (idx + 1) (Array.length a) a)
 
 removeSubtree : LayoutPath -> Layout p -> Result String (Layout p)
 removeSubtree lp layout =
@@ -84,43 +85,38 @@ viewLayout h l = case l of
     LayoutContainer kids -> containerHtml <| Array.map (viewLayout h) kids
     LayoutLeaf p -> h p
 
-type alias LayoutTargetEditor p = Maybe p -> FormState p -> Html (UnboundFui p)
-
-type LayoutEditEvent p
-  = LeeSet p
-  | LeeAdd p
+type LayoutEditEvent
+  = LeeSet
+  | LeeAdd
   | LeeRemove
 
-updateLayout : LayoutPath -> LayoutEditEvent p -> Layout p -> Result String (Layout p)
-updateLayout lp lee l = case lee of
-    LeeSet p -> setLeafBinding lp p l
-    LeeAdd p -> addLeaf p lp l
+-- FIXME: Not happy with the LayoutEditEvent in this:
+type alias LayoutTargetEditor p = LayoutEditEvent -> Maybe p -> FormState p LayoutEditEvent -> Html (UnboundFui p LayoutEditEvent)
+
+updateLayout : LayoutPath -> LayoutEditEvent -> Maybe p -> Layout p -> Result String (Layout p)
+updateLayout lp lee mp l = case lee of
+    LeeSet -> case mp of
+        Just p -> setLeafBinding lp p l
+        Nothing -> Err "No edit value"
+    LeeAdd -> case mp of
+        Just p -> addLeaf p lp l
+        Nothing -> Err "No edit value"
     LeeRemove -> removeSubtree lp l
 
-castP : LayoutEditEvent p -> Result String p
-castP lee = case lee of
-    LeeSet p -> Ok p  -- FIXME: is this right?
-    LeeAdd p -> Ok p
-    LeeRemove -> Err "No p in removal"
-
 containerAddControls
-   : p -> LayoutTargetEditor p -> LayoutPath -> FormState (LayoutEditEvent p)
-  -> Html (FormUiEvent LayoutPath (LayoutEditEvent p))
+   : p -> LayoutTargetEditor p -> LayoutPath -> FormState p LayoutEditEvent
+  -> Html (FormUiEvent LayoutPath p LayoutEditEvent)
 containerAddControls editInitial lte lp les =
   let
-    p lee = case castP lee of
-        Ok p -> p
-        Err _ -> editInitial
     s = case les of
         FsViewing -> FsEditing editInitial
-        FsEditing lee -> FsEditing <| p lee
-        FsPending lee -> FsPending <| p lee
-  in Html.map (bindFui lp << mapUfui LeeAdd) <| lte Nothing s
+        FsEditing p -> FsEditing p
+        FsPending r mp -> FsPending r mp
+  in Html.map (bindFui lp) <| lte LeeAdd Nothing s
 
--- FIXME: 2nd arg of h should be (Maybe p) and editing of containers
 viewEditLayout
-   : p -> LayoutTargetEditor p -> FormStore LayoutPath (LayoutEditEvent p) -> Layout p
-   -> Html (FormUiEvent LayoutPath (LayoutEditEvent p))
+   : p -> LayoutTargetEditor p -> FormStore LayoutPath p LayoutEditEvent -> Layout p
+   -> Html (FormUiEvent LayoutPath p LayoutEditEvent)
 viewEditLayout editInitial h fs =
   let
     go lp l =
@@ -129,8 +125,9 @@ viewEditLayout editInitial h fs =
         body = case l of
             LayoutContainer kids -> containerHtml <|
                 Array.push (containerAddControls editInitial h lp s) <| Array.indexedMap (\i -> go (lp ++ [i])) kids
-            LayoutLeaf p -> case castFormState castP s of
-                Ok fsp -> Html.map (bindFui lp << mapUfui LeeSet) <| h (Just p) fsp
-                Err msg -> Html.text msg
-      in body
+            LayoutLeaf p -> Html.map (bindFui lp) <| h LeeSet (Just p) s
+        removeButton = case lp of
+            [] -> Html.text "Layout wide controls here"
+            _ -> Html.button [Hevt.onClick <| bindFui lp <| UfAction LeeRemove] [Html.text "Remove"]
+      in Html.span [] [removeButton, body]
   in go []

@@ -32,6 +32,9 @@ type UiMode
 
 type alias NeConstT = List (Maybe WireValue)
 
+type NodeEditEvent
+  = NeeSubmit
+
 type NodeEdit
   = NeConst NeConstT
 
@@ -45,13 +48,13 @@ type alias Model =
   , viewMode : UiMode
   -- Layout:
   , layout : Layout Path
-  , layoutFs : FormStore LayoutPath (LayoutEditEvent Path)
+  , layoutFs : FormStore LayoutPath Path LayoutEditEvent
   -- Data:
   , subs : Set Path
   , types : TypeMap
   , tyAssns : TypeAssignMap
   , nodes : NodeMap
-  , nodeFs : FormStore Path NodeEdit
+  , nodeFs : FormStore Path NodeEdit NodeEditEvent
   }
 
 init : (Model, Cmd Msg)
@@ -93,17 +96,17 @@ type Msg
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | TimeStamped (Time -> Cmd Msg) Time.Time
-  | LayoutUiEvent (FormUiEvent LayoutPath (LayoutEditEvent Path))
-  | NodeUiEvent (FormUiEvent Path NodeEdit)
+  | LayoutUiEvent (FormUiEvent LayoutPath Path LayoutEditEvent)
+  | NodeUiEvent (FormUiEvent Path NodeEdit NodeEditEvent)
 
 timeStamped : (Time -> Cmd Msg) -> Cmd Msg
 timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 
-feHandler : Model -> FormEvent k v -> (k -> v -> (Model, Cmd Msg)) -> (Model, Cmd Msg)
+feHandler : Model -> FormEvent k v r -> (k -> r -> Maybe v -> (Model, Cmd Msg)) -> (Model, Cmd Msg)
 feHandler m fe submitHandler = case fe of
     FeNoop -> (m, Cmd.none)
     FeError msg -> update (GlobalError msg) m
-    FeSubmit k v -> submitHandler k v
+    FeAction k r mv -> submitHandler k r mv
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
@@ -121,7 +124,7 @@ update msg model = case msg of
       let
         (newLayoutFs, fe) = formUiUpdate fue <| .layoutFs model
         newM = {model | layoutFs = newLayoutFs}
-      in feHandler newM fe <| \lp p -> case updateLayout lp p <| .layout model of
+      in feHandler newM fe <| \lp r p -> case updateLayout lp r p <| .layout model of
         Err msg -> update (GlobalError msg) newM
         Ok newLayout ->
           let
@@ -132,7 +135,7 @@ update msg model = case msg of
       let
         (newNodeFs, fe) = formUiUpdate fue <| .nodeFs model
         newM = {model | nodeFs = newNodeFs}
-      in feHandler newM fe <| \p n -> update (GlobalError "Node edit not implemented") newM
+      in feHandler newM fe <| \p r n -> update (GlobalError "Node edit not implemented") newM
 
 -- Subscriptions
 
@@ -158,8 +161,8 @@ view m = div []
 viewErrors : List String -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text s]) errs)
 
-pathEditView : Maybe Path -> FormState Path -> Html (UnboundFui Path)
-pathEditView mp fs = case fs of
+pathEditView : r -> Maybe Path -> FormState Path r -> Html (UnboundFui Path r)
+pathEditView r mp fs = case fs of
     FsViewing -> case mp of
         Nothing -> text "Attempting to view unfilled path"
         Just p -> span [onClick <| UfPartial p] [text p]
@@ -169,18 +172,21 @@ pathEditView mp fs = case fs of
             Nothing -> "Set"
             Just p -> "Replace " ++ p
       in Html.span []
-        [ button [onClick <| UfSubmit] [text buttonText]
+        [ button [onClick <| UfAction r] [text buttonText]
         , input [value partial, type_ "text", onInput <| UfPartial] []
         ]
-    FsPending pending ->
+    FsPending _ mPending ->
       let
         oldValStr = case mp of
             Nothing -> ""
             Just p -> p
-      in
-        span [onClick <| UfPartial pending] [text <| oldValStr ++ " -> " ++ pending]
+      in case mPending of
+        Nothing -> text "No pending, bad times"
+        Just pending -> span
+            [onClick <| UfPartial pending]
+            [text <| oldValStr ++ " -> " ++ pending]
 
-viewPath : FormStore Path NodeEdit -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (FormUiEvent Path NodeEdit)
+viewPath : FormStore Path NodeEdit NodeEditEvent -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (FormUiEvent Path NodeEdit NodeEditEvent)
 viewPath fs types tyAssns nodes p = case Dict.get p tyAssns of
     Nothing -> text <| "Loading type info: " ++ p
     Just (tn, lib) -> case Dict.get tn types of
@@ -189,7 +195,7 @@ viewPath fs types tyAssns nodes p = case Dict.get p tyAssns of
             Nothing -> text <| "No data for: " ++ p
             Just n -> Html.map (bindFui p) <| viewNode lib ty n <| formState p fs
 
-viewNode : Liberty -> Definition -> Node -> FormState NodeEdit -> Html (UnboundFui NodeEdit)
+viewNode : Liberty -> Definition -> Node -> FormState NodeEdit NodeEditEvent -> Html (UnboundFui NodeEdit NodeEditEvent)
 viewNode lib def node formState = case (lib, def, node) of
     (Cannot, TupleDef d, ConstDataNode n) -> viewConstTuple (List.map Tuple.second <| .types d) (Just <| .values n)
     (_, TupleDef d, ConstDataNode n) -> case castFormState asNeConst formState of
@@ -218,12 +224,12 @@ viewAtom ma def wv =
     _ -> text <| "View not implemented: " ++ toString def
 
 -- FIXME: Dodgy Just due to maybe not coming in here:
-viewConstNodeEdit : TupleDefinition -> ConstDataNodeT -> FormState NeConstT -> Html (UnboundFui NeConstT)
+viewConstNodeEdit : TupleDefinition -> ConstDataNodeT -> FormState NeConstT NodeEditEvent -> Html (UnboundFui NeConstT NodeEditEvent)
 viewConstNodeEdit d n s = viewConstTupleEdit (List.map Tuple.second <| .types d) (Just <| Tuple.second <| .values n) s
 
 viewConstTupleEdit
-   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT
-   -> Html (UnboundFui NeConstT)
+   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT NodeEditEvent
+   -> Html (UnboundFui NeConstT NodeEditEvent)
 viewConstTupleEdit defs mv s =
   let
     nDefs = List.length defs
@@ -236,23 +242,21 @@ viewConstTupleEdit defs mv s =
     (editBase, atomEditStates) = case s of
         FsViewing -> (current, List.repeat nDefs AesViewing)
         FsEditing mevs -> (mevs, List.map toAes mevs)
-        FsPending mevs -> (mevs, List.map toAes mevs)
+        FsPending _ mmevs -> case mmevs of
+            Nothing -> (current, List.repeat nDefs AesViewing)
+            Just mevs -> (mevs, List.map toAes mevs)
     asPartial idx wv = UfPartial <| Result.withDefault editBase <| replaceIdx idx (Just wv) editBase
     atomEditor idx def mwv aes = Html.map (asPartial idx) <| viewAtomEdit def mwv aes
     atomEditors = List.map4 atomEditor (List.range 0 nDefs) defs current atomEditStates
     filledFields = List.filterMap identity editBase
     content = if List.length filledFields == List.length defs
-      then button [onClick UfSubmit] [text "Apply"] :: atomEditors
+      then button [onClick <| UfAction NeeSubmit] [text "Apply"] :: atomEditors
       else atomEditors
   in span [] content
 
 viewAtomEdit : AtomDef -> Maybe WireValue -> AtomEditState WireValue -> Html WireValue
 viewAtomEdit d =
   let
-    castMaybe : (a -> Result String b) -> Maybe a -> Result String (Maybe b)
-    castMaybe c m = case m of
-        Nothing -> Ok Nothing
-        Just v -> Result.map Just <| c v
     castedView
        : (WireValue -> Result String a) -> (a -> WireValue) -> (Maybe a -> AtomEditState a -> Html a)
        -> Maybe WireValue -> AtomEditState WireValue -> Html WireValue

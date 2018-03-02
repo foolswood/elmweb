@@ -39,3 +39,8 @@ dropKeys : List comparable -> Dict comparable v -> Dict comparable v
 dropKeys l = case l of
     [] -> identity
     (k :: ks) -> Dict.remove k << dropKeys ks
+
+castMaybe : (a -> Result String b) -> Maybe a -> Result String (Maybe b)
+castMaybe c m = case m of
+    Nothing -> Ok Nothing
+    Just v -> Result.map Just <| c v
