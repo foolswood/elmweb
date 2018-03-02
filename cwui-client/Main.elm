@@ -60,8 +60,9 @@ type alias Model =
 init : (Model, Cmd Msg)
 init =
   let
-    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self"]
-    initialSubs = layoutRequires initialLayout
+    initialNodes = Dict.empty
+    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutDynamic "/api"]
+    initialSubs = layoutRequires (dynamicLayout initialNodes) initialLayout
     initialModel =
       { globalErrs = []
       , viewMode = UmEdit
@@ -70,7 +71,7 @@ init =
       , subs = initialSubs
       , types = Dict.empty
       , tyAssns = Dict.empty
-      , nodes = Dict.empty
+      , nodes = initialNodes
       , nodeFs = formStoreEmpty
       }
   in (initialModel, subDiffToCmd Set.empty initialSubs)
@@ -114,8 +115,9 @@ update msg model = case msg of
     NetworkEvent b ->
       let
         (newNodes, newAssns, newTypes, globalErrs) = handleFromRelayBundle b (.nodes model) (.tyAssns model) (.types model)
+        subs = layoutRequires (dynamicLayout <| newNodes) (.layout model)
       in
-        ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, globalErrs = globalErrs ++ .globalErrs model}, Cmd.none)
+        ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, globalErrs = globalErrs ++ .globalErrs model, subs = subs}, subDiffToCmd (.subs model) subs)
     TimeStamped c t -> (model, c (fromFloat t))
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
@@ -129,7 +131,7 @@ update msg model = case msg of
         Ok newLayout ->
           let
             editProcessedFs = formClear lp <| .layoutFs newM
-            subs = layoutRequires newLayout
+            subs = layoutRequires (dynamicLayout <| .nodes newM) newLayout
           in ({newM | layout = newLayout, layoutFs = editProcessedFs, subs = subs}, subDiffToCmd (.subs newM) subs)
     NodeUiEvent fue ->
       let
@@ -149,13 +151,24 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
+dynamicLayout : NodeMap -> Path -> Layout Path
+dynamicLayout nm p = case Dict.get p nm of
+    Nothing -> LayoutLeaf p
+    Just n -> case n of
+        ContainerNode segs -> LayoutContainer <| Array.map (\seg -> dynamicLayout nm (p ++ "/" ++ seg)) <| Array.fromList segs
+        _ -> LayoutLeaf p
+
 view : Model -> Html Msg
 view m = div []
   [ viewErrors <| .globalErrs m
+  , Html.text <| toString (.subs m)
   , button [onClick SwapViewMode] [text "switcheroo"]
   , case .viewMode m of
     UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
-    UmView -> Html.map NodeUiEvent <| viewLayout (viewPath (.nodeFs m) (.types m) (.tyAssns m) (.nodes m)) (.layout m)
+    UmView -> Html.map NodeUiEvent <| viewLayout
+        (dynamicLayout <| .nodes m)
+        (viewPath (.nodeFs m) (.types m) (.tyAssns m) (.nodes m))
+        (.layout m)
   ]
 
 viewErrors : List String -> Html a
