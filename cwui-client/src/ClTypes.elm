@@ -74,6 +74,11 @@ asWord8 wv = case wv of
     WvWord8 i -> Ok i
     _ -> Err "Not a Word8"
 
+asFloat : WireValue -> Result String Float
+asFloat wv = case wv of
+    WvFloat f -> Ok f
+    _ -> Err "Not a Float"
+
 asString : WireValue -> Result String String
 asString wv = case wv of
     WvString s -> Ok s

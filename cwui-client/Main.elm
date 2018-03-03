@@ -333,6 +333,7 @@ viewAtom ma def wv =
         Err msg -> text msg
   in case def of
     ADEnum opts -> castedView asWord8 <| enumViewer opts
+    ADFloat bounds -> castedView asFloat <| floatViewer bounds
     ADString re -> castedView asString <| textViewer re
     ADRef ty -> castedView asString <| refViewer ty
     _ -> text <| "View not implemented: " ++ toString def
@@ -390,6 +391,9 @@ textViewer re ma s = text s
 
 refViewer : TypeName -> Maybe Attributee -> String -> Html a
 refViewer tn ma tgt = text tgt
+
+floatViewer : Bounds Float -> Maybe Attributee -> Float -> Html a
+floatViewer b ma f = text <| toString f
 
 enumViewer : List String -> Maybe Attributee -> Int -> Html a
 enumViewer opts ma e = text <| case itemAtIndex e opts of
