@@ -165,6 +165,6 @@ viewEditLayout editInitial h fs =
             LayoutLeaf p -> Html.map (bindFui lp) <| h LeeSetLeaf (Just p) s
         removeButton = case lp of
             [] -> Html.text "Layout wide controls here"
-            _ -> Html.button [Hevt.onClick <| bindFui lp <| UfAction LeeRemove] [Html.text "Remove"]
+            _ -> Html.button [Hevt.onClick <| bindFui lp <| UfAct LeeRemove] [Html.text "Remove"]
       in Html.div [] [removeButton, body]
   in go []

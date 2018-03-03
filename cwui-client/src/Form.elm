@@ -16,13 +16,15 @@ castAes c s = case s of
     AesEditing v -> Result.map AesEditing <| c v
 
 type UnboundFui v r
-  = UfPartial v
-  | UfAction r
+  = UfUpdate v
+  | UfAct r
+  | UfActUp r v
 
 mapUfui : (a -> b) -> (r -> s) -> UnboundFui a r -> UnboundFui b s
 mapUfui f g e = case e of
-    UfPartial a -> UfPartial <| f a
-    UfAction r -> UfAction <| g r
+    UfUpdate a -> UfUpdate <| f a
+    UfAct r -> UfAct <| g r
+    UfActUp r a -> UfActUp (g r) <| f a
 
 type alias FormUiEvent k v r = (k, UnboundFui v r)
 
@@ -55,8 +57,8 @@ formState k = Maybe.withDefault FsViewing << Dict.get k
 
 formUiUpdate : FormUiEvent comparable v r -> FormStore comparable v r -> (FormStore comparable v r, FormEvent comparable r)
 formUiUpdate (k, fue) fs = case fue of
-    UfPartial v -> (Dict.insert k (FsEditing v) fs, FeNoop)
-    UfAction r ->
+    UfUpdate v -> (Dict.insert k (FsEditing v) fs, FeNoop)
+    UfAct r ->
       let
         (mv, mr) = case formState k fs of
             FsViewing -> (Nothing, Nothing)
@@ -67,6 +69,7 @@ formUiUpdate (k, fue) fs = case fue of
         Just oldR -> if r == oldR
           then (fs, FeNoop)
           else (fs, FeError "Already a pending action")
+    UfActUp r v -> formUiUpdate (bindFui k <| UfAct r) (Dict.insert k (FsEditing v) fs)
 
 formClear : comparable -> FormStore comparable v r -> FormStore comparable v r
 formClear = Dict.remove

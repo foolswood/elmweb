@@ -35,10 +35,12 @@ type alias NeConstT = List (Maybe WireValue)
 
 type NodeEditEvent v
   = NeeSubmit v
+  | NeeChildChoose
 
 mapNee : (a -> b) -> NodeEditEvent a -> NodeEditEvent b
 mapNee f e = case e of
     NeeSubmit v -> NeeSubmit <| f v
+    NeeChildChoose -> NeeChildChoose
 
 mapNeeUf : (a -> b) -> UnboundFui a (NodeEditEvent a) -> UnboundFui b (NodeEditEvent b)
 mapNeeUf f = mapUfui f (mapNee f)
@@ -203,7 +205,12 @@ update msg model = case msg of
       let
         (newNodeFs, fe) = formUiUpdate fue <| .nodeFs model
         newM = {model | nodeFs = newNodeFs}
-      in feHandler newM fe <| \p r -> update (GlobalError "Node edit not implemented") newM
+      in feHandler newM fe <| \p r -> case r of
+        NeeChildChoose ->
+          let
+            subs = requiredPaths (.nodes newM) (.nodeFs newM) (.layout newM)
+          in ({newM | subs = subs}, subDiffToCmd (.subs newM) subs)
+        NeeSubmit v -> update (GlobalError "Node edit not implemented") newM
 
 -- Subscriptions
 
@@ -245,15 +252,15 @@ pathEditView : (Path -> r) -> Maybe Path -> FormState Path r -> Html (UnboundFui
 pathEditView r mp fs = case fs of
     FsViewing -> case mp of
         Nothing -> text "Attempting to view unfilled path"
-        Just p -> span [onClick <| UfPartial p] [text p]
+        Just p -> span [onClick <| UfUpdate p] [text p]
     FsEditing partial ->
       let
         buttonText = case mp of
             Nothing -> "Set"
             Just p -> "Replace " ++ p
       in Html.span []
-        [ button [onClick <| UfAction <| r partial] [text buttonText]
-        , input [value partial, type_ "text", onInput <| UfPartial] []
+        [ button [onClick <| UfAct <| r partial] [text buttonText]
+        , input [value partial, type_ "text", onInput <| UfUpdate] []
         ]
     FsPending _ mPending ->
       let
@@ -263,7 +270,7 @@ pathEditView r mp fs = case fs of
       in case mPending of
         Nothing -> text "No pending, bad times"
         Just pending -> span
-            [onClick <| UfPartial pending]
+            [onClick <| UfUpdate pending]
             [text <| oldValStr ++ " -> " ++ pending]
 
 viewPath : NodeFs -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (FormUiEvent Path NodeEdit (NodeEditEvent NodeEdit))
@@ -301,7 +308,7 @@ viewArray arrayDef mn s =
     fillChoice seg isPicked mc = case mc of
         Nothing -> Just <| {chosen = isPicked, mod = Nothing}
         Just a -> Just <| {a | chosen = isPicked}
-    wrapChoice (seg, isPicked) = UfPartial <| Dict.update seg (fillChoice seg isPicked) picks
+    wrapChoice (seg, isPicked) = UfActUp NeeChildChoose <| Dict.update seg (fillChoice seg isPicked) picks
   in Html.map wrapChoice <| viewChildrenChoose segs <| Dict.map (always .chosen) picks
 
 viewChildrenChoose : List Seg -> Dict Seg Bool -> Html (Seg, Bool)
@@ -354,12 +361,12 @@ viewConstTupleEdit defs mv s =
         FsPending _ mmevs -> case mmevs of
             Nothing -> (current, List.repeat nDefs AesViewing)
             Just mevs -> (mevs, List.map toAes mevs)
-    asPartial idx wv = UfPartial <| Result.withDefault editBase <| replaceIdx idx (Just wv) editBase
+    asPartial idx wv = UfUpdate <| Result.withDefault editBase <| replaceIdx idx (Just wv) editBase
     atomEditor idx def mwv aes = Html.map (asPartial idx) <| viewAtomEdit def mwv aes
     atomEditors = List.map4 atomEditor (List.range 0 nDefs) defs current atomEditStates
     filledFields = List.filterMap identity editBase
     content = if List.length filledFields == List.length defs
-      then button [onClick <| UfAction <| NeeSubmit editBase] [text "Apply"] :: atomEditors
+      then button [onClick <| UfAct <| NeeSubmit editBase] [text "Apply"] :: atomEditors
       else atomEditors
   in span [] content
 
