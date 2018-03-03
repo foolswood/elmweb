@@ -3,9 +3,10 @@ module RelayState exposing (TypeMap, TypeAssignMap, NodeMap, handleFromRelayBund
 import Dict exposing (Dict)
 
 import Futility exposing (dropKeys)
-import ClTypes exposing (Definition, TypeName, Liberty, Path, TpId)
+import ClTypes exposing (Definition, TypeName, Liberty, Path, Seg, TpId)
 import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath)
-import ClNodes exposing (Node, childAbsent, childPresentAfter, removeTimePoint, setTimePoint, setConstData)
+import ClNodes exposing (Node, childUpdate, removeTimePoint, setTimePoint, setConstData)
+import SequenceOps exposing (SeqOp(..))
 
 type alias TypeMap = Dict TypeName Definition
 type alias TypeAssignMap = Dict Path (TypeName, Liberty)
@@ -36,15 +37,26 @@ handleDums dums nodeMap = List.foldl
     ([], nodeMap)
     dums
 
+-- FIXME: Drops attributee
+digestCms : List ContainerUpdateMsg -> Dict Path (Dict Seg (SeqOp Seg))
+digestCms =
+  let
+    wedgeIn k v md = Just <| case md of
+        Nothing -> Dict.singleton k v
+        Just d -> Dict.insert k v d
+    digestCm cm = case cm of
+        MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} ->
+            Dict.update msgPath (wedgeIn msgTgt <| SoPresentAfter msgRef)
+        MsgAbsent {msgPath, msgTgt, msgAttributee} ->
+            Dict.update msgPath (wedgeIn msgTgt <| SoAbsent)
+  in List.foldl digestCm Dict.empty
+
 handleCms : List ContainerUpdateMsg -> NodeMap -> (List (Path, String), NodeMap)
 handleCms cms nodeMap =
   let
-    handleCm cm = case cm of
-        MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} ->
-            failyUpdate (childPresentAfter msgAttributee msgTgt msgRef) msgPath
-        MsgAbsent {msgPath, msgTgt, msgAttributee} ->
-            failyUpdate (childAbsent msgAttributee msgTgt) msgPath
-  in List.foldl handleCm ([], nodeMap) cms
+    dcm = digestCms cms
+    applyOps p ops = failyUpdate (childUpdate ops) p
+  in Dict.foldl applyOps ([], nodeMap) dcm
 
 handleDefOps : List DefMsg -> TypeMap -> TypeMap
 handleDefOps defs types =

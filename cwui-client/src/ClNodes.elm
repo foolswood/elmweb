@@ -2,6 +2,7 @@ module ClNodes exposing (..)
 
 import Dict exposing (Dict)
 
+import SequenceOps exposing (SeqOp, applySeqOps)
 import ClTypes exposing (Seg, Attributee, WireValue, WireType, TpId, Time, Interpolation)
 
 type alias ConstData = (Maybe Attributee, List WireValue)
@@ -81,29 +82,9 @@ removeTimePoint tpid ma mn = case mn of
           }
         _ -> Err "Attempted to remove timepoint from non-series"
 
--- FIXME: The attributee is currently dropped in the child* functions
-
-childPresentAfter : Maybe Attributee -> Seg -> Maybe Seg -> Maybe Node -> Result String Node
-childPresentAfter att tgt mRef mn =
-  let
-    insertAfter ref acc remaining = case remaining of
-        (v :: leftover) -> if v == ref
-            then Ok <| acc ++ (tgt :: remaining)
-            else insertAfter ref (acc ++ [v]) leftover
-        [] -> Err <| "Ref not present: " ++ ref
-    tgtRemoved = List.filter ((/=) tgt)
-    presentAfter existing = case mRef of
-        Nothing -> Ok <| tgt :: tgtRemoved existing
-        Just ref -> insertAfter ref [] existing
-  in case mn of
-    Nothing -> Result.map ContainerNode <| presentAfter []
-    Just n -> case n of
-        ContainerNode kids -> Result.map ContainerNode <| presentAfter kids
-        _ -> Err "Child present applied to non-container"
-
-childAbsent : Maybe Attributee -> Seg -> Maybe Node -> Result String Node
-childAbsent att tgt mn = case mn of
-    Nothing -> Err "Child remove on missing node"
-    Just n -> case n of
-        ContainerNode children -> Ok <| ContainerNode <| List.filter ((/=) tgt) children
-        _ -> Err "Attempted to remove child from non-container"
+-- FIXME: No attributee
+childUpdate : Dict Seg (SeqOp Seg) -> Maybe Node -> Result String Node
+childUpdate ops mn = Result.map ContainerNode <| case mn of
+    Nothing -> applySeqOps ops []
+    Just (ContainerNode kids) -> applySeqOps ops kids
+    _ -> Err "Child present applied to non-container"
