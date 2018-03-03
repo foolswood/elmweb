@@ -11,7 +11,7 @@ import WebSocket
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
-import ClMsgTypes exposing (FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(MsgSub))
+import ClMsgTypes exposing (FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(MsgSub), ErrorIndex(..))
 import Futility exposing (..)
 import PathManipulation exposing (appendSeg)
 import RelayState exposing (..)
@@ -75,7 +75,7 @@ type alias NodeFs = FormStore Path NodeEdit (NodeEditEvent NodeEdit)
 
 type alias Model =
   -- Global:
-  { globalErrs : List String
+  { errs : List (ErrorIndex, String)
   , viewMode : UiMode
   -- Layout:
   , layout : Layout Path
@@ -132,7 +132,7 @@ init =
     initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutChildChoice "/relay/clients" <| LayoutLeaf ""]
     initialSubs = requiredPaths initialNodes initialNodeFs initialLayout
     initialModel =
-      { globalErrs = []
+      { errs = []
       , viewMode = UmEdit
       , layout = initialLayout
       , layoutFs = formStoreEmpty
@@ -161,7 +161,7 @@ subDiffToCmd old new =
     else subToCmd <| Set.toList new
 
 type Msg
-  = GlobalError String
+  = AddError ErrorIndex String
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | TimeStamped (Time -> Cmd Msg) Time.Time
@@ -171,21 +171,24 @@ type Msg
 timeStamped : (Time -> Cmd Msg) -> Cmd Msg
 timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 
+addGlobalError : String -> Model -> (Model, Cmd Msg)
+addGlobalError msg m = ({m | errs = (GlobalError, msg) :: .errs m}, Cmd.none)
+
 feHandler : Model -> FormEvent k r -> (k -> r -> (Model, Cmd Msg)) -> (Model, Cmd Msg)
 feHandler m fe submitHandler = case fe of
     FeNoop -> (m, Cmd.none)
-    FeError msg -> update (GlobalError msg) m
+    FeError msg -> addGlobalError msg m
     FeAction k r -> submitHandler k r
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
-    GlobalError s -> ({model | globalErrs = s :: .globalErrs model}, Cmd.none)
+    AddError idx msg -> ({model | errs = (idx, msg) :: .errs model}, Cmd.none)
     NetworkEvent b ->
       let
-        (newNodes, newAssns, newTypes, globalErrs) = handleFromRelayBundle b (.nodes model) (.tyAssns model) (.types model)
+        (newNodes, newAssns, newTypes, errs) = handleFromRelayBundle b (.nodes model) (.tyAssns model) (.types model)
         subs = requiredPaths newNodes (.nodeFs model) (.layout model)
       in
-        ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, globalErrs = globalErrs ++ .globalErrs model, subs = subs}, subDiffToCmd (.subs model) subs)
+        ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, errs = errs ++ .errs model, subs = subs}, subDiffToCmd (.subs model) subs)
     TimeStamped c t -> (model, c (fromFloat t))
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
@@ -195,7 +198,7 @@ update msg model = case msg of
         (newLayoutFs, fe) = formUiUpdate fue <| .layoutFs model
         newM = {model | layoutFs = newLayoutFs}
       in feHandler newM fe <| \lp r -> case updateLayout lp r <| .layout model of
-        Err msg -> update (GlobalError msg) newM
+        Err msg -> addGlobalError msg newM
         Ok newLayout ->
           let
             editProcessedFs = formClear lp <| .layoutFs newM
@@ -210,7 +213,7 @@ update msg model = case msg of
           let
             subs = requiredPaths (.nodes newM) (.nodeFs newM) (.layout newM)
           in ({newM | subs = subs}, subDiffToCmd (.subs newM) subs)
-        NeeSubmit v -> update (GlobalError "Node edit not implemented") newM
+        NeeSubmit v -> addGlobalError "Node edit not implemented" newM
 
 -- Subscriptions
 
@@ -220,7 +223,7 @@ subscriptions model = WebSocket.listen wsTarget eventFromNetwork
 eventFromNetwork : String -> Msg
 eventFromNetwork s = case parseBundle s of
     (Ok b) -> NetworkEvent b
-    (Err e) -> GlobalError e
+    (Err e) -> AddError GlobalError e
 
 -- View
 
@@ -233,7 +236,7 @@ dynamicLayout nm p = case Dict.get p nm of
 
 view : Model -> Html Msg
 view m = div []
-  [ viewErrors <| .globalErrs m
+  [ viewErrors <| .errs m
   , button [onClick SwapViewMode] [text "switcheroo"]
   , case .viewMode m of
     UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
@@ -245,8 +248,8 @@ view m = div []
         (.layout m)
   ]
 
-viewErrors : List String -> Html a
-viewErrors errs = ul [] (List.map (\s -> li [] [text s]) errs)
+viewErrors : List (ErrorIndex, String) -> Html a
+viewErrors errs = ul [] (List.map (\s -> li [] [text <| toString s]) errs)
 
 pathEditView : (Path -> r) -> Maybe Path -> FormState Path r -> Html (UnboundFui Path r)
 pathEditView r mp fs = case fs of

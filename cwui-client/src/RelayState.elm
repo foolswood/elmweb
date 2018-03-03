@@ -4,7 +4,7 @@ import Dict exposing (Dict)
 
 import Futility exposing (dropKeys)
 import ClTypes exposing (Definition, TypeName, Liberty, Path, Seg, TpId)
-import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath)
+import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath, ErrorIndex(..), MsgError(..))
 import ClNodes exposing (Node, childUpdate, removeTimePoint, setTimePoint, setConstData)
 import SequenceOps exposing (SeqOp(..))
 
@@ -74,9 +74,9 @@ digestTypeMsgs tms =
 
 handleFromRelayBundle
   :  FromRelayClientBundle -> NodeMap -> TypeAssignMap -> TypeMap
-  -> (NodeMap, TypeAssignMap, TypeMap, List String)
+  -> (NodeMap, TypeAssignMap, TypeMap, List (ErrorIndex, String))
 handleFromRelayBundle
-    (FromRelayClientBundle typeUnsubs dataUnsubs errs defs typeAssns dms cms)
+    (FromRelayClientBundle typeUnsubs dataUnsubs errMsgs defs typeAssns dms cms)
     nodes assigns types =
   let
     updatedTypes = handleDefOps defs <| dropKeys typeUnsubs types
@@ -85,6 +85,11 @@ handleFromRelayBundle
     -- FIXME: Clear nodes whose types have changed
     (dataErrs, updatedDataNodes) = handleDums dms <| dropKeys dataUnsubs nodes
     (contErrs, updatedNodes) = handleCms cms updatedDataNodes
-    -- FIXME: Crappy error handling
-    globalErrs = [toString (errs, dataErrs, contErrs)]
-  in (updatedNodes, updatedAssigns, updatedTypes, globalErrs)
+    indexDumErr (p, (mTpId, s)) = case mTpId of
+        Nothing -> (PathError p, s)
+        Just tpId -> (TimePointError p tpId, s)
+    indexedErrs
+       = List.map (\(MsgError idx s) -> (idx, s)) errMsgs
+      ++ List.map indexDumErr dataErrs
+      ++ List.map (\(p, s) -> (PathError p, s)) contErrs
+  in (updatedNodes, updatedAssigns, updatedTypes, indexedErrs)
