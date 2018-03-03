@@ -19,10 +19,10 @@ type UnboundFui v r
   = UfPartial v
   | UfAction r
 
-mapUfui : (a -> b) -> UnboundFui a r -> UnboundFui b r
-mapUfui f e = case e of
+mapUfui : (a -> b) -> (r -> s) -> UnboundFui a r -> UnboundFui b s
+mapUfui f g e = case e of
     UfPartial a -> UfPartial <| f a
-    UfAction r -> UfAction r
+    UfAction r -> UfAction <| g r
 
 type alias FormUiEvent k v r = (k, UnboundFui v r)
 
@@ -45,15 +45,15 @@ type alias FormStore k v r = Dict k (FormState v r)
 formStoreEmpty : FormStore k v r
 formStoreEmpty = Dict.empty
 
-type FormEvent k v r
-  = FeAction k r (Maybe v)
+type FormEvent k r
+  = FeAction k r
   | FeError String
   | FeNoop
 
 formState : comparable -> FormStore comparable v r -> FormState v r
 formState k = Maybe.withDefault FsViewing << Dict.get k
 
-formUiUpdate : FormUiEvent comparable v r -> FormStore comparable v r -> (FormStore comparable v r, FormEvent comparable v r)
+formUiUpdate : FormUiEvent comparable v r -> FormStore comparable v r -> (FormStore comparable v r, FormEvent comparable r)
 formUiUpdate (k, fue) fs = case fue of
     UfPartial v -> (Dict.insert k (FsEditing v) fs, FeNoop)
     UfAction r ->
@@ -63,7 +63,7 @@ formUiUpdate (k, fue) fs = case fue of
             FsEditing v -> (Just v, Nothing)
             FsPending r mv -> (mv, Just r)
       in case mr of
-        Nothing -> (Dict.insert k (FsPending r mv) fs, FeAction k r mv)
+        Nothing -> (Dict.insert k (FsPending r mv) fs, FeAction k r)
         Just oldR -> if r == oldR
           then (fs, FeNoop)
           else (fs, FeError "Already a pending action")

@@ -115,35 +115,29 @@ viewLayout joinPath dyn chosenKids h =
         LayoutLeaf p -> h p
   in go
 
-type LayoutEditEvent
+type LayoutEditEvent p
   = LeeRemove
-  | LeeSetDynamic
-  | LeeSetChooser
-  | LeeSetLeaf
-  | LeeAddLeaf
+  | LeeSetDynamic p
+  | LeeSetChooser p
+  | LeeSetLeaf p
+  | LeeAddLeaf p
 
 -- FIXME: Not happy with the LayoutEditEvent in this:
-type alias LayoutTargetEditor p = LayoutEditEvent -> Maybe p -> FormState p LayoutEditEvent -> Html (UnboundFui p LayoutEditEvent)
+type alias LayoutTargetEditor p
+   = (p -> LayoutEditEvent p) -> Maybe p -> FormState p (LayoutEditEvent p)
+  -> Html (UnboundFui p (LayoutEditEvent p))
 
-updateLayout : LayoutPath -> LayoutEditEvent -> Maybe p -> Layout p -> Result String (Layout p)
-updateLayout lp lee mp l = case lee of
+updateLayout : LayoutPath -> LayoutEditEvent p -> Layout p -> Result String (Layout p)
+updateLayout lp lee l = case lee of
     LeeRemove -> removeSubtree lp l
-    LeeSetChooser -> case mp of
-        Just p ->  updateLayoutPath (setChooser p) lp l
-        Nothing -> Err "No edit value"
-    LeeSetDynamic -> case mp of
-        Just p -> setLayout (LayoutDynamic p) lp l
-        Nothing -> Err "No edit value"
-    LeeSetLeaf -> case mp of
-        Just p -> setLeafBinding lp p l
-        Nothing -> Err "No edit value"
-    LeeAddLeaf -> case mp of
-        Just p -> addLeaf p lp l
-        Nothing -> Err "No edit value"
+    LeeSetChooser p -> updateLayoutPath (setChooser p) lp l
+    LeeSetDynamic p -> setLayout (LayoutDynamic p) lp l
+    LeeSetLeaf p -> setLeafBinding lp p l
+    LeeAddLeaf p -> addLeaf p lp l
 
 containerAddControls
-   : p -> LayoutTargetEditor p -> LayoutPath -> FormState p LayoutEditEvent
-  -> Html (FormUiEvent LayoutPath p LayoutEditEvent)
+   : p -> LayoutTargetEditor p -> LayoutPath -> FormState p (LayoutEditEvent p)
+  -> Html (FormUiEvent LayoutPath p (LayoutEditEvent p))
 containerAddControls editInitial lte lp les =
   let
     s = case les of
@@ -153,8 +147,8 @@ containerAddControls editInitial lte lp les =
   in Html.map (bindFui lp) <| lte LeeAddLeaf Nothing s
 
 viewEditLayout
-   : p -> LayoutTargetEditor p -> FormStore LayoutPath p LayoutEditEvent -> Layout p
-   -> Html (FormUiEvent LayoutPath p LayoutEditEvent)
+   : p -> LayoutTargetEditor p -> FormStore LayoutPath p (LayoutEditEvent p) -> Layout p
+   -> Html (FormUiEvent LayoutPath p (LayoutEditEvent p))
 viewEditLayout editInitial h fs =
   let
     go lp l =
