@@ -117,6 +117,7 @@ viewLayout joinPath dyn chosenKids h =
 
 type LayoutEditEvent p
   = LeeRemove
+  | LeeSubdivide
   | LeeSetDynamic p
   | LeeSetChooser p
   | LeeSetLeaf p
@@ -130,6 +131,7 @@ type alias LayoutTargetEditor p
 updateLayout : LayoutPath -> LayoutEditEvent p -> Layout p -> Result String (Layout p)
 updateLayout lp lee l = case lee of
     LeeRemove -> removeSubtree lp l
+    LeeSubdivide -> updateLayoutPath (Ok << LayoutContainer << Array.repeat 1) lp l
     LeeSetChooser p -> updateLayoutPath (setChooser p) lp l
     LeeSetDynamic p -> setLayout (LayoutDynamic p) lp l
     LeeSetLeaf p -> setLeafBinding lp p l
@@ -172,5 +174,6 @@ viewEditLayout editInitial h fs =
         layoutControls = if contained
             then Html.button [Hevt.onClick <| bindFui lp <| UfAct LeeRemove] [Html.text "Remove"] :: typeControls
             else typeControls
-      in Html.div [] <| layoutControls ++ [body]
+        alwaysControls = [Html.button [Hevt.onClick <| bindFui lp <| UfAct LeeSubdivide] [Html.text "Split"]]
+      in Html.div [] <| alwaysControls ++ layoutControls ++ [body]
   in go False []
