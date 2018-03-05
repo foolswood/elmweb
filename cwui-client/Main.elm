@@ -299,8 +299,12 @@ viewNode lib def maybeNode formState =
         (Html.map (mapNeeUf nc) << uncurry h)
         (maybeNode, formState)
   in case (lib, def) of
-    (Cannot, TupleDef d) -> viewCasted (castMaybe asConstDataNode) (viewConstTuple d) maybeNode
-    (_, TupleDef d) -> rcns NeConst asConstDataNode asNeConst <| viewConstNodeEdit d
+    (Cannot, TupleDef d) -> case .interpLim d of
+        ILUninterpolated -> viewCasted (castMaybe asConstDataNode) (viewConstTuple d) maybeNode
+        _ -> text "Time series view not implemented"
+    (_, TupleDef d) -> case .interpLim d of
+        ILUninterpolated -> rcns NeConst asConstDataNode asNeConst <| viewConstNodeEdit d
+        _ -> text "Time series edit not implemented"
     (_, StructDef d) -> text "Struct edit not implemented"
     (Cannot, ArrayDef d) -> rcns NeChildren asContainerNode asNeChildren <| viewArray d
     (_, ArrayDef d) -> text "Array edit not implemented"
