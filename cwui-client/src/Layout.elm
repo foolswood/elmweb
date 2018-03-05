@@ -151,20 +151,26 @@ viewEditLayout
    -> Html (FormUiEvent LayoutPath p (LayoutEditEvent p))
 viewEditLayout editInitial h fs =
   let
-    go lp l =
+    go contained lp l =
       let
         s = formState lp fs
-        body = case l of
-            LayoutContainer kids -> containerHtml <|
-                Array.push (containerAddControls editInitial h lp s) <| Array.indexedMap (\i -> go (lp ++ [i])) kids
-            LayoutChildChoice p kid -> Html.div []
-              [ Html.map (bindFui lp) <| h LeeSetChooser (Just p) s
-              , go (lp ++ [0]) kid
-              ]
-            LayoutDynamic p -> Html.map (bindFui lp) <| h LeeSetDynamic (Just p) s
-            LayoutLeaf p -> Html.map (bindFui lp) <| h LeeSetLeaf (Just p) s
-        removeButton = case lp of
-            [] -> Html.text "Layout wide controls here"
-            _ -> Html.button [Hevt.onClick <| bindFui lp <| UfAct LeeRemove] [Html.text "Remove"]
-      in Html.div [] [removeButton, body]
-  in go []
+        (typeControls, body) = case l of
+            LayoutContainer kids ->
+              let
+                c = [containerAddControls editInitial h lp s]
+                b = containerHtml <| Array.indexedMap (\i -> go True (lp ++ [i])) kids
+              in (c, b)
+            LayoutChildChoice p kid ->
+              let
+                b = Html.div []
+                  [ Html.map (bindFui lp) <| h LeeSetChooser (Just p) s
+                  , go False (lp ++ [0]) kid
+                  ]
+              in ([], b)
+            LayoutDynamic p -> ([], Html.map (bindFui lp) <| h LeeSetDynamic (Just p) s)
+            LayoutLeaf p -> ([], Html.map (bindFui lp) <| h LeeSetLeaf (Just p) s)
+        layoutControls = if contained
+            then Html.button [Hevt.onClick <| bindFui lp <| UfAct LeeRemove] [Html.text "Remove"] :: typeControls
+            else typeControls
+      in Html.div [] <| layoutControls ++ [body]
+  in go False []
