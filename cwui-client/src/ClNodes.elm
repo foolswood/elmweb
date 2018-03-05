@@ -33,6 +33,21 @@ type Node
   | TimeSeriesNode TimeSeriesNodeT
   | ContainerNode ContainerNodeT
 
+asConstDataNode : Node -> Result String ConstDataNodeT
+asConstDataNode n = case n of
+    ConstDataNode cn -> Ok cn
+    _ -> Err "Not a const node"
+
+asTimeSeriesNode : Node -> Result String TimeSeriesNodeT
+asTimeSeriesNode n = case n of
+    TimeSeriesNode tsn -> Ok tsn
+    _ -> Err "Not timeseries"
+
+asContainerNode : Node -> Result String ContainerNodeT
+asContainerNode n = case n of
+    ContainerNode cn -> Ok cn
+    _ -> Err "Not container"
+
 setConstData : List WireType -> ConstData -> Maybe Node -> Result String Node
 setConstData wts cd mn =
   let

@@ -281,25 +281,29 @@ viewPath fs types tyAssns nodes p = case Dict.get p tyAssns of
     Nothing -> text <| "Loading type info: " ++ p
     Just (tn, lib) -> case Dict.get tn types of
         Nothing -> text <| "Type missing from map: " ++ toString tn
-        Just ty -> case Dict.get p nodes of
-            Nothing -> text <| "No data for: " ++ p
-            Just n -> Html.map (bindFui p) <| viewNode lib ty n <| formState p fs
+        Just ty -> Html.map (bindFui p) <| viewNode lib ty (Dict.get p nodes) <| formState p fs
+
+viewCasted : (a -> Result String b) -> (b -> Html r) -> a -> Html r
+viewCasted c h a = case c a of
+    Ok b -> h b
+    Err m -> text m
 
 viewNode
-   : Liberty -> Definition -> Node
+   : Liberty -> Definition -> Maybe Node
    -> FormState NodeEdit (NodeEditEvent NodeEdit)
    -> Html (UnboundFui NodeEdit (NodeEditEvent NodeEdit))
-viewNode lib def node formState = case (lib, def, node) of
-    (Cannot, TupleDef d, ConstDataNode n) -> viewConstTuple (List.map Tuple.second <| .types d) (Just <| .values n)
-    (_, TupleDef d, ConstDataNode n) -> case castFormState asNeConst formState of
-        Ok s -> Html.map (mapNeeUf NeConst) <| viewConstNodeEdit d n s
-        Err msg -> text msg
-    (_, StructDef d, ContainerNode n) -> text "Struct edit not implemented"
-    (Cannot, ArrayDef d, ContainerNode n) -> case castFormState asNeChildren formState of
-        Ok s -> Html.map (mapNeeUf NeChildren) <| viewArray d (Just n) s
-        Err msg -> text msg
-    (_, ArrayDef d, ContainerNode n) -> text "Array edit not implemented"
-    _ -> text "Def/node type mismatch"
+viewNode lib def maybeNode formState =
+  let
+    rcns nc cn cfs h = viewCasted
+        (\(n, s) -> Result.map2 (,) (castMaybe cn n) (castFormState cfs s))
+        (Html.map (mapNeeUf nc) << uncurry h)
+        (maybeNode, formState)
+  in case (lib, def) of
+    (Cannot, TupleDef d) -> viewCasted (castMaybe asConstDataNode) (viewConstTuple d) maybeNode
+    (_, TupleDef d) -> rcns NeConst asConstDataNode asNeConst <| viewConstNodeEdit d
+    (_, StructDef d) -> text "Struct edit not implemented"
+    (Cannot, ArrayDef d) -> rcns NeChildren asContainerNode asNeChildren <| viewArray d
+    (_, ArrayDef d) -> text "Array edit not implemented"
 
 viewArray
    : ArrayDefinition
@@ -322,10 +326,13 @@ viewChildrenChoose segs chosen =
         False -> Html.li [onClick (seg, True)] [Html.text seg]
   in Html.ol [] <| List.map selWidget segs
 
-viewConstTuple : List AtomDef -> Maybe ConstData -> Html a
-viewConstTuple defs mv = case mv of
+viewConstTuple : TupleDefinition -> Maybe ConstDataNodeT -> Html a
+viewConstTuple td mn = case mn of
     Nothing -> text "Awaiting data"
-    Just (ma, vs) -> span [] <| List.map2 (viewAtom ma) defs vs
+    Just n -> span [] <| List.map2
+        (viewAtom <| Tuple.first <| .values n)
+        (List.map Tuple.second <| .types td)
+        (Tuple.second <| .values n)
 
 viewAtom : Maybe Attributee -> AtomDef -> WireValue -> Html a
 viewAtom ma def wv =
@@ -341,11 +348,10 @@ viewAtom ma def wv =
     ADRef ty -> castedView asString <| refViewer ty
     _ -> text <| "View not implemented: " ++ toString def
 
--- FIXME: Dodgy Just due to maybe not coming in here:
 viewConstNodeEdit
-   : TupleDefinition-> ConstDataNodeT -> FormState NeConstT (NodeEditEvent a)
+   : TupleDefinition-> Maybe ConstDataNodeT -> FormState NeConstT (NodeEditEvent a)
   -> Html (UnboundFui NeConstT (NodeEditEvent NeConstT))
-viewConstNodeEdit d n s = viewConstTupleEdit (List.map Tuple.second <| .types d) (Just <| Tuple.second <| .values n) s
+viewConstNodeEdit d mn s = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s
 
 viewConstTupleEdit
    : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT (NodeEditEvent a)
