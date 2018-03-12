@@ -13,6 +13,9 @@ type alias Time = (Int, Int)
 fromFloat : Float -> Time
 fromFloat ft = let s = floor ft in (s, round ((ft - toFloat s) * 2 ^ 32))
 
+fromTime : Time -> Float
+fromTime (s, f) = toFloat s + (toFloat f / 2.0 ^ 32)
+
 type Liberty
   = Cannot
   | May
