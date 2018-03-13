@@ -7,7 +7,7 @@ import Html.Events exposing (onInput, onClick)
 import Futility exposing (itemAtIndex, castMaybe, replaceIdx)
 import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, AtomDef(..), TupleDefinition)
 import EditTypes exposing (NodeEditEvent(..), NeConstT)
-import Form exposing (AtomEditState(..), castAes, UnboundFui(..), FormState(..))
+import Form exposing (AtomEditState(..), castAes, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 
 viewConstTuple : TupleDefinition -> Maybe ConstDataNodeT -> Html a
@@ -33,13 +33,13 @@ viewAtom ma def wv =
     _ -> text <| "View not implemented: " ++ toString def
 
 viewConstNodeEdit
-   : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT (NodeEditEvent a)
-  -> Html (UnboundFui NeConstT (NodeEditEvent NeConstT))
+   : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT
+  -> Html (NodeEditEvent NeConstT)
 viewConstNodeEdit d mn s = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s
 
 viewConstTupleEdit
-   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT (NodeEditEvent a)
-   -> Html (UnboundFui NeConstT (NodeEditEvent NeConstT))
+   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT
+   -> Html (NodeEditEvent NeConstT)
 viewConstTupleEdit defs mv s =
   let
     nDefs = List.length defs
@@ -52,15 +52,12 @@ viewConstTupleEdit defs mv s =
     (editBase, atomEditStates) = case s of
         FsViewing -> (current, List.repeat nDefs AesViewing)
         FsEditing mevs -> (mevs, List.map toAes mevs)
-        FsPending _ mmevs -> case mmevs of
-            Nothing -> (current, List.repeat nDefs AesViewing)
-            Just mevs -> (mevs, List.map toAes mevs)
-    asPartial idx wv = UfUpdate <| Result.withDefault editBase <| replaceIdx idx (Just wv) editBase
+    asPartial idx wv = NeeUpdate <| Result.withDefault editBase <| replaceIdx idx (Just wv) editBase
     atomEditor idx def mwv aes = Html.map (asPartial idx) <| viewAtomEdit def mwv aes
     atomEditors = List.map4 atomEditor (List.range 0 nDefs) defs current atomEditStates
     filledFields = List.filterMap identity editBase
     content = if List.length filledFields == List.length defs
-      then button [onClick <| UfAct <| NeeSubmit editBase] [text "Apply"] :: atomEditors
+      then button [onClick <| NeeSubmit editBase] [text "Apply"] :: atomEditors
       else atomEditors
   in span [] content
 

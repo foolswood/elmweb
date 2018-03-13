@@ -2,8 +2,6 @@ module Form exposing (..)
 
 import Dict exposing (Dict)
 
-import Futility exposing (castMaybe)
-
 type AtomEditState a
   = AesViewing
   | AesUnfilled
@@ -15,61 +13,24 @@ castAes c s = case s of
     AesUnfilled -> Ok AesUnfilled
     AesEditing v -> Result.map AesEditing <| c v
 
-type UnboundFui v r
-  = UfUpdate v
-  | UfAct r
-  | UfActUp r v
-
-mapUfui : (a -> b) -> (r -> s) -> UnboundFui a r -> UnboundFui b s
-mapUfui f g e = case e of
-    UfUpdate a -> UfUpdate <| f a
-    UfAct r -> UfAct <| g r
-    UfActUp r a -> UfActUp (g r) <| f a
-
-type alias FormUiEvent k v r = (k, UnboundFui v r)
-
-bindFui : k -> UnboundFui v r -> FormUiEvent k v r
-bindFui k e = (k, e)
-
-type FormState v r
+type FormState v
   = FsViewing
   | FsEditing v
-  | FsPending r (Maybe v)
 
-castFormState : (a -> Result String b) -> FormState a r -> Result String (FormState b r)
+castFormState : (a -> Result String b) -> FormState a -> Result String (FormState b)
 castFormState c f = case f of
     FsViewing -> Ok FsViewing
     FsEditing a -> Result.map FsEditing <| c a
-    FsPending r ma -> Result.map (FsPending r) <| castMaybe c ma
 
-type alias FormStore k v r = Dict k (FormState v r)
+type alias FormStore k v = Dict k (FormState v)
 
-formStoreEmpty : FormStore k v r
+formStoreEmpty : FormStore k v
 formStoreEmpty = Dict.empty
 
-type FormEvent k r
-  = FeAction k r
-  | FeError String
-  | FeNoop
-
-formState : comparable -> FormStore comparable v r -> FormState v r
+formState : comparable -> FormStore comparable v -> FormState v
 formState k = Maybe.withDefault FsViewing << Dict.get k
 
-formUiUpdate : FormUiEvent comparable v r -> FormStore comparable v r -> (FormStore comparable v r, FormEvent comparable r)
-formUiUpdate (k, fue) fs = case fue of
-    UfUpdate v -> (Dict.insert k (FsEditing v) fs, FeNoop)
-    UfAct r ->
-      let
-        (mv, mr) = case formState k fs of
-            FsViewing -> (Nothing, Nothing)
-            FsEditing v -> (Just v, Nothing)
-            FsPending r mv -> (mv, Just r)
-      in case mr of
-        Nothing -> (Dict.insert k (FsPending r mv) fs, FeAction k r)
-        Just oldR -> if r == oldR
-          then (fs, FeNoop)
-          else (fs, FeError "Already a pending action")
-    UfActUp r v -> formUiUpdate (bindFui k <| UfAct r) (Dict.insert k (FsEditing v) fs)
-
-formClear : comparable -> FormStore comparable v r -> FormStore comparable v r
-formClear = Dict.remove
+formUpdate : comparable -> Maybe v -> FormStore comparable v -> FormStore comparable v
+formUpdate k mv fs = case mv of
+    Just v -> Dict.insert k (FsEditing v) fs
+    Nothing -> Dict.remove k fs

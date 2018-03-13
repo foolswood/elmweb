@@ -17,7 +17,7 @@ import PathManipulation exposing (appendSeg)
 import RelayState exposing (..)
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEditEvent)
-import Form exposing (FormStore, formStoreEmpty, FormUiEvent, formClear, formUiUpdate, FormEvent(..), FormState(..), formState, UnboundFui(..), mapUfui, bindFui, castFormState)
+import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
 import TupleViews exposing (viewConstTuple, viewConstNodeEdit)
 import EditTypes exposing (NodeEdit(..), NodeEditEvent(..), NeChildrenT, asNeChildren, asNeConst, mapNee, NeChildState)
 
@@ -33,7 +33,7 @@ type UiMode
   = UmEdit
   | UmView
 
-type alias NodeFs = FormStore Path NodeEdit (NodeEditEvent NodeEdit)
+type alias NodeFs = FormStore Path NodeEdit
 
 type alias Model =
   -- Global:
@@ -41,7 +41,7 @@ type alias Model =
   , viewMode : UiMode
   -- Layout:
   , layout : Layout Path
-  , layoutFs : FormStore LayoutPath Path (LayoutEditEvent Path)
+  , layoutFs : FormStore LayoutPath Path
   -- Data:
   , subs : Set Path
   , types : TypeMap
@@ -51,7 +51,7 @@ type alias Model =
   }
 
 -- FIXME: Doesn't take edits into account
-picksSegs : Maybe (List Seg) -> FormState NeChildrenT r -> (NeChildrenT, List Seg)
+picksSegs : Maybe (List Seg) -> FormState NeChildrenT -> (NeChildrenT, List Seg)
 picksSegs mRemoteSegs s =
   let
     remoteSegs = Maybe.withDefault [] mRemoteSegs
@@ -61,9 +61,6 @@ picksSegs mRemoteSegs s =
     formStateVal = case s of
         FsViewing -> defaultPicks
         FsEditing v -> v
-        FsPending _ mv -> case mv of
-            Nothing -> defaultPicks
-            Just v -> v
   in (formStateVal, remoteSegs)
 
 
@@ -127,20 +124,14 @@ type Msg
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | TimeStamped (Time -> Cmd Msg) Time.Time
-  | LayoutUiEvent (FormUiEvent LayoutPath Path (LayoutEditEvent Path))
-  | NodeUiEvent (FormUiEvent Path NodeEdit (NodeEditEvent NodeEdit))
+  | LayoutUiEvent (LayoutPath, LayoutEditEvent Path)
+  | NodeUiEvent (Path, NodeEditEvent NodeEdit)
 
 timeStamped : (Time -> Cmd Msg) -> Cmd Msg
 timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 
 addGlobalError : String -> Model -> (Model, Cmd Msg)
 addGlobalError msg m = ({m | errs = (GlobalError, msg) :: .errs m}, Cmd.none)
-
-feHandler : Model -> FormEvent k r -> (k -> r -> (Model, Cmd Msg)) -> (Model, Cmd Msg)
-feHandler m fe submitHandler = case fe of
-    FeNoop -> (m, Cmd.none)
-    FeError msg -> addGlobalError msg m
-    FeAction k r -> submitHandler k r
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
@@ -155,27 +146,19 @@ update msg model = case msg of
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
-    LayoutUiEvent fue ->
-      let
-        (newLayoutFs, fe) = formUiUpdate fue <| .layoutFs model
-        newM = {model | layoutFs = newLayoutFs}
-      in feHandler newM fe <| \lp r -> case updateLayout lp r <| .layout model of
-        Err msg -> addGlobalError msg newM
-        Ok newLayout ->
+    LayoutUiEvent (p, ue) -> case updateLayout p ue (.layoutFs model) (.layout model) of
+        Err msg -> addGlobalError msg model
+        Ok (newFs, newLayout) ->
           let
-            editProcessedFs = formClear lp <| .layoutFs newM
-            subs = requiredPaths (.nodes newM) (.nodeFs newM) newLayout
-          in ({newM | layout = newLayout, layoutFs = editProcessedFs, subs = subs}, subDiffToCmd (.subs newM) subs)
-    NodeUiEvent fue ->
-      let
-        (newNodeFs, fe) = formUiUpdate fue <| .nodeFs model
-        newM = {model | nodeFs = newNodeFs}
-      in feHandler newM fe <| \p r -> case r of
-        NeeChildChoose ->
+            subs = requiredPaths (.nodes model) (.nodeFs model) newLayout
+          in ({model | layout = newLayout, layoutFs = newFs, subs = subs}, subDiffToCmd (.subs model) subs)
+    NodeUiEvent (p, ue) -> case ue of
+        NeeUpdate v ->
           let
-            subs = requiredPaths (.nodes newM) (.nodeFs newM) (.layout newM)
-          in ({newM | subs = subs}, subDiffToCmd (.subs newM) subs)
-        NeeSubmit v -> addGlobalError "Node edit not implemented" newM
+            newFs = formUpdate p (Just v) <| .nodeFs model
+            subs = requiredPaths (.nodes model) newFs (.layout model)
+          in ({model | nodeFs = newFs, subs = subs}, subDiffToCmd (.subs model) subs)
+        NeeSubmit v -> addGlobalError "Node edit not implemented" model
 
 -- Subscriptions
 
@@ -213,55 +196,42 @@ view m = div []
 viewErrors : List (ErrorIndex, String) -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text <| toString s]) errs)
 
-pathEditView : (Path -> r) -> Maybe Path -> FormState Path r -> Html (UnboundFui Path r)
-pathEditView r mp fs = case fs of
+pathEditView : (Path -> r) -> (Path -> r) -> Maybe Path -> FormState Path -> Html r
+pathEditView up act mp fs = case fs of
     FsViewing -> case mp of
         Nothing -> text "Attempting to view unfilled path"
-        Just p -> span [onClick <| UfUpdate p] [text p]
+        Just p -> span [onClick <| up p] [text p]
     FsEditing partial ->
       let
         buttonText = case mp of
             Nothing -> "Set"
             Just p -> "Replace " ++ p
       in Html.span []
-        [ button [onClick <| UfAct <| r partial] [text buttonText]
-        , input [value partial, type_ "text", onInput <| UfUpdate] []
+        [ button [onClick <| act partial] [text buttonText]
+        , input [value partial, type_ "text", onInput <| up] []
         ]
-    FsPending _ mPending ->
-      let
-        oldValStr = case mp of
-            Nothing -> ""
-            Just p -> p
-      in case mPending of
-        Nothing -> text "No pending, bad times"
-        Just pending -> span
-            [onClick <| UfUpdate pending]
-            [text <| oldValStr ++ " -> " ++ pending]
 
-viewPath : NodeFs -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (FormUiEvent Path NodeEdit (NodeEditEvent NodeEdit))
+viewPath : NodeFs -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (Path, NodeEditEvent NodeEdit)
 viewPath fs types tyAssns nodes p = case Dict.get p tyAssns of
     Nothing -> text <| "Loading type info: " ++ p
     Just (tn, lib) -> case Dict.get tn types of
         Nothing -> text <| "Type missing from map: " ++ toString tn
-        Just ty -> Html.map (bindFui p) <| viewNode lib ty (Dict.get p nodes) <| formState p fs
+        Just ty -> Html.map ((,) p) <| viewNode lib ty (Dict.get p nodes) <| formState p fs
 
 viewCasted : (a -> Result String b) -> (b -> Html r) -> a -> Html r
 viewCasted c h a = case c a of
     Ok b -> h b
     Err m -> text m
 
-mapNeeUf : (a -> b) -> UnboundFui a (NodeEditEvent a) -> UnboundFui b (NodeEditEvent b)
-mapNeeUf f = mapUfui f (mapNee f)
-
 viewNode
    : Liberty -> Definition -> Maybe Node
-   -> FormState NodeEdit (NodeEditEvent NodeEdit)
-   -> Html (UnboundFui NodeEdit (NodeEditEvent NodeEdit))
+   -> FormState NodeEdit
+   -> Html (NodeEditEvent NodeEdit)
 viewNode lib def maybeNode formState =
   let
     rcns nc cn cfs h = viewCasted
         (\(n, s) -> Result.map2 (,) (castMaybe cn n) (castFormState cfs s))
-        (Html.map (mapNeeUf nc) << uncurry h)
+        (Html.map (mapNee nc) << uncurry h)
         (maybeNode, formState)
   in case (lib, def) of
     (Cannot, TupleDef d) -> case .interpLim d of
@@ -276,15 +246,15 @@ viewNode lib def maybeNode formState =
 
 viewArray
    : ArrayDefinition
-  -> Maybe ContainerNodeT -> FormState NeChildrenT (NodeEditEvent a)
-  -> Html (UnboundFui NeChildrenT (NodeEditEvent NeChildrenT))
+  -> Maybe ContainerNodeT -> FormState NeChildrenT
+  -> Html (NodeEditEvent NeChildrenT)
 viewArray arrayDef mn s =
   let
     (picks, segs) = picksSegs mn s
     fillChoice seg isPicked mc = case mc of
         Nothing -> Just <| {chosen = isPicked, mod = Nothing}
         Just a -> Just <| {a | chosen = isPicked}
-    wrapChoice (seg, isPicked) = UfActUp NeeChildChoose <| Dict.update seg (fillChoice seg isPicked) picks
+    wrapChoice (seg, isPicked) = NeeUpdate <| Dict.update seg (fillChoice seg isPicked) picks
   in Html.map wrapChoice <| viewChildrenChoose segs <| Dict.map (always .chosen) picks
 
 viewChildrenChoose : List Seg -> Dict Seg Bool -> Html (Seg, Bool)

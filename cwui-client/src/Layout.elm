@@ -6,7 +6,7 @@ import Html exposing (Html)
 import Html.Events as Hevt
 
 import Futility exposing (updateIdx)
-import Form exposing (FormState(..), formState, FormStore, FormUiEvent, UnboundFui(..), bindFui, mapUfui, castFormState)
+import Form exposing (FormState(..), formState, FormStore, formUpdate)
 
 type alias LayoutPath = List Int
 
@@ -116,7 +116,8 @@ viewLayout joinPath dyn chosenKids h =
   in go
 
 type LayoutEditEvent p
-  = LeeRemove
+  = LeeUpdate p
+  | LeeRemove
   | LeeSubdivide
   | LeeSetDynamic p
   | LeeSetChooser p
@@ -125,36 +126,45 @@ type LayoutEditEvent p
 
 -- FIXME: Not happy with the LayoutEditEvent in this:
 type alias LayoutTargetEditor p
-   = (p -> LayoutEditEvent p) -> Maybe p -> FormState p (LayoutEditEvent p)
-  -> Html (UnboundFui p (LayoutEditEvent p))
+   = (p -> LayoutEditEvent p) -> (p -> LayoutEditEvent p)
+  -> Maybe p -> FormState p
+  -> Html (LayoutEditEvent p)
 
-updateLayout : LayoutPath -> LayoutEditEvent p -> Layout p -> Result String (Layout p)
-updateLayout lp lee l = case lee of
-    LeeRemove -> removeSubtree lp l
-    LeeSubdivide -> updateLayoutPath (Ok << LayoutContainer << Array.repeat 1) lp l
-    LeeSetChooser p -> updateLayoutPath (setChooser p) lp l
-    LeeSetDynamic p -> setLayout (LayoutDynamic p) lp l
-    LeeSetLeaf p -> setLeafBinding lp p l
-    LeeAddLeaf p -> addLeaf p lp l
+updateLayout
+   : LayoutPath -> LayoutEditEvent p
+  -> FormStore LayoutPath p -> Layout p
+  -> Result String (FormStore LayoutPath p, Layout p)
+updateLayout lp lee fs l =
+  let
+    (newState, rNewLayout) = case lee of
+        LeeUpdate p -> (Just p, Ok l)
+        LeeRemove -> (Nothing, removeSubtree lp l)
+        LeeSubdivide -> (Nothing, updateLayoutPath (Ok << LayoutContainer << Array.repeat 1) lp l)
+        LeeSetChooser p -> (Nothing, updateLayoutPath (setChooser p) lp l)
+        LeeSetDynamic p -> (Nothing, setLayout (LayoutDynamic p) lp l)
+        LeeSetLeaf p -> (Nothing, setLeafBinding lp p l)
+        LeeAddLeaf p -> (Nothing, addLeaf p lp l)
+    newFs = formUpdate lp newState fs
+  in Result.map ((,) newFs) rNewLayout
 
 containerAddControls
-   : p -> LayoutTargetEditor p -> LayoutPath -> FormState p (LayoutEditEvent p)
-  -> Html (FormUiEvent LayoutPath p (LayoutEditEvent p))
+   : p -> LayoutTargetEditor p -> LayoutPath -> FormState p
+  -> Html (LayoutPath, LayoutEditEvent p)
 containerAddControls editInitial lte lp les =
   let
     s = case les of
         FsViewing -> FsEditing editInitial
         FsEditing p -> FsEditing p
-        FsPending r mp -> FsPending r mp
-  in Html.map (bindFui lp) <| lte LeeAddLeaf Nothing s
+  in Html.map ((,) lp) <| lte LeeUpdate LeeAddLeaf Nothing s
 
 viewEditLayout
-   : p -> LayoutTargetEditor p -> FormStore LayoutPath p (LayoutEditEvent p) -> Layout p
-   -> Html (FormUiEvent LayoutPath p (LayoutEditEvent p))
+   : p -> LayoutTargetEditor p -> FormStore LayoutPath p -> Layout p
+   -> Html (LayoutPath, LayoutEditEvent p)
 viewEditLayout editInitial h fs =
   let
     go contained lp l =
       let
+        bindEvt = Html.map ((,) lp)
         s = formState lp fs
         (typeControls, body) = case l of
             LayoutContainer kids ->
@@ -165,15 +175,15 @@ viewEditLayout editInitial h fs =
             LayoutChildChoice p kid ->
               let
                 b = Html.div []
-                  [ Html.map (bindFui lp) <| h LeeSetChooser (Just p) s
+                  [ bindEvt <| h LeeUpdate LeeSetChooser (Just p) s
                   , go False (lp ++ [0]) kid
                   ]
               in ([], b)
-            LayoutDynamic p -> ([], Html.map (bindFui lp) <| h LeeSetDynamic (Just p) s)
-            LayoutLeaf p -> ([], Html.map (bindFui lp) <| h LeeSetLeaf (Just p) s)
+            LayoutDynamic p -> ([], bindEvt <| h LeeUpdate LeeSetDynamic (Just p) s)
+            LayoutLeaf p -> ([], bindEvt <| h LeeUpdate LeeSetLeaf (Just p) s)
         layoutControls = if contained
-            then Html.button [Hevt.onClick <| bindFui lp <| UfAct LeeRemove] [Html.text "Remove"] :: typeControls
+            then Html.button [Hevt.onClick <| (lp, LeeRemove)] [Html.text "Remove"] :: typeControls
             else typeControls
-        alwaysControls = [Html.button [Hevt.onClick <| bindFui lp <| UfAct LeeSubdivide] [Html.text "Split"]]
+        alwaysControls = [Html.button [Hevt.onClick <| (lp, LeeSubdivide)] [Html.text "Split"]]
       in Html.div [] <| alwaysControls ++ layoutControls ++ [body]
   in go False []

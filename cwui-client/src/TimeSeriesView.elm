@@ -38,6 +38,12 @@ type alias TsModel =
   , playheadPos : Time
   }
 
+type alias TimePointEdit =
+  { time : Time
+  , value : NeConstT
+  , interpolation : Interpolation
+  }
+
 exampleTimeSeries : TsModel
 exampleTimeSeries =
   { series =

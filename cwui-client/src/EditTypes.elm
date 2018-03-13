@@ -7,13 +7,13 @@ import ClTypes exposing (WireValue, Seg)
 type alias NeConstT = List (Maybe WireValue)
 
 type NodeEditEvent v
-  = NeeSubmit v
-  | NeeChildChoose
+  = NeeUpdate v
+  | NeeSubmit v
 
 mapNee : (a -> b) -> NodeEditEvent a -> NodeEditEvent b
 mapNee f e = case e of
+    NeeUpdate v -> NeeUpdate <| f v
     NeeSubmit v -> NeeSubmit <| f v
-    NeeChildChoose -> NeeChildChoose
 
 type NeChildMod
   = NcmPresentAfter Seg
