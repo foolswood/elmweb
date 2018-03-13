@@ -6,7 +6,7 @@ import Html.Events exposing (onInput, onClick)
 
 import Futility exposing (itemAtIndex, castMaybe, replaceIdx)
 import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, AtomDef(..), TupleDefinition)
-import EditTypes exposing (NodeEditEvent(..), NeConstT)
+import EditTypes exposing (EditEvent(..), NeConstT, NaConstT)
 import Form exposing (AtomEditState(..), castAes, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 
@@ -34,12 +34,12 @@ viewAtom ma def wv =
 
 viewConstNodeEdit
    : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT
-  -> Html (NodeEditEvent NeConstT)
+  -> Html (EditEvent NeConstT NaConstT)
 viewConstNodeEdit d mn s = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s
 
 viewConstTupleEdit
    : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT
-   -> Html (NodeEditEvent NeConstT)
+   -> Html (EditEvent NeConstT NaConstT)
 viewConstTupleEdit defs mv s =
   let
     nDefs = List.length defs
@@ -52,12 +52,12 @@ viewConstTupleEdit defs mv s =
     (editBase, atomEditStates) = case s of
         FsViewing -> (current, List.repeat nDefs AesViewing)
         FsEditing mevs -> (mevs, List.map toAes mevs)
-    asPartial idx wv = NeeUpdate <| Result.withDefault editBase <| replaceIdx idx (Just wv) editBase
+    asPartial idx wv = EeUpdate <| Result.withDefault editBase <| replaceIdx idx (Just wv) editBase
     atomEditor idx def mwv aes = Html.map (asPartial idx) <| viewAtomEdit def mwv aes
     atomEditors = List.map4 atomEditor (List.range 0 nDefs) defs current atomEditStates
     filledFields = List.filterMap identity editBase
     content = if List.length filledFields == List.length defs
-      then button [onClick <| NeeSubmit editBase] [text "Apply"] :: atomEditors
+      then button [onClick <| EeSubmit filledFields] [text "Apply"] :: atomEditors
       else atomEditors
   in span [] content
 

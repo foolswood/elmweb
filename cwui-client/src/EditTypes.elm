@@ -4,26 +4,23 @@ import Dict exposing (Dict)
 
 import ClTypes exposing (WireValue, Seg)
 
-type alias NeConstT = List (Maybe WireValue)
-
-type NodeEditEvent v
-  = NeeUpdate v
-  | NeeSubmit v
-
-mapNee : (a -> b) -> NodeEditEvent a -> NodeEditEvent b
-mapNee f e = case e of
-    NeeUpdate v -> NeeUpdate <| f v
-    NeeSubmit v -> NeeSubmit <| f v
-
 type NeChildMod
   = NcmPresentAfter Seg
   | NcmAbsent
+
+type alias NaConstT = List WireValue
+type alias NaChildrenT = Dict Seg NeChildMod
+
+type NodeActions
+  = NaConst NaConstT
+  | NaChildren NaChildrenT
 
 type alias NeChildState =
   { chosen : Bool
   , mod : Maybe NeChildMod
   }
 
+type alias NeConstT = List (Maybe WireValue)
 type alias NeChildrenT = Dict Seg NeChildState
 
 type NodeEdit
@@ -39,3 +36,12 @@ asNeChildren : NodeEdit -> Result String NeChildrenT
 asNeChildren edit = case edit of
     NeChildren e -> Ok e
     _ -> Err "Not NeChildren"
+
+type EditEvent es ss
+  = EeUpdate es
+  | EeSubmit ss
+
+mapEe : (a -> b) -> (c -> d) -> EditEvent a c -> EditEvent b d
+mapEe f g e = case e of
+    EeUpdate p -> EeUpdate <| f p
+    EeSubmit v -> EeSubmit <| g v
