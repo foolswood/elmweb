@@ -29,6 +29,7 @@ library
                      , clapi-hs
 
 executable cwui-server
+  ghc-options:       -threaded -rtsopts -with-rtsopts=-N -Wall
   hs-source-dirs:      app
   main-is:             Main.hs
   default-language:    Haskell2010
@@ -40,6 +41,7 @@ executable cwui-server
                      , websockets
 
 executable example-provider
+  ghc-options:       -threaded -rtsopts -with-rtsopts=-N -Wall
   hs-source-dirs:      example-provider
   main-is:             Main.hs
   default-language:    Haskell2010
