@@ -72,6 +72,11 @@ type WireValue
   | WvString String
   | WvList (List WireValue)
 
+asTime : WireValue -> Result String Time
+asTime wv = case wv of
+    WvTime t -> Ok t
+    _ -> Err "Not a Time"
+
 asWord8 : WireValue -> Result String Int
 asWord8 wv = case wv of
     WvWord8 i -> Ok i
