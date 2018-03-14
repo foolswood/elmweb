@@ -16,7 +16,7 @@ import Futility exposing (..)
 import PathManipulation exposing (appendSeg)
 import RelayState exposing (..)
 import MonoTime
-import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEditEvent)
+import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
 import TupleViews exposing (viewConstTuple, viewConstNodeEdit)
 import EditTypes exposing (NodeEdit(..), EditEvent(..), NeChildrenT, asNeChildren, asNeConst, mapEe, NeChildState, NodeActions(..), NaChildrenT)
@@ -124,7 +124,7 @@ type Msg
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | TimeStamped (Time -> Cmd Msg) Time.Time
-  | LayoutUiEvent (LayoutPath, LayoutEditEvent Path)
+  | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path))
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
 
 timeStamped : (Time -> Cmd Msg) -> Cmd Msg
@@ -196,19 +196,19 @@ view m = div []
 viewErrors : List (ErrorIndex, String) -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text <| toString s]) errs)
 
-pathEditView : (Path -> r) -> (Path -> r) -> Maybe Path -> FormState Path -> Html r
-pathEditView up act mp fs = case fs of
+pathEditView : Maybe Path -> FormState Path -> Html (EditEvent Path Path)
+pathEditView mp fs = case fs of
     FsViewing -> case mp of
         Nothing -> text "Attempting to view unfilled path"
-        Just p -> span [onClick <| up p] [text p]
+        Just p -> span [onClick <| EeUpdate p] [text p]
     FsEditing partial ->
       let
         buttonText = case mp of
             Nothing -> "Set"
             Just p -> "Replace " ++ p
       in Html.span []
-        [ button [onClick <| act partial] [text buttonText]
-        , input [value partial, type_ "text", onInput <| up] []
+        [ button [onClick <| EeSubmit partial] [text buttonText]
+        , input [value partial, type_ "text", onInput EeUpdate] []
         ]
 
 viewPath : NodeFs -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
