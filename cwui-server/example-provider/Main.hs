@@ -79,6 +79,7 @@ fwdProviderProto = waitThen fwd rev
         sendRev $ Trpd d
         fwdProviderProto
 
+-- Convert a time to a number of microseconds
 usTime :: Time -> Int
 usTime (Time s f) = fromIntegral $ (s * 1000000) + (fromIntegral $ f * (1000000 `div` 2^32))
 
