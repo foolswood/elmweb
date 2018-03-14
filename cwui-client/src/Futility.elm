@@ -44,3 +44,8 @@ castMaybe : (a -> Result String b) -> Maybe a -> Result String (Maybe b)
 castMaybe c m = case m of
     Nothing -> Ok Nothing
     Just v -> Result.map Just <| c v
+
+type alias Conv outer inner =
+  { wrap : (inner -> outer)
+  , unwrap : (outer -> Result String inner)
+  }

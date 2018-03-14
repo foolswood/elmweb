@@ -2,6 +2,7 @@ module ClNodes exposing (..)
 
 import Dict exposing (Dict)
 
+import Futility exposing (Conv)
 import SequenceOps exposing (SeqOp, applySeqOps)
 import ClTypes exposing (Seg, Attributee, WireValue, WireType, TpId, Time, Interpolation)
 
@@ -33,20 +34,29 @@ type Node
   | TimeSeriesNode TimeSeriesNodeT
   | ContainerNode ContainerNodeT
 
-asConstDataNode : Node -> Result String ConstDataNodeT
-asConstDataNode n = case n of
-    ConstDataNode cn -> Ok cn
-    _ -> Err "Not a const node"
+constNodeConv : Conv Node ConstDataNodeT
+constNodeConv =
+  let
+    asConstDataNode n = case n of
+        ConstDataNode cn -> Ok cn
+        _ -> Err "Not a const node"
+  in {wrap = ConstDataNode, unwrap = asConstDataNode}
 
-asTimeSeriesNode : Node -> Result String TimeSeriesNodeT
-asTimeSeriesNode n = case n of
-    TimeSeriesNode tsn -> Ok tsn
-    _ -> Err "Not timeseries"
+timeseriesNodeConv : Conv Node TimeSeriesNodeT
+timeseriesNodeConv =
+  let
+    asTimeSeriesNode n = case n of
+        TimeSeriesNode tsn -> Ok tsn
+        _ -> Err "Not timeseries"
+  in {wrap = TimeSeriesNode, unwrap = asTimeSeriesNode}
 
-asContainerNode : Node -> Result String ContainerNodeT
-asContainerNode n = case n of
-    ContainerNode cn -> Ok cn
-    _ -> Err "Not container"
+childrenNodeConv : Conv Node ContainerNodeT
+childrenNodeConv =
+  let
+    asContainerNode n = case n of
+        ContainerNode cn -> Ok cn
+        _ -> Err "Not container"
+  in {wrap = ContainerNode, unwrap = asContainerNode}
 
 setConstData : List WireType -> ConstData -> Maybe Node -> Result String Node
 setConstData wts cd mn =

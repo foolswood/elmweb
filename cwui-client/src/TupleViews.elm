@@ -33,14 +33,14 @@ viewAtom ma def wv =
     _ -> text <| "View not implemented: " ++ toString def
 
 viewConstNodeEdit
-   : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT
+   : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
   -> Html (EditEvent NeConstT NaConstT)
-viewConstNodeEdit d mn s = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s
+viewConstNodeEdit d mn s mp = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s mp
 
 viewConstTupleEdit
-   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT
+   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT -> Maybe (List WireValue)
    -> Html (EditEvent NeConstT NaConstT)
-viewConstTupleEdit defs mv s =
+viewConstTupleEdit defs mv s mp =
   let
     nDefs = List.length defs
     current = case mv of
@@ -56,7 +56,9 @@ viewConstTupleEdit defs mv s =
     atomEditor idx def mwv aes = Html.map (asPartial idx) <| viewAtomEdit def mwv aes
     atomEditors = List.map4 atomEditor (List.range 0 nDefs) defs current atomEditStates
     filledFields = List.filterMap identity editBase
-    content = if List.length filledFields == List.length defs
+    allFilled = List.length filledFields == List.length defs
+    asPending = Just filledFields == mp
+    content = if allFilled && not asPending
       then button [onClick <| EeSubmit filledFields] [text "Apply"] :: atomEditors
       else atomEditors
   in span [] content

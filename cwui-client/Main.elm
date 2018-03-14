@@ -19,7 +19,7 @@ import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
 import TupleViews exposing (viewConstTuple, viewConstNodeEdit)
-import EditTypes exposing (NodeEdit(..), EditEvent(..), NeChildrenT, asNeChildren, asNeConst, mapEe, NeChildState, NodeActions(..), NaChildrenT)
+import EditTypes exposing (NodeEdit, EditEvent(..), NeChildrenT, mapEe, NeChildState, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -35,6 +35,8 @@ type UiMode
 
 type alias NodeFs = FormStore Path NodeEdit
 
+type alias Pending = Dict Path NodeActions
+
 type alias Model =
   -- Global:
   { errs : List (ErrorIndex, String)
@@ -48,6 +50,7 @@ type alias Model =
   , tyAssns : TypeAssignMap
   , nodes : NodeMap
   , nodeFs : NodeFs
+  , pending : Pending
   }
 
 -- FIXME: Doesn't take edits into account
@@ -72,7 +75,7 @@ chosenChildPaths nm fs p =
         Just n -> case n of
             ContainerNode segs -> Just segs
             _ -> Nothing
-  in case castFormState asNeChildren <| formState p fs of
+  in case castFormState (.unwrap childrenNeConv) <| formState p fs of
         Ok neFs ->
           let
             (picks, segs) = picksSegs mChildSegs neFs
@@ -100,6 +103,7 @@ init =
       , tyAssns = Dict.empty
       , nodes = initialNodes
       , nodeFs = initialNodeFs
+      , pending = Dict.empty
       }
   in (initialModel, subDiffToCmd Set.empty initialSubs)
 
@@ -189,7 +193,7 @@ view m = div []
         (++)
         (dynamicLayout <| .nodes m)
         (chosenChildPaths (.nodes m) (.nodeFs m))
-        (viewPath (.nodeFs m) (.types m) (.tyAssns m) (.nodes m))
+        (viewPath (.nodeFs m) (.types m) (.tyAssns m) (.nodes m) (.pending m))
         (.layout m)
   ]
 
@@ -211,12 +215,12 @@ pathEditView mp fs = case fs of
         , input [value partial, type_ "text", onInput EeUpdate] []
         ]
 
-viewPath : NodeFs -> TypeMap -> TypeAssignMap -> NodeMap -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
-viewPath fs types tyAssns nodes p = case Dict.get p tyAssns of
+viewPath : NodeFs -> TypeMap -> TypeAssignMap -> NodeMap -> Pending -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
+viewPath fs types tyAssns nodes pending p = case Dict.get p tyAssns of
     Nothing -> text <| "Loading type info: " ++ p
     Just (tn, lib) -> case Dict.get tn types of
         Nothing -> text <| "Type missing from map: " ++ toString tn
-        Just ty -> Html.map ((,) p) <| viewNode lib ty (Dict.get p nodes) <| formState p fs
+        Just ty -> Html.map ((,) p) <| viewNode lib ty (Dict.get p nodes) (formState p fs) (Dict.get p pending)
 
 viewCasted : (a -> Result String b) -> (b -> Html r) -> a -> Html r
 viewCasted c h a = case c a of
@@ -225,30 +229,30 @@ viewCasted c h a = case c a of
 
 viewNode
    : Liberty -> Definition -> Maybe Node
-   -> FormState NodeEdit
+   -> FormState NodeEdit -> Maybe NodeActions
    -> Html (EditEvent NodeEdit NodeActions)
-viewNode lib def maybeNode formState =
+viewNode lib def maybeNode formState maybeNas =
   let
-    rcns nc na cn cfs h = viewCasted
-        (\(n, s) -> Result.map2 (,) (castMaybe cn n) (castFormState cfs s))
-        (Html.map (mapEe nc na) << uncurry h)
-        (maybeNode, formState)
+    rcns neConv naConv cn h = viewCasted
+        (\(n, s, a) -> Result.map3 (,,) (castMaybe cn n) (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
+        (\(mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h mn fs mp)
+        (maybeNode, formState, maybeNas)
   in case (lib, def) of
     (Cannot, TupleDef d) -> case .interpLim d of
-        ILUninterpolated -> viewCasted (castMaybe asConstDataNode) (viewConstTuple d) maybeNode
+        ILUninterpolated -> viewCasted (castMaybe <| .unwrap constNodeConv) (viewConstTuple d) maybeNode
         _ -> text "Time series view not implemented"
     (_, TupleDef d) -> case .interpLim d of
-        ILUninterpolated -> rcns NeConst NaConst asConstDataNode asNeConst <| viewConstNodeEdit d
+        ILUninterpolated -> rcns constNeConv constNaConv (.unwrap constNodeConv) <| viewConstNodeEdit d
         _ -> text "Time series edit not implemented"
     (_, StructDef d) -> text "Struct edit not implemented"
-    (Cannot, ArrayDef d) -> rcns NeChildren NaChildren asContainerNode asNeChildren <| viewArray d
+    (Cannot, ArrayDef d) -> rcns childrenNeConv childrenNaConv (.unwrap childrenNodeConv) <| viewArray d
     (_, ArrayDef d) -> text "Array edit not implemented"
 
 viewArray
    : ArrayDefinition
-  -> Maybe ContainerNodeT -> FormState NeChildrenT
+  -> Maybe ContainerNodeT -> FormState NeChildrenT -> Maybe NaChildrenT
   -> Html (EditEvent NeChildrenT NaChildrenT)
-viewArray arrayDef mn s =
+viewArray arrayDef mn s mp =
   let
     (picks, segs) = picksSegs mn s
     fillChoice seg isPicked mc = case mc of
