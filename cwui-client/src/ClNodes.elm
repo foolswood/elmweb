@@ -26,7 +26,11 @@ type alias TimeSeriesNodeT =
   , values : TimeSeries TimePoint
   }
 
-type alias ContainerNodeT = List Seg
+type alias ContaineeT =
+  { seg : Seg
+  , attributee : Maybe Attributee
+  }
+type alias ContainerNodeT = List ContaineeT
 
 type Node
   = ConstDataNode ConstDataNodeT
@@ -106,7 +110,10 @@ removeTimePoint tpid ma mn = case mn of
 
 -- FIXME: No attributee
 childUpdate : Dict Seg (SeqOp Seg) -> Maybe Node -> Result String Node
-childUpdate ops mn = Result.map ContainerNode <| case mn of
+childUpdate ops mn =
+  let
+    asContainee = List.map (flip ContaineeT Nothing)
+  in Result.map (ContainerNode << asContainee) <| case mn of
     Nothing -> applySeqOps ops []
-    Just (ContainerNode kids) -> applySeqOps ops kids
+    Just (ContainerNode kids) -> applySeqOps ops <| List.map .seg kids
     _ -> Err "Child present applied to non-container"

@@ -54,17 +54,18 @@ type alias Model =
   }
 
 -- FIXME: Doesn't take edits into account
-picksSegs : Maybe (List Seg) -> FormState NeChildrenT -> (NeChildrenT, List Seg)
-picksSegs mRemoteSegs s =
+picksSegs : Maybe (List ContaineeT) -> FormState NeChildrenT -> (NeChildrenT, List Seg)
+picksSegs mContainees s =
   let
-    remoteSegs = Maybe.withDefault [] mRemoteSegs
-    defaultPicks = case remoteSegs of
+    containees = Maybe.withDefault [] mContainees
+    segs = List.map .seg containees
+    defaultPicks = case segs of
         (s :: _) -> Dict.singleton s <| NeChildState True Nothing
         [] -> Dict.empty
     formStateVal = case s of
         FsViewing -> defaultPicks
         FsEditing v -> v
-  in (formStateVal, remoteSegs)
+  in (formStateVal, segs)
 
 
 chosenChildPaths : NodeMap -> NodeFs -> Path -> Array Path
@@ -180,7 +181,7 @@ dynamicLayout : NodeMap -> Path -> Layout Path
 dynamicLayout nm p = case Dict.get p nm of
     Nothing -> LayoutLeaf p
     Just n -> case n of
-        ContainerNode segs -> LayoutContainer <| Array.map (\seg -> dynamicLayout nm (p ++ "/" ++ seg)) <| Array.fromList segs
+        ContainerNode segs -> LayoutContainer <| Array.map (\seg -> dynamicLayout nm (p ++ "/" ++ seg)) <| Array.fromList <| List.map .seg segs
         _ -> LayoutLeaf p
 
 view : Model -> Html Msg
