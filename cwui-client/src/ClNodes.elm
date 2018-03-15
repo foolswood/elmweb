@@ -24,7 +24,6 @@ type alias ConstDataNodeT =
 type alias TimeSeriesNodeT =
   { types : List WireType
   , values : TimeSeries TimePoint
-  , removed : Dict TpId (Maybe Attributee)
   }
 
 type alias ContainerNodeT = List Seg
@@ -86,7 +85,6 @@ setTimePoint wts tpid t ma wvs i mn =
     Nothing -> Ok <| TimeSeriesNode
         { types = wts
         , values = Dict.singleton tpid tp
-        , removed = Dict.empty
         }
     Just n -> case n of
         TimeSeriesNode tsn ->
@@ -103,7 +101,6 @@ removeTimePoint tpid ma mn = case mn of
         TimeSeriesNode tsn -> Ok <| TimeSeriesNode
           { tsn
           | values = Dict.remove tpid <| .values tsn
-          , removed = Dict.insert tpid ma <| .removed tsn
           }
         _ -> Err "Attempted to remove timepoint from non-series"
 
