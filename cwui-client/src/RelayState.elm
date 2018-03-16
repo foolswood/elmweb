@@ -3,25 +3,14 @@ module RelayState exposing (TypeMap, TypeAssignMap, NodeMap, handleFromRelayBund
 import Dict exposing (Dict)
 
 import Futility exposing (dropKeys)
-import ClTypes exposing (Definition, TypeName, Liberty, Path, Seg, TpId)
+import ClTypes exposing (Definition, TypeName, Liberty, Path, Seg, TpId, Interpolation, Time, Attributee, WireValue, WireType)
 import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath, ErrorIndex(..), MsgError(..))
-import ClNodes exposing (Node, childUpdate, removeTimePoint, setTimePoint, setConstData)
+import ClNodes exposing (Node, childUpdate, removeTimePoint, setTimePoint, setConstData, TimePoint, TimeSeriesNodeT)
 import SequenceOps exposing (SeqOp(..))
 
 type alias TypeMap = Dict TypeName Definition
 type alias TypeAssignMap = Dict Path (TypeName, Liberty)
 type alias NodeMap = Dict Path Node
-
-handleDataUpdateMsg : DataUpdateMsg -> Maybe Node -> Result (Maybe TpId, String) Node
-handleDataUpdateMsg dum = case dum of
-    MsgConstSet {msgTypes, msgArgs, msgAttributee} -> Result.mapError (\s -> (Nothing, s)) <<
-        setConstData msgTypes (msgAttributee, msgArgs)
-    (MsgSet
-      { msgTpId, msgTime, msgTypes, msgArgs, msgInterpolation
-      , msgAttributee}) -> Result.mapError (\s -> (Just msgTpId, s)) <<
-        setTimePoint msgTypes msgTpId msgTime msgAttributee msgArgs msgInterpolation
-    (MsgRemove {msgTpId, msgAttributee}) -> Result.mapError (\s -> (Just msgTpId, s)) <<
-        removeTimePoint msgTpId msgAttributee
 
 failyUpdate
    : (Maybe a -> Result e a) -> comparable
@@ -31,11 +20,66 @@ failyUpdate f k (es, d) = case f <| Dict.get k d of
     Ok v -> (es, Dict.insert k v d)
     Err e -> ((k, e) :: es, d)
 
+type TimeSeriesDataOp
+  = OpSet Time (List WireType) (List WireValue) Interpolation
+  | OpRemove
+
+type alias TimeChangeT = Dict TpId (Maybe Attributee, TimeSeriesDataOp)
+
+type DataChange
+  = ConstChange (Maybe Attributee) (List WireType) (List WireValue)
+  | TimeChange TimeChangeT
+
+type alias DataDigest = Dict Path DataChange
+
+digestDum : DataUpdateMsg -> DataDigest -> DataDigest
+digestDum dum =
+  let
+    insertTs tpid ma tso mv = Just <| TimeChange <| case mv of
+        Just (TimeChange d) -> Dict.insert tpid (ma, tso) d
+        _ -> Dict.singleton tpid (ma, tso)
+    up mv = case dum of
+        MsgConstSet {msgTypes, msgArgs, msgAttributee} ->
+            Just <| ConstChange msgAttributee msgTypes msgArgs
+        MsgSet {msgTpId, msgTime, msgTypes, msgArgs, msgInterpolation, msgAttributee} ->
+          let
+            atp = OpSet msgTime msgTypes msgArgs msgInterpolation
+          in insertTs msgTpId msgAttributee atp mv
+        MsgRemove {msgTpId, msgAttributee} ->
+            insertTs msgTpId msgAttributee OpRemove mv
+  in Dict.update (dumPath dum) up
+
+digestDums : List DataUpdateMsg -> DataDigest
+digestDums = List.foldl digestDum Dict.empty
+
+ddApply : DataDigest -> NodeMap -> (List (Path, (Maybe TpId, String)), NodeMap)
+ddApply dd nodeMap =
+  let
+    tcApply tpId (ma, tso) (errs, mn) =
+      let
+        r = case tso of
+            OpSet t wts wvs i -> setTimePoint wts tpId t ma wvs i mn
+            OpRemove -> removeTimePoint tpId ma mn
+      in case r of
+            Ok n -> (errs, Just n)
+            Err msg -> ((tpId, msg) :: errs, mn)
+    -- FIXME: Cleaner with failyUpdate?
+    dcApply p dc (errs, nm) =
+      let
+        mn = Dict.get p nm
+      in case dc of
+        ConstChange ma wts wvs -> case setConstData wts (ma, wvs) mn of
+            Ok newN -> (errs, Dict.insert p newN nm)
+            Err msg -> ((p, (Nothing, msg)) :: errs, nm)
+        TimeChange d ->
+          let
+            (tpErrs, newMn) = Dict.foldl tcApply ([], mn) d
+            newErrs = List.map (\(tpId, msg) -> (p, (Just tpId, msg))) tpErrs ++ errs
+          in (newErrs, Dict.update p (\_ -> newMn) nm)
+  in Dict.foldl dcApply ([], nodeMap) dd
+
 handleDums : List DataUpdateMsg -> NodeMap -> (List (Path, (Maybe TpId, String)), NodeMap)
-handleDums dums nodeMap = List.foldl
-    (\dum -> failyUpdate (handleDataUpdateMsg dum) (dumPath dum))
-    ([], nodeMap)
-    dums
+handleDums dums nodeMap = ddApply (digestDums dums) nodeMap
 
 -- FIXME: Drops attributee
 digestCms : List ContainerUpdateMsg -> Dict Path (Dict Seg (SeqOp Seg))
