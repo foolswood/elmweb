@@ -108,11 +108,12 @@ removeTimePoint tpid ma mn = case mn of
           }
         _ -> Err "Attempted to remove timepoint from non-series"
 
--- FIXME: No attributee
-childUpdate : Dict Seg (SeqOp Seg) -> Maybe Node -> Result String Node
-childUpdate ops mn =
+-- FIXME: Drops attributee
+childUpdate : Dict Seg (Maybe Attributee, SeqOp Seg) -> Maybe Node -> Result String Node
+childUpdate attOps mn =
   let
     asContainee = List.map (flip ContaineeT Nothing)
+    ops = Dict.map (always Tuple.second) attOps
   in Result.map (ContainerNode << asContainee) <| case mn of
     Nothing -> applySeqOps ops []
     Just (ContainerNode kids) -> applySeqOps ops <| List.map .seg kids

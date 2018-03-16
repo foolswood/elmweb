@@ -91,8 +91,15 @@ ddApply dd nodeMap =
 handleDums : List DataUpdateMsg -> NodeMap -> (List (Path, (Maybe TpId, String)), NodeMap)
 handleDums dums nodeMap = ddApply (digestDums dums) nodeMap
 
--- FIXME: Drops attributee
-digestCms : List ContainerUpdateMsg -> Dict Path (Dict Seg (SeqOp Seg))
+type alias CmDigest = Dict Path (Dict Seg (Maybe Attributee, SeqOp Seg))
+
+cmUnion : CmDigest -> CmDigest -> CmDigest
+cmUnion cmA cmB =
+  let
+    combine k a b = Dict.insert k <| Dict.union a b
+  in Dict.merge Dict.insert combine Dict.insert cmA cmB Dict.empty
+
+digestCms : List ContainerUpdateMsg -> CmDigest
 digestCms =
   let
     wedgeIn k v md = Just <| case md of
@@ -100,9 +107,9 @@ digestCms =
         Just d -> Dict.insert k v d
     digestCm cm = case cm of
         MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} ->
-            Dict.update msgPath (wedgeIn msgTgt <| SoPresentAfter msgRef)
+            Dict.update msgPath <| wedgeIn msgTgt (msgAttributee, SoPresentAfter msgRef)
         MsgAbsent {msgPath, msgTgt, msgAttributee} ->
-            Dict.update msgPath (wedgeIn msgTgt <| SoAbsent)
+            Dict.update msgPath <| wedgeIn msgTgt (msgAttributee, SoAbsent)
   in List.foldl digestCm Dict.empty
 
 handleCms : List ContainerUpdateMsg -> NodeMap -> (List (Path, String), NodeMap)
