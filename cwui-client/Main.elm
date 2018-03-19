@@ -7,6 +7,7 @@ import Html.Events exposing (onInput, onClick)
 import Time
 import Task
 import WebSocket
+import Process
 
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
@@ -41,10 +42,12 @@ type alias Model =
   -- Global:
   { errs : List (ErrorIndex, String)
   , viewMode : UiMode
+  , keepRecent : Float
   -- Layout:
   , layout : Layout Path
   , layoutFs : FormStore LayoutPath Path
   -- Data:
+  , recent : List Digest
   , subs : Set Path
   , types : TypeMap
   , tyAssns : TypeAssignMap
@@ -97,8 +100,10 @@ init =
     initialModel =
       { errs = []
       , viewMode = UmEdit
+      , keepRecent = 0.0
       , layout = initialLayout
       , layoutFs = formStoreEmpty
+      , recent = []
       , subs = initialSubs
       , types = Dict.empty
       , tyAssns = Dict.empty
@@ -128,6 +133,7 @@ type Msg
   = AddError ErrorIndex String
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
+  | FoldRecent
   | TimeStamped (Time -> Cmd Msg) Time.Time
   | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path))
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
@@ -138,15 +144,32 @@ timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 addGlobalError : String -> Model -> (Model, Cmd Msg)
 addGlobalError msg m = ({m | errs = (GlobalError, msg) :: .errs m}, Cmd.none)
 
+queueFold : Float -> Cmd Msg
+queueFold delay = Task.perform (always FoldRecent) <| Process.sleep delay
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
     AddError idx msg -> ({model | errs = (idx, msg) :: .errs model}, Cmd.none)
-    NetworkEvent b ->
-      let
-        (newNodes, newAssns, newTypes, errs) = handleFromRelayBundle b (.nodes model) (.tyAssns model) (.types model)
-        subs = requiredPaths newNodes (.nodeFs model) (.layout model)
-      in
-        ({model | nodes = newNodes, tyAssns = newAssns, types = newTypes, errs = errs ++ .errs model, subs = subs}, subDiffToCmd (.subs model) subs)
+    NetworkEvent b -> ({model | recent = .recent model ++ [digest b]}, queueFold <| .keepRecent model)
+    FoldRecent ->
+        case .recent model of
+            (d :: remaining) ->
+              let
+                (newNodes, newAssns, newTypes, errs) = applyDigest
+                    d (.nodes model) (.tyAssns model) (.types model)
+                subs = requiredPaths newNodes (.nodeFs model) (.layout model)
+                newM =
+                  { model
+                  | nodes = newNodes
+                  , tyAssns = newAssns
+                  , types = newTypes
+                  , errs = errs ++ .errs model
+                  , subs = subs
+                  , recent = remaining
+                  }
+              in
+                (newM, subDiffToCmd (.subs model) subs)
+            [] -> addGlobalError "Tried to fold but no recent" model
     TimeStamped c t -> (model, c (fromFloat t))
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
