@@ -1,17 +1,14 @@
-module RelayState exposing (TypeMap, TypeAssignMap, NodeMap, Digest, digest, applyDigest)
+module Digests exposing (Digest, digest, applyDigest, digestUnion, digestEmpty)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
 
 import Futility exposing (dropKeysSet)
-import ClTypes exposing (Definition, TypeName, Liberty, Path, Seg, TpId, Interpolation, Time, Attributee, WireValue, WireType)
+import ClTypes exposing (TypeName, Path, Seg, TpId, Interpolation, Time, Attributee, WireValue, WireType)
 import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath, ErrorIndex(..), MsgError(..))
-import ClNodes exposing (Node, childUpdate, removeTimePoint, setTimePoint, setConstData, TimePoint, TimeSeriesNodeT)
+import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData, TimePoint, TimeSeriesNodeT)
 import SequenceOps exposing (SeqOp(..))
-
-type alias TypeMap = Dict TypeName Definition
-type alias TypeAssignMap = Dict Path (TypeName, Liberty)
-type alias NodeMap = Dict Path Node
+import RemoteState exposing (RemoteState, NodeMap, TypeMap, TypeAssignMap)
 
 failyUpdate
    : (Maybe a -> Result e a) -> comparable
@@ -153,12 +150,12 @@ digest (FromRelayClientBundle typeUnsubs dataUnsubs errMsgs dms tms dums cms) =
   , errs = List.map (\(MsgError idx s) -> (idx, s)) errMsgs
   }
 
-applyDigest : Digest -> NodeMap -> TypeAssignMap -> TypeMap -> (NodeMap, TypeAssignMap, TypeMap, List (ErrorIndex, String))
-applyDigest d nm tam tm =
+applyDigest : Digest -> RemoteState -> (RemoteState, List (ErrorIndex, String))
+applyDigest d rs =
   let
-    newTm = Dict.union (.defs d) <| dropKeysSet (.typeUnsubs d) tm
-    newTam = Dict.union (.tyAssns d) <| dropKeysSet (.dataUnsubs d) tam
-    (dataErrs, dataAppliedNm) = ddApply (.dops d) nm
+    newTm = Dict.union (.defs d) <| dropKeysSet (.typeUnsubs d) <| .types rs
+    newTam = Dict.union (.tyAssns d) <| dropKeysSet (.dataUnsubs d) <| .tyAssns rs
+    (dataErrs, dataAppliedNm) = ddApply (.dops d) <| .nodes rs
     (contErrs, newNm) = applyCms (.cops d) dataAppliedNm
     indexDumErr (p, (mTpId, s)) = case mTpId of
         Nothing -> (PathError p, s)
@@ -167,7 +164,7 @@ applyDigest d nm tam tm =
        = .errs d
       ++ List.map indexDumErr dataErrs
       ++ List.map (\(p, s) -> (PathError p, s)) contErrs
-  in (newNm, newTam, newTm, indexedErrs)
+  in ({types = newTm, tyAssns = newTam, nodes = newNm}, indexedErrs)
 
 -- Compose digests
 digestUnion : Digest -> Digest -> Digest

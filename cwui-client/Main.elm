@@ -15,7 +15,8 @@ import ClNodes exposing (..)
 import ClMsgTypes exposing (FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(MsgSub), ErrorIndex(..))
 import Futility exposing (..)
 import PathManipulation exposing (appendSeg)
-import RelayState exposing (..)
+import Digests exposing (..)
+import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap)
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
@@ -49,9 +50,7 @@ type alias Model =
   -- Data:
   , recent : List Digest
   , subs : Set Path
-  , types : TypeMap
-  , tyAssns : TypeAssignMap
-  , nodes : NodeMap
+  , state : RemoteState
   , nodeFs : NodeFs
   , pending : Pending
   }
@@ -71,10 +70,10 @@ picksSegs mContainees s =
   in (formStateVal, segs)
 
 
-chosenChildPaths : NodeMap -> NodeFs -> Path -> Array Path
-chosenChildPaths nm fs p =
+chosenChildPaths : RemoteState -> NodeFs -> Path -> Array Path
+chosenChildPaths rs fs p =
   let
-    mChildSegs = case Dict.get p nm of
+    mChildSegs = case Dict.get p <| .nodes rs of
         Nothing -> Nothing
         Just n -> case n of
             ContainerNode segs -> Just segs
@@ -87,16 +86,16 @@ chosenChildPaths nm fs p =
           in Array.fromList <| List.map (appendSeg p) <| List.filter isChosen segs
         Err _ -> Array.empty
 
-requiredPaths : NodeMap -> NodeFs -> Layout Path -> Set Path
-requiredPaths nm fs = layoutRequires (++) (dynamicLayout nm) (chosenChildPaths nm fs)
+requiredPaths : RemoteState -> NodeFs -> Layout Path -> Set Path
+requiredPaths rs fs = layoutRequires (++) (dynamicLayout rs) (chosenChildPaths rs fs)
 
 init : (Model, Cmd Msg)
 init =
   let
-    initialNodes = Dict.empty
     initialNodeFs = formStoreEmpty
     initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutChildChoice "/relay/clients" <| LayoutLeaf ""]
-    initialSubs = requiredPaths initialNodes initialNodeFs initialLayout
+    initialState = remoteStateEmpty
+    initialSubs = requiredPaths initialState initialNodeFs initialLayout
     initialModel =
       { errs = []
       , viewMode = UmEdit
@@ -105,9 +104,7 @@ init =
       , layoutFs = formStoreEmpty
       , recent = []
       , subs = initialSubs
-      , types = Dict.empty
-      , tyAssns = Dict.empty
-      , nodes = initialNodes
+      , state = initialState
       , nodeFs = initialNodeFs
       , pending = Dict.empty
       }
@@ -155,14 +152,11 @@ update msg model = case msg of
         case .recent model of
             (d :: remaining) ->
               let
-                (newNodes, newAssns, newTypes, errs) = applyDigest
-                    d (.nodes model) (.tyAssns model) (.types model)
-                subs = requiredPaths newNodes (.nodeFs model) (.layout model)
+                (newState, errs) = applyDigest d (.state model)
+                subs = requiredPaths newState (.nodeFs model) (.layout model)
                 newM =
                   { model
-                  | nodes = newNodes
-                  , tyAssns = newAssns
-                  , types = newTypes
+                  | state = newState
                   , errs = errs ++ .errs model
                   , subs = subs
                   , recent = remaining
@@ -178,13 +172,13 @@ update msg model = case msg of
         Err msg -> addGlobalError msg model
         Ok (newFs, newLayout) ->
           let
-            subs = requiredPaths (.nodes model) (.nodeFs model) newLayout
+            subs = requiredPaths (.state model) (.nodeFs model) newLayout
           in ({model | layout = newLayout, layoutFs = newFs, subs = subs}, subDiffToCmd (.subs model) subs)
     NodeUiEvent (p, ue) -> case ue of
         EeUpdate v ->
           let
             newFs = formUpdate p (Just v) <| .nodeFs model
-            subs = requiredPaths (.nodes model) newFs (.layout model)
+            subs = requiredPaths (.state model) newFs (.layout model)
           in ({model | nodeFs = newFs, subs = subs}, subDiffToCmd (.subs model) subs)
         EeSubmit v -> addGlobalError "Node edit not implemented" model
 
@@ -200,11 +194,11 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
-dynamicLayout : NodeMap -> Path -> Layout Path
-dynamicLayout nm p = case Dict.get p nm of
+dynamicLayout : RemoteState -> Path -> Layout Path
+dynamicLayout rs p = case Dict.get p <| .nodes rs of
     Nothing -> LayoutLeaf p
     Just n -> case n of
-        ContainerNode segs -> LayoutContainer <| Array.map (\seg -> dynamicLayout nm (p ++ "/" ++ seg)) <| Array.fromList <| List.map .seg segs
+        ContainerNode segs -> LayoutContainer <| Array.map (\seg -> dynamicLayout rs (p ++ "/" ++ seg)) <| Array.fromList <| List.map .seg segs
         _ -> LayoutLeaf p
 
 view : Model -> Html Msg
@@ -215,9 +209,9 @@ view m = div []
     UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
     UmView -> Html.map NodeUiEvent <| viewLayout
         (++)
-        (dynamicLayout <| .nodes m)
-        (chosenChildPaths (.nodes m) (.nodeFs m))
-        (viewPath (.nodeFs m) (.types m) (.tyAssns m) (.nodes m) (.pending m))
+        (dynamicLayout <| .state m)
+        (chosenChildPaths (.state m) (.nodeFs m))
+        (viewPath (.nodeFs m) (.state m) (.pending m))
         (.layout m)
   ]
 
@@ -239,8 +233,8 @@ pathEditView mp fs = case fs of
         , input [value partial, type_ "text", onInput EeUpdate] []
         ]
 
-viewPath : NodeFs -> TypeMap -> TypeAssignMap -> NodeMap -> Pending -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
-viewPath fs types tyAssns nodes pending p = case Dict.get p tyAssns of
+viewPath : NodeFs -> RemoteState -> Pending -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
+viewPath fs {types, tyAssns, nodes} pending p = case Dict.get p tyAssns of
     Nothing -> text <| "Loading type info: " ++ p
     Just (tn, lib) -> case Dict.get tn types of
         Nothing -> text <| "Type missing from map: " ++ toString tn
