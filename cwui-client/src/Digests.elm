@@ -1,14 +1,12 @@
-module Digests exposing (Digest, digest, applyDigest, digestUnion, digestEmpty)
+module Digests exposing (Digest, digest, applyDigest, TaOp(..))
 
 import Dict exposing (Dict)
-import Set exposing (Set)
 
-import Futility exposing (dropKeysSet)
-import ClTypes exposing (TypeName, Path, Seg, TpId, Interpolation, Time, Attributee, WireValue, WireType)
+import ClTypes exposing (TypeName, Path, Seg, TpId, Interpolation, Time, Attributee, WireValue, WireType, Definition, Liberty)
 import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath, ErrorIndex(..), MsgError(..))
 import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData, TimePoint, TimeSeriesNodeT)
 import SequenceOps exposing (SeqOp(..))
-import RemoteState exposing (RemoteState, NodeMap, TypeMap, TypeAssignMap)
+import RemoteState exposing (RemoteState, NodeMap, TypeAssignMap, TypeMap)
 
 failyUpdate
    : (Maybe a -> Result e a) -> comparable
@@ -113,38 +111,72 @@ applyCms cms nm =
     applyOps p ops = failyUpdate (childUpdate ops) p
   in Dict.foldl applyOps ([], nm) cms
 
-digestDefOps : List DefMsg -> TypeMap
-digestDefOps defs =
+type DefOp
+  = OpDefine Definition
+  | OpUndefine
+
+type alias DefOps = Dict TypeName DefOp
+
+digestDefOps : List TypeName -> List DefMsg -> DefOps
+digestDefOps unsubbedTns defs =
   let
     applyDefOp o = case o of
-        MsgDefine tn def -> Dict.insert tn def
-        MsgUndefine tn -> Dict.remove tn
-  in List.foldl applyDefOp Dict.empty defs
+        MsgDefine tn def -> Dict.insert tn <| OpDefine def
+        MsgUndefine tn -> Dict.insert tn OpUndefine
+    unsubsAsUndefs = Dict.fromList <| List.map (\tn -> (tn, OpUndefine)) unsubbedTns
+  in List.foldl applyDefOp unsubsAsUndefs defs
 
-digestTypeMsgs : List TypeMsg -> TypeAssignMap
-digestTypeMsgs tms =
+applyDefOps : DefOps -> TypeMap -> TypeMap
+applyDefOps dops tm =
   let
-    applyTypeMsg (MsgAssignType p tn l) = (p, (tn, l))
-  in Dict.fromList <| List.map applyTypeMsg tms
+    applyOp tn op = case op of
+        OpDefine def -> Dict.insert tn def
+        OpUndefine -> Dict.remove tn
+  in Dict.foldl applyOp tm dops
+
+type TaOp
+  = OpAssign (TypeName, Liberty)
+  | OpDemote
+
+type alias TaOps = Dict Path TaOp
+
+digestTypeMsgs : List Path -> List TypeMsg -> TaOps
+digestTypeMsgs dataUnsubs tms =
+  let
+    tds = List.map (\p -> (p, OpDemote)) dataUnsubs
+    tas = List.map (\(MsgAssignType p tn l) -> (p, OpAssign (tn, l))) tms
+  in Dict.fromList <| tds ++ tas
+
+dropDemotes : TaOps -> Dict Path a -> Dict Path a
+dropDemotes tao d =
+  let
+    doDrop p op = case op of
+        OpDemote -> Dict.remove p
+        _ -> identity
+  in Dict.foldl doDrop d tao
+
+applyTypeMsgs : TaOps -> TypeAssignMap -> TypeAssignMap
+applyTypeMsgs tao tam =
+  let
+    applyOp p op = case op of
+        OpAssign a -> Dict.insert p a
+        OpDemote -> Dict.remove p
+  in Dict.foldl applyOp tam tao
 
 type alias Digest =
-  { typeUnsubs : Set TypeName
-  , dataUnsubs : Set Path
-  , defs : TypeMap
-  , tyAssns : TypeAssignMap
+  { defs : DefOps
+  , taOps : TaOps
   , cops : CmDigest
   , dops : DataDigest
   , errs : List (ErrorIndex, String)
   }
 
-digestEmpty = Digest Set.empty Set.empty Dict.empty Dict.empty Dict.empty Dict.empty []
+digestEmpty = Digest Dict.empty Dict.empty Dict.empty Dict.empty []
 
 digest : FromRelayClientBundle -> Digest
 digest (FromRelayClientBundle typeUnsubs dataUnsubs errMsgs dms tms dums cms) =
-  { typeUnsubs = Set.fromList typeUnsubs
-  , dataUnsubs = Set.fromList dataUnsubs
-  , defs = digestDefOps dms
-  , tyAssns = digestTypeMsgs tms
+  { defs = digestDefOps typeUnsubs dms
+  , taOps = digestTypeMsgs dataUnsubs tms
   , cops = digestCms cms
   , dops = digestDums dums
   , errs = List.map (\(MsgError idx s) -> (idx, s)) errMsgs
@@ -153,9 +185,10 @@ digest (FromRelayClientBundle typeUnsubs dataUnsubs errMsgs dms tms dums cms) =
 applyDigest : Digest -> RemoteState -> (RemoteState, List (ErrorIndex, String))
 applyDigest d rs =
   let
-    newTm = Dict.union (.defs d) <| dropKeysSet (.typeUnsubs d) <| .types rs
-    newTam = Dict.union (.tyAssns d) <| dropKeysSet (.dataUnsubs d) <| .tyAssns rs
-    (dataErrs, dataAppliedNm) = ddApply (.dops d) <| .nodes rs
+    newTm = applyDefOps (.defs d) <| .types rs
+    newTam = applyTypeMsgs (.taOps d) <| .tyAssns rs
+    reducedNodes = dropDemotes (.taOps d) <| .nodes rs
+    (dataErrs, dataAppliedNm) = ddApply (.dops d) reducedNodes
     (contErrs, newNm) = applyCms (.cops d) dataAppliedNm
     indexDumErr (p, (mTpId, s)) = case mTpId of
         Nothing -> (PathError p, s)
@@ -165,15 +198,3 @@ applyDigest d rs =
       ++ List.map indexDumErr dataErrs
       ++ List.map (\(p, s) -> (PathError p, s)) contErrs
   in ({types = newTm, tyAssns = newTam, nodes = newNm}, indexedErrs)
-
--- Compose digests
-digestUnion : Digest -> Digest -> Digest
-digestUnion dA dB =
-  { typeUnsubs = Set.union (.typeUnsubs dA) (.typeUnsubs dB)
-  , dataUnsubs = Set.union (.dataUnsubs dA) (.dataUnsubs dB)
-  , defs = Dict.union (.defs dA) (.defs dB)
-  , tyAssns = Dict.union (.tyAssns dA) (.tyAssns dB)
-  , cops = cmUnion (.cops dA) (.cops dB)
-  , dops = ddUnion (.dops dA) (.dops dB)
-  , errs = .errs dA ++ .errs dB
-  }

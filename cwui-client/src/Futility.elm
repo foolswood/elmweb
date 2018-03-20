@@ -36,9 +36,6 @@ firstMatching pred l = case l of
     [] -> Nothing
     item :: rl -> if pred item then Just item else firstMatching pred rl
 
-dropKeysSet : Set comparable -> Dict comparable v -> Dict comparable v
-dropKeysSet toDrop = Dict.filter (\k _ -> Set.member k toDrop)
-
 castMaybe : (a -> Result String b) -> Maybe a -> Result String (Maybe b)
 castMaybe c m = case m of
     Nothing -> Ok Nothing

@@ -48,7 +48,7 @@ type alias Model =
   , layout : Layout Path
   , layoutFs : FormStore LayoutPath Path
   -- Data:
-  , recent : List Digest
+  , recent : List (Digest, RemoteState)
   , subs : Set Path
   , state : RemoteState
   , nodeFs : NodeFs
@@ -130,7 +130,7 @@ type Msg
   = AddError ErrorIndex String
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
-  | FoldRecent
+  | SquashRecent
   | TimeStamped (Time -> Cmd Msg) Time.Time
   | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path))
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
@@ -142,28 +142,36 @@ addGlobalError : String -> Model -> (Model, Cmd Msg)
 addGlobalError msg m = ({m | errs = (GlobalError, msg) :: .errs m}, Cmd.none)
 
 queueFold : Float -> Cmd Msg
-queueFold delay = Task.perform (always FoldRecent) <| Process.sleep delay
+queueFold delay = Task.perform (always SquashRecent) <| Process.sleep delay
+
+latestState : Model -> RemoteState
+latestState m =
+  let
+    go recent = case recent of
+        [] -> .state m
+        ((d, s) :: []) -> s
+        (_ :: remainder) -> go remainder
+  in go <| .recent m
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
     AddError idx msg -> ({model | errs = (idx, msg) :: .errs model}, Cmd.none)
-    NetworkEvent b -> ({model | recent = .recent model ++ [digest b]}, queueFold <| .keepRecent model)
-    FoldRecent ->
+    NetworkEvent b ->
+      let
+        d = digest b
+        (newState, errs) = applyDigest d <| latestState model
+        subs = requiredPaths newState (.nodeFs model) (.layout model)
+        newM =
+          { model
+          | errs = errs ++ .errs model
+          , subs = subs
+          , recent = .recent model ++ [(d, newState)]
+          }
+      in (newM, queueFold <| .keepRecent model)
+    SquashRecent ->
         case .recent model of
-            (d :: remaining) ->
-              let
-                (newState, errs) = applyDigest d (.state model)
-                subs = requiredPaths newState (.nodeFs model) (.layout model)
-                newM =
-                  { model
-                  | state = newState
-                  , errs = errs ++ .errs model
-                  , subs = subs
-                  , recent = remaining
-                  }
-              in
-                (newM, subDiffToCmd (.subs model) subs)
-            [] -> addGlobalError "Tried to fold but no recent" model
+            ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
+            [] -> addGlobalError "Tried to squash but no recent" model
     TimeStamped c t -> (model, c (fromFloat t))
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
@@ -211,7 +219,7 @@ view m = div []
         (++)
         (dynamicLayout <| .state m)
         (chosenChildPaths (.state m) (.nodeFs m))
-        (viewPath (.nodeFs m) (.state m) (.pending m))
+        (viewPath (.nodeFs m) (.state m) (.recent m) (.pending m))
         (.layout m)
   ]
 
@@ -233,12 +241,42 @@ pathEditView mp fs = case fs of
         , input [value partial, type_ "text", onInput EeUpdate] []
         ]
 
-viewPath : NodeFs -> RemoteState -> Pending -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
-viewPath fs {types, tyAssns, nodes} pending p = case Dict.get p tyAssns of
-    Nothing -> text <| "Loading type info: " ++ p
-    Just (tn, lib) -> case Dict.get tn types of
-        Nothing -> text <| "Type missing from map: " ++ toString tn
-        Just ty -> Html.map ((,) p) <| viewNode lib ty (Dict.get p nodes) (formState p fs) (Dict.get p pending)
+appendMaybe : Maybe a -> List a -> List a
+appendMaybe ma l = Maybe.withDefault l <| Maybe.map (\a -> l ++ [a]) ma
+
+viewLoading : Html a
+viewLoading = text "Loading..."
+
+viewPath : NodeFs -> RemoteState -> List (Digest, RemoteState) -> Pending -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
+viewPath nodeFs baseState recent pending p =
+  let
+    viewerFor s fs mPending recentCops recentDums = case Dict.get p <| .tyAssns s of
+        Nothing -> viewLoading
+        Just (tn, lib) -> case Dict.get tn <| .types s of
+            Nothing -> text "Missing type information"
+            -- FIXME: Doesn't pass on the recent stuff!
+            Just def -> viewNode lib def (Dict.get p <| .nodes s) fs mPending
+    viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews) =
+      let
+        newRecentCops = appendMaybe (Dict.get p <| .cops d) recentCops
+        newRecentDums = appendMaybe (Dict.get p <| .dops d) recentDums
+        -- FIXME: Highlight colour thing fairly rubbish, doesn't deactivate controls etc.
+        newCompleteView highlightCol partialViewer = div
+            [style [("border", "0.2em solid " ++ highlightCol)]]
+            [partialViewer FsViewing Nothing recentCops recentDums]
+        newCompleteViews ls = appendMaybe
+            (Maybe.map (newCompleteView ls) mPartialViewer) completeViews
+      in case Dict.get p <| .taOps d of
+            Nothing -> (mPartialViewer, newRecentCops, newRecentDums, completeViews)
+            Just OpDemote -> (Nothing, [], [], newCompleteViews "red")
+            Just (OpAssign tn) -> (Just <| viewerFor s, [], [], newCompleteViews "green")
+    finalise (mPartialViewer, recentCops, recentDums, completeViews) =
+      let
+        finalView partialViewer = partialViewer
+            (formState p nodeFs) (Dict.get p pending) recentCops recentDums
+      in appendMaybe (Maybe.map finalView mPartialViewer) completeViews
+    contents = finalise <| List.foldl viewDigestAfter (Just <| viewerFor baseState, [], [], []) recent
+  in Html.map (\e -> (p, e)) <| div [] contents
 
 viewCasted : (a -> Result String b) -> (b -> Html r) -> a -> Html r
 viewCasted c h a = case c a of
