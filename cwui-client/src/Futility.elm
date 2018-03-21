@@ -41,6 +41,11 @@ castMaybe c m = case m of
     Nothing -> Ok Nothing
     Just v -> Result.map Just <| c v
 
+castList : (a -> Result String b) -> List a -> Result String (List b)
+castList c l = case l of
+    (a :: remainder) -> Result.map2 (::) (c a) (castList c remainder)
+    [] -> Ok []
+
 type alias Conv outer inner =
   { wrap : (inner -> outer)
   , unwrap : (outer -> Result String inner)

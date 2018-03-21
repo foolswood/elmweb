@@ -255,7 +255,9 @@ viewPath nodeFs baseState recent pending p =
         Just (tn, lib) -> case Dict.get tn <| .types s of
             Nothing -> text "Missing type information"
             -- FIXME: Doesn't pass on the recent stuff!
-            Just def -> viewNode lib def (Dict.get p <| .nodes s) fs mPending
+            Just def -> viewNode
+                lib def (Dict.get p <| .nodes s) recentCops recentDums
+                fs mPending
     viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews) =
       let
         newRecentCops = appendMaybe (Dict.get p <| .cops d) recentCops
@@ -285,9 +287,10 @@ viewCasted c h a = case c a of
 
 viewNode
    : Liberty -> Definition -> Maybe Node
+   -> List Cops -> List DataChange
    -> FormState NodeEdit -> Maybe NodeActions
    -> Html (EditEvent NodeEdit NodeActions)
-viewNode lib def maybeNode formState maybeNas =
+viewNode lib def maybeNode recentCops recentDums formState maybeNas =
   let
     rcns neConv naConv cn h = viewCasted
         (\(n, s, a) -> Result.map3 (,,) (castMaybe cn n) (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
@@ -295,7 +298,7 @@ viewNode lib def maybeNode formState maybeNas =
         (maybeNode, formState, maybeNas)
   in case (lib, def) of
     (Cannot, TupleDef d) -> case .interpLim d of
-        ILUninterpolated -> viewCasted (castMaybe <| .unwrap constNodeConv) (viewConstTuple d) maybeNode
+        ILUninterpolated -> viewCasted (castMaybe <| .unwrap constNodeConv) (\mn -> viewConstTuple d mn recentDums) maybeNode
         _ -> text "Time series view not implemented"
     (_, TupleDef d) -> case .interpLim d of
         ILUninterpolated -> rcns constNeConv constNaConv (.unwrap constNodeConv) <| viewConstNodeEdit d

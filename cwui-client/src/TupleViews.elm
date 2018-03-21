@@ -4,32 +4,48 @@ import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onInput, onClick)
 
-import Futility exposing (itemAtIndex, castMaybe, replaceIdx)
+import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx)
 import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, AtomDef(..), TupleDefinition)
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT)
 import Form exposing (AtomEditState(..), castAes, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
+import Digests exposing (DataChange(ConstChange))
 
-viewConstTuple : TupleDefinition -> Maybe ConstDataNodeT -> Html a
-viewConstTuple td mn = case mn of
-    Nothing -> text "Awaiting data"
-    Just n -> span [] <| List.map2
-        (viewAtom <| Tuple.first <| .values n)
-        (List.map Tuple.second <| .types td)
-        (Tuple.second <| .values n)
-
-viewAtom : Maybe Attributee -> AtomDef -> WireValue -> Html a
-viewAtom ma def wv =
+viewConstTuple : TupleDefinition -> Maybe ConstDataNodeT -> List DataChange -> Html a
+viewConstTuple td mn recent =
   let
-    castedView : (WireValue -> Result String b) -> (Maybe Attributee -> b -> Html a) -> Html a
-    castedView c h = case c wv of
-        Ok a -> h ma a
+    mCd dc = case dc of
+        ConstChange ma _ wvs -> Just (ma, wvs)
+        _ -> Nothing
+    recentAttrVals = List.filterMap mCd recent
+    attrVals = case mn of
+        Nothing -> recentAttrVals
+        Just n -> .values n :: recentAttrVals
+    atomTypes = List.map Tuple.second <| .types td
+    emptyAtomVals = List.repeat (List.length atomTypes) []
+    consAttrVals (ma, wvs) accs = List.map2 (\wv acc -> (ma, wv) :: acc) wvs accs
+    atomVals = List.foldr consAttrVals emptyAtomVals attrVals
+  in span [] <| List.map2 viewAtom atomTypes atomVals
+
+takeLatest : (Maybe Attributee -> a -> Html b)  -> List (Maybe Attributee, a) -> Html b
+takeLatest h l = case l of
+    ((ma, v) :: []) -> h ma v
+    (_ :: remainder) -> takeLatest h remainder
+    [] -> text "No latest value"
+
+viewAtom : AtomDef -> List (Maybe Attributee, WireValue) -> Html a
+viewAtom def avs =
+  let
+    castAttributed c (ma, a) = Result.map (\b -> (ma, b)) <| c a
+    castedView : (WireValue -> Result String b) -> (List (Maybe Attributee, b) -> Html a) -> Html a
+    castedView c h = case castList (castAttributed c) avs of
+        Ok vs -> h vs
         Err msg -> text msg
   in case def of
     ADEnum opts -> castedView asWord8 <| enumViewer opts
-    ADFloat bounds -> castedView asFloat <| floatViewer bounds
-    ADString re -> castedView asString <| textViewer re
-    ADRef ty -> castedView asString <| refViewer ty
+    ADFloat bounds -> castedView asFloat <| takeLatest <| floatViewer bounds
+    ADString re -> castedView asString <| takeLatest <| textViewer re
+    ADRef ty -> castedView asString <| takeLatest <| refViewer ty
     _ -> text <| "View not implemented: " ++ toString def
 
 viewConstNodeEdit
@@ -87,10 +103,15 @@ refViewer tn ma tgt = text tgt
 floatViewer : Bounds Float -> Maybe Attributee -> Float -> Html a
 floatViewer b ma f = text <| toString f
 
-enumViewer : List String -> Maybe Attributee -> Int -> Html a
-enumViewer opts ma e = text <| case itemAtIndex e opts of
-    Just v -> v
-    Nothing -> "Enum index out of range"
+enumViewer : List String -> List (Maybe Attributee, Int) -> Html a
+enumViewer opts vs =
+  let
+    optString idx = case itemAtIndex idx opts of
+        Just v -> v
+        Nothing -> "Enum index out of range"
+    attrString ma = Maybe.withDefault "" <| Maybe.map (\a -> a ++ ": ") ma
+    combinedStr (ma, idx) = attrString ma ++ optString idx
+  in text <| String.join " -> " <| List.map combinedStr vs
 
 enumEditor : List String -> Maybe Int -> AtomEditState Int -> Html Int
 enumEditor opts me se = text "shuffle"

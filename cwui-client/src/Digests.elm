@@ -1,4 +1,4 @@
-module Digests exposing (Digest, digest, applyDigest, TaOp(..))
+module Digests exposing (Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..))
 
 import Dict exposing (Dict)
 
@@ -84,7 +84,8 @@ ddApply dd nodeMap =
           in (newErrs, Dict.update p (\_ -> newMn) nm)
   in Dict.foldl dcApply ([], nodeMap) dd
 
-type alias CmDigest = Dict Path (Dict Seg (Maybe Attributee, SeqOp Seg))
+type alias Cops = Dict Seg (Maybe Attributee, SeqOp Seg)
+type alias CmDigest = Dict Path Cops
 
 cmUnion : CmDigest -> CmDigest -> CmDigest
 cmUnion cmA cmB =
