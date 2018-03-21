@@ -140,9 +140,6 @@ timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 addGlobalError : String -> Model -> (Model, Cmd Msg)
 addGlobalError msg m = ({m | errs = (GlobalError, msg) :: .errs m}, Cmd.none)
 
-queueFold : Float -> Cmd Msg
-queueFold delay = Task.perform (always SquashRecent) <| Process.sleep delay
-
 latestState : Model -> RemoteState
 latestState m =
   let
@@ -166,7 +163,9 @@ update msg model = case msg of
           , subs = subs
           , recent = .recent model ++ [(d, newState)]
           }
-      in (newM, queueFold <| .keepRecent model)
+        subCmd = subDiffToCmd (.subs model) subs
+        queueSquashCmd = Task.perform (always SquashRecent) <| Process.sleep <| .keepRecent model
+      in (newM, Cmd.batch [subCmd, queueSquashCmd])
     SquashRecent ->
         case .recent model of
             ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
