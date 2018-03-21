@@ -20,7 +20,7 @@ import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, Ty
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
-import TupleViews exposing (viewWithRecent, viewConstNodeEdit)
+import TupleViews exposing (viewWithRecent)
 import EditTypes exposing (NodeEdit, EditEvent(..), NeChildrenT, mapEe, NeChildState, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
 
 main = Html.program {
@@ -296,16 +296,13 @@ viewNode lib def maybeNode recentCops recentDums formState maybeNas =
         (\(n, s, a) -> Result.map3 (,,) (castMaybe cn n) (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
         (\(mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h mn fs mp)
         (maybeNode, formState, maybeNas)
-  in case (lib, def) of
-    (Cannot, TupleDef d) -> case .interpLim d of
-        ILUninterpolated -> viewCasted (castMaybe <| .unwrap constNodeConv) (\mn -> viewWithRecent d mn recentDums) maybeNode
-        _ -> text "Time series view not implemented"
-    (_, TupleDef d) -> case .interpLim d of
-        ILUninterpolated -> rcns constNeConv constNaConv (.unwrap constNodeConv) <| viewConstNodeEdit d
+    editable = lib /= Cannot
+  in case def of
+    TupleDef d -> case .interpLim d of
+        ILUninterpolated -> rcns constNeConv constNaConv (.unwrap constNodeConv) <| viewWithRecent editable d recentDums
         _ -> text "Time series edit not implemented"
-    (_, StructDef d) -> text "Struct edit not implemented"
-    (Cannot, ArrayDef d) -> rcns childrenNeConv childrenNaConv (.unwrap childrenNodeConv) <| viewArray d
-    (_, ArrayDef d) -> text "Array edit not implemented"
+    StructDef d -> text "Struct edit not implemented"
+    ArrayDef d -> rcns childrenNeConv childrenNaConv (.unwrap childrenNodeConv) <| viewArray d
 
 viewArray
    : ArrayDefinition

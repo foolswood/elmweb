@@ -50,3 +50,7 @@ type alias Conv outer inner =
   { wrap : (inner -> outer)
   , unwrap : (outer -> Result String inner)
   }
+
+type Either l r
+  = Left l
+  | Right r

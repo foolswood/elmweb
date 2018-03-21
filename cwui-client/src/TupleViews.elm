@@ -1,19 +1,27 @@
-module TupleViews exposing (viewWithRecent, viewConstNodeEdit)
+module TupleViews exposing (viewWithRecent)
 
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onInput, onClick)
 
-import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx)
-import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, AtomDef(..), TupleDefinition, Liberty(..))
+import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..))
+import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, AtomDef(..), TupleDefinition)
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT)
 import Form exposing (AtomEditState(..), castAes, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (DataChange(ConstChange))
 
-viewWithRecent : TupleDefinition -> Maybe ConstDataNodeT -> List DataChange -> Html a
-viewWithRecent def mn recent =
+type EditTarget k v f a
+  = Editable k (Maybe v) (FormState f) (Maybe a)
+  | ReadOnly v
+
+viewWithRecent
+   : Bool -> TupleDefinition -> List DataChange
+  -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
+  -> Html (EditEvent NeConstT NaConstT)
+viewWithRecent editable def recent mn fs mp =
   let
+    -- FIXME: Not otherwise dealing with stuff like this here, sort above?
     mCd dc = case dc of
         ConstChange ma _ wvs -> Just (ma, wvs)
         _ -> Nothing
@@ -23,26 +31,47 @@ viewWithRecent def mn recent =
         Just n -> .values n :: recentAttrVals
     finalVal = List.length attrVals - 1
     sourceInfo idx ma = text <| toString (idx - finalVal) ++ Maybe.withDefault "" ma
-    asComp idx (ma, wvs) = (sourceInfo idx ma, Cannot, wvs)
-    comps = List.indexedMap asComp attrVals
-  in constDataComp def comps
+    latestControls = text "Staging controls?"
+    asComp idx (ma, wvs) =
+      let
+        isLatest = idx == finalVal
+        si = if isLatest
+          then latestControls
+          else sourceInfo idx ma
+        et = if isLatest && editable
+          then Editable () (Just wvs) fs mp
+          else ReadOnly wvs
+      in (si, et)
+    valComps = List.indexedMap asComp attrVals
+    comps = case (editable, valComps) of
+        (True, []) -> [(latestControls, Editable () Nothing fs mp)]
+        _ -> valComps
+    cleanResult r = case r of
+        Left a -> never a
+        Right (_, evt) -> evt
+  in Html.map cleanResult <| constDataComp def comps
 
-viewConstTuple : TupleDefinition -> Liberty -> List WireValue -> Html a
-viewConstTuple td lib wvs =
-  let
-    atomTypes = List.map Tuple.second <| .types td
-  in span [] <| List.map2 (viewAtom lib) atomTypes wvs
-
-constDataComp : TupleDefinition -> List (Html a, Liberty, List WireValue) -> Html a
+constDataComp
+   : TupleDefinition
+  -> List (Html a, EditTarget k (List WireValue) NeConstT NaConstT)
+  -> Html (Either a (k, EditEvent NeConstT NaConstT))
 constDataComp def values =
   let
-    viewRow (sourceInfo, lib, wvs) = [div [] [sourceInfo], div [] [viewConstTuple def lib wvs]]
+    ads = List.map Tuple.second <| .types def
+    viewRow (sourceInfo, et) =
+      let
+        tupV = case et of
+            ReadOnly wvs -> viewConstTuple ads wvs
+            Editable k mwvs fs mp -> Html.map (\e -> (k, e)) <| viewConstTupleEdit ads mwvs fs mp
+      in [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]]
     cells = List.concatMap viewRow values
   in div [style [("display", "grid"), ("grid-template-columns", "auto auto")]] cells
 
-viewAtom : Liberty -> AtomDef -> WireValue -> Html a
-viewAtom lib def wv =
-  -- FIXME: Ignores liberty
+viewConstTuple : List AtomDef -> List WireValue -> Html a
+viewConstTuple ads wvs = span [] <| List.map2 viewAtom ads wvs
+
+viewAtom : AtomDef -> WireValue -> Html a
+viewAtom def wv =
   let
     castedView : (WireValue -> Result String b) -> (b -> Html a) -> Html a
     castedView c h = case c wv of
