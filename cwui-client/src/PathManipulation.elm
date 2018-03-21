@@ -1,4 +1,4 @@
-module PathManipulation exposing (splitBasename, appendSeg)
+module PathManipulation exposing (splitBasename, appendSeg, canonicalise)
 import ClTypes exposing (Path, Seg)
 
 s : String
@@ -17,3 +17,8 @@ splitBasename p = case List.reverse (pathToSegs p) of
 
 appendSeg : Path -> Seg -> Path
 appendSeg p s = p ++ "/" ++ s
+
+canonicalise : Path -> Path
+canonicalise p = if String.endsWith "/" p
+  then String.dropRight 1 p
+  else p

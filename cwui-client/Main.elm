@@ -87,7 +87,7 @@ chosenChildPaths rs fs p =
         Err _ -> Array.empty
 
 requiredPaths : RemoteState -> NodeFs -> Layout Path -> Set Path
-requiredPaths rs fs = layoutRequires (++) (dynamicLayout rs) (chosenChildPaths rs fs)
+requiredPaths rs fs = layoutRequires (\pa pb -> PathManipulation.canonicalise <| pa ++ pb) (dynamicLayout rs) (chosenChildPaths rs fs)
 
 init : (Model, Cmd Msg)
 init =
