@@ -20,7 +20,7 @@ import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, Ty
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
-import TupleViews exposing (viewConstTuple, viewConstNodeEdit)
+import TupleViews exposing (viewWithRecent, viewConstNodeEdit)
 import EditTypes exposing (NodeEdit, EditEvent(..), NeChildrenT, mapEe, NeChildState, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
 
 main = Html.program {
@@ -298,7 +298,7 @@ viewNode lib def maybeNode recentCops recentDums formState maybeNas =
         (maybeNode, formState, maybeNas)
   in case (lib, def) of
     (Cannot, TupleDef d) -> case .interpLim d of
-        ILUninterpolated -> viewCasted (castMaybe <| .unwrap constNodeConv) (\mn -> viewConstTuple d mn recentDums) maybeNode
+        ILUninterpolated -> viewCasted (castMaybe <| .unwrap constNodeConv) (\mn -> viewWithRecent d mn recentDums) maybeNode
         _ -> text "Time series view not implemented"
     (_, TupleDef d) -> case .interpLim d of
         ILUninterpolated -> rcns constNeConv constNaConv (.unwrap constNodeConv) <| viewConstNodeEdit d
