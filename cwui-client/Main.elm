@@ -12,7 +12,7 @@ import Process
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
-import ClMsgTypes exposing (FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(MsgSub), ErrorIndex(..))
+import ClMsgTypes exposing (FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(..), ErrorIndex(..))
 import Futility exposing (..)
 import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
@@ -118,13 +118,12 @@ sendBundle b = timeStamped (WebSocket.send wsTarget << serialiseBundle b)
 subDiffToCmd : Set Path -> Set Path -> Cmd Msg
 subDiffToCmd old new =
   let
-    subToCmd ps = case ps of
-        [] -> Cmd.none
-        _ -> sendBundle (ToRelayClientBundle (List.map MsgSub ps) [] [])
-  in if old == new
-    then Cmd.none
-    -- FIXME: Not efficient and leaks.
-    else subToCmd <| Set.toList new
+    added = Set.toList <| Set.diff new old
+    removed = Set.toList <| Set.diff old new
+    subOps = List.map MsgSub added ++ List.map MsgUnsub removed
+  in case subOps of
+    [] -> Cmd.none
+    _ -> sendBundle (ToRelayClientBundle subOps [] [])
 
 type Msg
   = AddError ErrorIndex String
