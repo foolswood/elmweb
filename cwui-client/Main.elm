@@ -248,34 +248,41 @@ viewLoading = text "Loading..."
 viewPath : NodeFs -> RemoteState -> List (Digest, RemoteState) -> Pending -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
 viewPath nodeFs baseState recent pending p =
   let
-    viewerFor s fs mPending recentCops recentDums = case Dict.get p <| .tyAssns s of
-        Nothing -> viewLoading
-        Just (tn, lib) -> case Dict.get tn <| .types s of
+    viewerFor s = case Dict.get p <| .tyAssns s of
+        Nothing -> Nothing
+        Just (tn, lib) -> Just <| \fs mPending recentCops recentDums -> case Dict.get tn <| .types s of
             Nothing -> text "Missing type information"
-            -- FIXME: Doesn't pass on the recent stuff!
             Just def -> viewNode
                 lib def (Dict.get p <| .nodes s) recentCops recentDums
                 fs mPending
-    viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews) =
+    bordered highlightCol h = div
+        [style [("border", "0.2em solid " ++ highlightCol)]] [h]
+    viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
       let
         newRecentCops = appendMaybe (Dict.get p <| .cops d) recentCops
         newRecentDums = appendMaybe (Dict.get p <| .dops d) recentDums
         -- FIXME: Highlight colour thing fairly rubbish, doesn't deactivate controls etc.
-        newCompleteView highlightCol partialViewer = div
-            [style [("border", "0.2em solid " ++ highlightCol)]]
-            [partialViewer FsViewing Nothing recentCops recentDums]
+        newCompleteView highlightCol partialViewer = bordered highlightCol <|
+            partialViewer FsViewing Nothing recentCops recentDums
         newCompleteViews ls = appendMaybe
             (Maybe.map (newCompleteView ls) mPartialViewer) completeViews
       in case Dict.get p <| .taOps d of
-            Nothing -> (mPartialViewer, newRecentCops, newRecentDums, completeViews)
-            Just OpDemote -> (Nothing, [], [], newCompleteViews "red")
-            Just (OpAssign tn) -> (Just <| viewerFor s, [], [], newCompleteViews "green")
-    finalise (mPartialViewer, recentCops, recentDums, completeViews) =
+            Nothing -> (mPartialViewer, newRecentCops, newRecentDums, completeViews, typeChanged)
+            Just OpDemote -> (Nothing, [], [], newCompleteViews "red", True)
+            Just (OpAssign tn) -> (viewerFor s, [], [], newCompleteViews "red", True)
+    finalise (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
       let
-        finalView partialViewer = partialViewer
-            (formState p nodeFs) (Dict.get p pending) recentCops recentDums
-      in appendMaybe (Maybe.map finalView mPartialViewer) completeViews
-    contents = finalise <| List.foldl viewDigestAfter (Just <| viewerFor baseState, [], [], []) recent
+        highlight = if typeChanged
+          then bordered "green"
+          else identity
+        finalView = case mPartialViewer of
+            Nothing -> if not typeChanged
+                then Just <| viewLoading
+                else Nothing
+            Just partialViewer -> Just <| highlight <| partialViewer
+                (formState p nodeFs) (Dict.get p pending) recentCops recentDums
+      in appendMaybe finalView completeViews
+    contents = finalise <| List.foldl viewDigestAfter (viewerFor baseState, [], [], [], False) recent
   in Html.map (\e -> (p, e)) <| div [] contents
 
 viewCasted : (a -> Result String b) -> (b -> Html r) -> a -> Html r

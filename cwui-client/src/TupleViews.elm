@@ -31,7 +31,9 @@ viewWithRecent editable def recent mn fs mp =
         Just n -> .values n :: recentAttrVals
     finalVal = List.length attrVals - 1
     sourceInfo idx ma = text <| toString (idx - finalVal) ++ Maybe.withDefault "" ma
-    latestControls = text "Staging controls?"
+    latestControls = if editable
+      then text "Staging controls?"
+      else text "Latest"
     asComp idx (ma, wvs) =
       let
         isLatest = idx == finalVal
