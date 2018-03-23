@@ -5,16 +5,15 @@ import Dict exposing (Dict)
 import Futility exposing (Conv)
 import SequenceOps exposing (SeqOp, applySeqOps)
 import ClTypes exposing (Seg, Attributee, WireValue, WireType, TpId, Time, Interpolation)
+import TimeSeries exposing (TimeSeries)
 
 type alias ConstData = (Maybe Attributee, List WireValue)
 
 type alias TimePoint =
-  { time : Time
-  , attributee : Maybe Attributee
+  { attributee : Maybe Attributee
   , wvs : List WireValue
   , interpolation : Interpolation
   }
-type alias TimeSeries a = Dict TpId a
 
 type alias ConstDataNodeT =
   { types : List WireType
@@ -80,21 +79,20 @@ setTimePoint
 setTimePoint wts tpid t ma wvs i mn =
   let
     tp =
-      { time = t
-      , attributee = ma
+      { attributee = ma
       , wvs = wvs
       , interpolation = i
       }
   in case mn of
     Nothing -> Ok <| TimeSeriesNode
         { types = wts
-        , values = Dict.singleton tpid tp
+        , values = TimeSeries.singleton tpid t tp
         }
     Just n -> case n of
         TimeSeriesNode tsn ->
           if .types tsn == wts
             then Ok <| TimeSeriesNode
-                {tsn | values = Dict.insert tpid tp <| .values tsn}
+                {tsn | values = TimeSeries.insert tpid t tp <| .values tsn}
           else Err "TimePoint WireType differs"
         _ -> Err "TimePoint set on non-series"
 
@@ -104,7 +102,7 @@ removeTimePoint tpid ma mn = case mn of
     Just n -> case n of
         TimeSeriesNode tsn -> Ok <| TimeSeriesNode
           { tsn
-          | values = Dict.remove tpid <| .values tsn
+          | values = TimeSeries.remove tpid <| .values tsn
           }
         _ -> Err "Attempted to remove timepoint from non-series"
 
