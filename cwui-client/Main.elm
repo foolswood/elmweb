@@ -94,7 +94,7 @@ init : (Model, Cmd Msg)
 init =
   let
     initialNodeFs = formStoreEmpty
-    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutChildChoice "/relay/clients" <| LayoutLeaf ""]
+    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutLeaf "/relay/clients", LayoutChildChoice "/relay/clients" <| LayoutLeaf ""]
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialNodeFs initialLayout
     initialModel =
