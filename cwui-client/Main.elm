@@ -43,6 +43,7 @@ type alias Model =
   -- Global:
   { errs : List (ErrorIndex, String)
   , viewMode : UiMode
+  , bundleCount : Int
   , keepRecent : Float
   -- Layout:
   , layout : Layout Path
@@ -99,7 +100,8 @@ init =
     initialModel =
       { errs = []
       , viewMode = UmEdit
-      , keepRecent = 0.0
+      , bundleCount = 0
+      , keepRecent = 5000.0
       , layout = initialLayout
       , layoutFs = formStoreEmpty
       , recent = []
@@ -162,6 +164,7 @@ update msg model = case msg of
           | errs = errs ++ .errs model
           , subs = subs
           , recent = .recent model ++ [(d, newState)]
+          , bundleCount = .bundleCount model + 1
           }
         subCmd = subDiffToCmd (.subs model) subs
         queueSquashCmd = Task.perform (always SquashRecent) <| Process.sleep <| .keepRecent model
@@ -211,6 +214,7 @@ view : Model -> Html Msg
 view m = div []
   [ viewErrors <| .errs m
   , button [onClick SwapViewMode] [text "switcheroo"]
+  , text <| "# Bundles: " ++ (toString <| .bundleCount m)
   , case .viewMode m of
     UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
     UmView -> Html.map NodeUiEvent <| viewLayout
