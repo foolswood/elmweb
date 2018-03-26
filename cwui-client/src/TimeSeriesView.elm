@@ -6,18 +6,13 @@ import Json.Decode as JD
 import CSS exposing (emPx, keyFramed, applyKeyFramed)
 
 import ClTypes exposing (TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime)
+import ClNodes exposing (TimePoint)
+import TimeSeries exposing (TimeSeries)
+import EditTypes exposing (NeConstT)
 
 import Html exposing (..)
 import Html.Attributes as HA exposing (..)
 import Html.Events exposing (..)
-
-type alias OrderedTimePoint =
-  { tpId : TpId
-  , attributee : Maybe Attributee
-  , wvs : List WireValue
-  , interpolation : Interpolation
-  }
-type alias OrderedTimeSeries = List (Time, OrderedTimePoint)
 
 type alias Viewport =
   { top : Float
@@ -31,7 +26,7 @@ type TsMsg
   | PlayheadSet Time
 
 type alias TsModel =
-  { series : List OrderedTimeSeries
+  { series : List (TimeSeries TimePoint)
   , vZoom : Float
   , hZoom : Float
   , viewport : Viewport
@@ -46,18 +41,21 @@ type alias TimePointEdit =
 
 exampleTimeSeries : TsModel
 exampleTimeSeries =
-  { series =
-    [ [ ((0, 0), OrderedTimePoint 21 Nothing [] ILinear)
-      , ((50, 0), OrderedTimePoint 21 Nothing [] ILinear)
-      , ((200, 0), OrderedTimePoint 21 Nothing [] ILinear)
+  let
+    asSeries = List.foldl (\(tpid, t, tp) -> TimeSeries.insert tpid t tp) TimeSeries.empty
+  in
+  { series = List.map asSeries <|
+    [ [ (21, (0, 0), TimePoint Nothing [] ILinear)
+      , (22, (50, 0), TimePoint Nothing [] ILinear)
+      , (23, (200, 0), TimePoint Nothing [] ILinear)
       ]
-    , [ ((3, 0), OrderedTimePoint 21 Nothing [] ILinear)
+    , [ (33, (3, 0), TimePoint Nothing [] ILinear)
       ]
-    , [ ((5, 0), OrderedTimePoint 21 Nothing [] ILinear)
+    , [ (21, (5, 0), TimePoint Nothing [] ILinear)
       ]
-    , [ ((7, 0), OrderedTimePoint 21 Nothing [] ILinear)
+    , [ (12, (7, 0), TimePoint Nothing [] ILinear)
       ]
-    , [ ((9, 0), OrderedTimePoint 21 Nothing [] ILinear)
+    , [ (99, (9, 0), TimePoint Nothing [] ILinear)
       ]
     ]
   , vZoom = 2.0
@@ -66,7 +64,7 @@ exampleTimeSeries =
   , playheadPos = (42, 0)
   }
 
-getHeights : Float -> List OrderedTimeSeries -> List Float
+getHeights : Float -> List a -> List Float
 getHeights z ots = List.repeat (List.length ots) z
 
 gridStyle = ("display", "grid")
@@ -163,10 +161,10 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       ]
       <| List.map viewTick ticks]
 
-viewTsData : Float -> OrderedTimeSeries -> Html a
+viewTsData : Float -> TimeSeries TimePoint -> Html a
 viewTsData scale ts =
   let
-    lefts = List.map (((*) scale) << fromTime << Tuple.first) ts
+    lefts = List.map (((*) scale) << fromTime) <| TimeSeries.times ts
     colStyles =
       [ gridStyle
       , ("grid-template-columns", mapEm lefts ++ " 1fr")
@@ -174,8 +172,8 @@ viewTsData scale ts =
     prePoint = div [] []
     contentGrid = div
       [style <| ("height", "100%") :: colStyles]
-      <| prePoint :: List.map (viewTimePoint << Tuple.second) ts
-    popOvers = if List.length ts == 1
+      <| prePoint :: TimeSeries.fold (\t tpid tp acc -> viewTimePoint tpid tp :: acc) [] ts
+    popOvers = if True
       then [div
         [style
           [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| 60 * scale)
@@ -185,8 +183,8 @@ viewTsData scale ts =
       else []
   in div [style [("position", "relative")]] <| contentGrid :: popOvers
 
-viewTimePoint : OrderedTimePoint -> Html a
-viewTimePoint _ = div [style [("border-left", "medium solid red"), ("background", "lightgreen")]] [text "foo"]
+viewTimePoint : TpId -> TimePoint -> Html a
+viewTimePoint _ _ = div [style [("border-left", "medium solid red"), ("background", "lightgreen")]] [text "foo"]
 
 viewTsLabel : String -> Html a
 viewTsLabel name = div [] [text name]

@@ -1,4 +1,4 @@
-module TimeSeries exposing (TimeSeries, empty, insert, remove, singleton, fold)
+module TimeSeries exposing (TimeSeries, empty, insert, remove, singleton, fold, times)
 
 import Dict exposing (Dict)
 
@@ -39,6 +39,9 @@ fold f acc {points, tpIds} =
         -- something up
         Nothing -> f t 0 a
   in Dict.foldl withTpId acc points
+
+times : TimeSeries a -> List Time
+times {points} = Dict.keys points
 
 -- You'd think this could be generic, but since you can't have 2 different
 -- comparables, nope!
