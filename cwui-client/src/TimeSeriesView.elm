@@ -8,6 +8,7 @@ import CSS exposing (emPx, keyFramed, applyKeyFramed)
 import ClTypes exposing (TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime)
 import ClNodes exposing (TimePoint)
 import TimeSeries exposing (TimeSeries)
+import TimeSeriesDiff exposing (ChangedTimes)
 import EditTypes exposing (NeConstT)
 
 import Html exposing (..)
@@ -102,7 +103,7 @@ viewTimeSeries s =
       , ("left", toEm labelWidth)
       , ("top", toEm controlsHeight)
       ]
-    dataGrid = div [style dgStyles] <| List.map (viewTsData <| .hZoom s) <| .series s
+    dataGrid = div [style dgStyles] <| List.map (\ts -> viewTsData (.hZoom s) ts (Dict.singleton (1, 0) <| Just (1, 0))) <| .series s
     labelGrid = div
       [ style <| rowStyles ++
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
@@ -161,10 +162,11 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       ]
       <| List.map viewTick ticks]
 
-viewTsData : Float -> TimeSeries TimePoint -> Html a
-viewTsData scale ts =
+viewTsData : Float -> TimeSeries TimePoint -> ChangedTimes -> Html a
+viewTsData scale ts cts =
   let
-    lefts = List.map (((*) scale) << fromTime) <| TimeSeries.times ts
+    tFloat = (*) scale << fromTime
+    lefts = List.map tFloat <| TimeSeries.times ts
     colStyles =
       [ gridStyle
       , ("grid-template-columns", mapEm lefts ++ " 1fr")
@@ -173,18 +175,32 @@ viewTsData scale ts =
     contentGrid = div
       [style <| ("height", "100%") :: colStyles]
       <| prePoint :: TimeSeries.fold (\t tpid tp acc -> viewTimePoint tpid tp :: acc) [] ts
+    asHighlight start mDuration (hlStarts, prevEnd) = case mDuration of
+        Nothing -> (toEm ((tFloat start) - prevEnd) :: "1fr" :: hlStarts, prevEnd)
+        Just duration ->
+          let
+            fStart = tFloat start
+            fDuration = tFloat duration
+          in (toEm (fStart - prevEnd) :: toEm fDuration :: hlStarts, fStart + fDuration)
+    (hlStarts, _) = Dict.foldr asHighlight ([], 0.0) cts
+    highlightGrid = div
+      [style
+        [ gridStyle, ("position", "absolute"), ("top", "0px"), ("left", "0px"), ("height", "100%"), ("z-index", "-1")
+        , ("grid-template-columns", String.join " " hlStarts)]
+      ]
+      <| List.map (\i -> div [style [("grid-column-start", toString <| 2 * (i + 1)), ("background", "purple")]] []) <| List.range 0 <| Dict.size cts - 1
     popOvers = if True
       then [div
         [style
           [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| 60 * scale)
           , ("background", "lightblue")]]
-        [text "gubbins"]
+        [text <| toString hlStarts]
         ]
       else []
-  in div [style [("position", "relative")]] <| contentGrid :: popOvers
+  in div [style [("position", "relative")]] <| highlightGrid :: contentGrid :: popOvers
 
 viewTimePoint : TpId -> TimePoint -> Html a
-viewTimePoint _ _ = div [style [("border-left", "medium solid red"), ("background", "lightgreen")]] [text "foo"]
+viewTimePoint _ _ = div [style [("border-left", "medium solid red"), ("background-color", "rgba(127, 255, 127, 0.7)")]] [text "foo"]
 
 viewTsLabel : String -> Html a
 viewTsLabel name = div [] [text name]
