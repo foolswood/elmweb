@@ -15,7 +15,7 @@ main = H.beginnerProgram
   , update = updateFlow
   }
 
-type alias Pos = {x : Int, y : Int}
+type alias Pos = (Int, Int)
 
 type DragStartElem
   = DragFromInput String
@@ -40,12 +40,12 @@ exampleFlow : FlowModel
 exampleFlow =
   { dragging = Nothing
   , inputs = Dict.fromList
-    [ ("a", {x = 70, y = 100})
-    , ("b", {x = 20, y = 30})
+    [ ("a", (70, 100))
+    , ("b", (20, 30))
     ]
   , outputs = Dict.fromList
-    [ ("o", {x = 100, y = 30})
-    , ("p", {x = 20, y = 100})
+    [ ("o", (100, 30))
+    , ("p", (20, 100))
     ]
   , connections = Set.fromList
     [ ("a", "o")
@@ -118,9 +118,9 @@ viewFlow m =
                     else if Set.member endK existing
                         then [SA.strokeWidth "2", SA.strokeDasharray "5,5", SA.stroke "red"]
                         else [SA.strokeWidth "1", SA.strokeDasharray "10,10", SA.stroke "grey"]
-            asDragLine startPos = flip S.line [] <|
-                [ SA.x1 <| toString <| .x pos, SA.y1 <| toString <| .y pos
-                , SA.x2 <| toString <| .x startPos, SA.y2 <| toString <| .y startPos
+            asDragLine (sx, sy) = flip S.line [] <|
+                [ SA.x1 <| toString <| Tuple.first pos, SA.y1 <| toString <| Tuple.second pos
+                , SA.x2 <| toString sx, SA.y2 <| toString sy
                 ] ++ dragLineStyle
             keyState k = if Set.member k possibleNew
                 then EsAdd
@@ -143,28 +143,28 @@ viewFlow m =
       [ SE.onMouseOver <| DragSetEnd <| Just k
       , SE.onMouseOut <| DragSetEnd Nothing
       ]
-    input es k pos =
+    input es k (x, y) =
       let
-        commonAttrs = [SA.cx <| toString <| .x pos, SA.cy <| toString <| .y pos, SA.r "10"]
+        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "10"]
         stateAttrs = case es of
             EsInactive -> [SA.fill "grey"]
-            EsNormal -> [SA.fill "blue", SE.onMouseDown <| StartDrag (DragFromInput k) pos]
+            EsNormal -> [SA.fill "blue", SE.onMouseDown <| StartDrag (DragFromInput k) (x, y)]
             EsAdd -> SA.fill "green" :: dragTargetActions k
             EsRemove -> SA.fill "red" :: dragTargetActions k
       in S.circle (commonAttrs ++ stateAttrs) []
-    output es k pos =
+    output es k (x, y) =
       let
-        commonAttrs = [SA.cx <| toString <| .x pos, SA.cy <| toString <| .y pos, SA.r "8"]
+        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "8"]
         stateAttrs = case es of
             EsInactive -> [SA.fill "grey"]
-            EsNormal -> [SA.fill "blue", SE.onMouseDown <| StartDrag (DragFromOutput k) pos]
+            EsNormal -> [SA.fill "blue", SE.onMouseDown <| StartDrag (DragFromOutput k) (x, y)]
             EsAdd -> SA.fill "green" :: dragTargetActions k
             EsRemove -> SA.fill "red" :: dragTargetActions k
       in S.circle (commonAttrs ++ stateAttrs) []
     inputs = List.map (\(k, v) -> input (inputState k) k v) <| Dict.toList <| .inputs m
     outputs = List.map (\(k, v) -> output (outputState k) k v) <| Dict.toList <| .outputs m
     addLine (startK, endK) acc = case (Dict.get startK <| .inputs m, Dict.get endK <| .outputs m) of
-        (Just start, Just end) -> S.line [SA.strokeWidth "2", SA.stroke "black", SA.x1 <| toString <| .x start, SA.x2 <| toString <| .x end, SA.y1 <| toString <| .y start, SA.y2 <| toString <| .y end] [] :: acc
+        (Just (sx, sy), Just (ex, ey)) -> S.line [SA.strokeWidth "2", SA.stroke "black", SA.x1 <| toString sx, SA.x2 <| toString ex, SA.y1 <| toString sy, SA.y2 <| toString ey] [] :: acc
         _ -> acc
     completeLines = Set.foldl addLine [] <| .connections m
   in S.svg globalAttrs <| completeLines ++ (maybeToList dragLine) ++ inputs ++ outputs
@@ -191,5 +191,5 @@ updateFlow e m = case e of
         Just d -> {m | dragging = Just {d | end = mk}}
     Dragging x y -> case .dragging m of
         Nothing -> m
-        Just d -> {m | dragging = Just {d | pos = {x = x, y = y}}}
+        Just d -> {m | dragging = Just {d | pos = (x, y)}}
     DoSodAll -> m
