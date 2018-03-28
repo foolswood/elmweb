@@ -15,23 +15,48 @@ main = H.beginnerProgram
   , update = updateFlow
   }
 
+type alias Pos = {x : Int, y : Int}
+
+type DragStartElem
+  = DragFromInput String
+  | DragFromOutput String
+
+type alias DragData =
+  { start : DragStartElem
+  , pos : Pos
+  , end : Maybe String
+  }
+
+type alias Connection = (String, String)
+
+type alias FlowModel =
+  { dragging : Maybe DragData
+  , inputs : Dict String Pos
+  , outputs : Dict String Pos
+  , connections : Set Connection
+  }
+
+exampleFlow : FlowModel
 exampleFlow =
   { dragging = Nothing
-  , circles = Dict.fromList
+  , inputs = Dict.fromList
     [ ("a", {x = 70, y = 100})
     , ("b", {x = 20, y = 30})
-    , ("c", {x = 100, y = 60})
     ]
-  , lines = Set.fromList
-    [ ("a", "b")
-    , ("b", "c")
+  , outputs = Dict.fromList
+    [ ("o", {x = 100, y = 30})
+    , ("p", {x = 20, y = 100})
+    ]
+  , connections = Set.fromList
+    [ ("a", "o")
     ]
   }
 
 type FlowEvent
-  = StartDrag String
+  = StartDrag DragStartElem Pos
   | StopDrag
   | Dragging Int Int
+  | DragSetEnd (Maybe String)
   | DoSodAll
 
 mouseMove : (Int -> Int -> evt) -> S.Attribute evt
@@ -43,27 +68,128 @@ mouseMove e =
 preventDragging : H.Attribute FlowEvent
 preventDragging = HE.onWithOptions "dragstart" {preventDefault = True, stopPropagation = True} <| JD.succeed DoSodAll
 
+keysSet : Dict comparable v -> Set comparable
+keysSet = Set.fromList << Dict.keys
+
+dragEnds : DragStartElem -> FlowModel -> (Bool, Set String, Set String)
+dragEnds start m = case start of
+    DragFromInput startK ->
+      let
+        conExists endK = Set.member (startK, endK) <| .connections m
+        (existing, possibleNew) = Set.partition conExists <| keysSet <| .outputs m
+      in (False, possibleNew, existing)
+    DragFromOutput startK ->
+      let
+        conExists endK = Set.member (endK, startK) <| .connections m
+        (existing, possibleNew) = Set.partition conExists <| keysSet <| .inputs m
+      in (True, possibleNew, existing)
+
+type EndpointState
+  = EsNormal
+  | EsInactive
+  | EsAdd
+  | EsRemove
+
+maybeToList : Maybe a -> List a
+maybeToList m = case m of
+    Nothing -> []
+    Just a -> [a]
+
+viewFlow : FlowModel -> H.Html FlowEvent
 viewFlow m =
   let
-    globalAttrs = case .dragging m of
-      Just _ -> [mouseMove Dragging, SE.onMouseUp StopDrag, preventDragging, HE.onMouseLeave StopDrag]
-      Nothing -> [preventDragging]
-    draggyCircle k pos = S.circle
-      [ SA.cx <| toString <| .x pos, SA.cy <| toString <| .y pos, SA.r "10"
-      , SE.onMouseDown <| StartDrag k
+    {inputState, outputState, dragLine, globalAttrs} = case .dragging m of
+        Nothing ->
+          { inputState = always EsNormal
+          , outputState = always EsNormal
+          , dragLine = Nothing
+          , globalAttrs = []
+          }
+        Just {start, pos, end} ->
+          let
+            (fromOutput, possibleNew, existing) = dragEnds start m
+            mStartingElem = case start of
+                DragFromInput k -> Dict.get k <| .inputs m
+                DragFromOutput k -> Dict.get k <| .outputs m
+            dragLineStyle = case end of
+                Nothing -> [SA.strokeWidth "1", SA.strokeDasharray "10,10", SA.stroke "blue"]
+                Just endK -> if Set.member endK possibleNew
+                    then [SA.strokeWidth "2", SA.strokeDasharray "5,5", SA.stroke "green"]
+                    else if Set.member endK existing
+                        then [SA.strokeWidth "2", SA.strokeDasharray "5,5", SA.stroke "red"]
+                        else [SA.strokeWidth "1", SA.strokeDasharray "10,10", SA.stroke "grey"]
+            asDragLine startPos = flip S.line [] <|
+                [ SA.x1 <| toString <| .x pos, SA.y1 <| toString <| .y pos
+                , SA.x2 <| toString <| .x startPos, SA.y2 <| toString <| .y startPos
+                ] ++ dragLineStyle
+            keyState k = if Set.member k possibleNew
+                then EsAdd
+                else if Set.member k existing
+                    then EsRemove
+                    else EsInactive
+            outputState k = if fromOutput
+                then EsNormal
+                else keyState k
+            inputState k = if fromOutput
+                then keyState k
+                else EsNormal
+          in
+            { inputState = inputState
+            , outputState = outputState
+            , dragLine = Maybe.map asDragLine mStartingElem
+            , globalAttrs = [mouseMove Dragging, SE.onMouseUp StopDrag, preventDragging, HE.onMouseLeave StopDrag]
+            }
+    dragTargetActions k =
+      [ SE.onMouseOver <| DragSetEnd <| Just k
+      , SE.onMouseOut <| DragSetEnd Nothing
       ]
-      []
-    circles = List.map (uncurry draggyCircle) <| Dict.toList <| .circles m
-    addLine (startK, endK) acc = case (Dict.get startK <| .circles m, Dict.get endK <| .circles m) of
-        (Just start, Just end) -> S.line [SA.strokeWidth "1", SA.stroke "black", SA.x1 <| toString <| .x start, SA.x2 <| toString <| .x end, SA.y1 <| toString <| .y start, SA.y2 <| toString <| .y end] [] :: acc
+    input es k pos =
+      let
+        commonAttrs = [SA.cx <| toString <| .x pos, SA.cy <| toString <| .y pos, SA.r "10"]
+        stateAttrs = case es of
+            EsInactive -> [SA.fill "grey"]
+            EsNormal -> [SA.fill "blue", SE.onMouseDown <| StartDrag (DragFromInput k) pos]
+            EsAdd -> SA.fill "green" :: dragTargetActions k
+            EsRemove -> SA.fill "red" :: dragTargetActions k
+      in S.circle (commonAttrs ++ stateAttrs) []
+    output es k pos =
+      let
+        commonAttrs = [SA.cx <| toString <| .x pos, SA.cy <| toString <| .y pos, SA.r "8"]
+        stateAttrs = case es of
+            EsInactive -> [SA.fill "grey"]
+            EsNormal -> [SA.fill "blue", SE.onMouseDown <| StartDrag (DragFromOutput k) pos]
+            EsAdd -> SA.fill "green" :: dragTargetActions k
+            EsRemove -> SA.fill "red" :: dragTargetActions k
+      in S.circle (commonAttrs ++ stateAttrs) []
+    inputs = List.map (\(k, v) -> input (inputState k) k v) <| Dict.toList <| .inputs m
+    outputs = List.map (\(k, v) -> output (outputState k) k v) <| Dict.toList <| .outputs m
+    addLine (startK, endK) acc = case (Dict.get startK <| .inputs m, Dict.get endK <| .outputs m) of
+        (Just start, Just end) -> S.line [SA.strokeWidth "2", SA.stroke "black", SA.x1 <| toString <| .x start, SA.x2 <| toString <| .x end, SA.y1 <| toString <| .y start, SA.y2 <| toString <| .y end] [] :: acc
         _ -> acc
-    lines = Set.foldl addLine [] <| .lines m
-  in S.svg globalAttrs <| lines ++ circles
+    completeLines = Set.foldl addLine [] <| .connections m
+  in S.svg globalAttrs <| completeLines ++ (maybeToList dragLine) ++ inputs ++ outputs
 
+connectionFor : DragData -> Maybe Connection
+connectionFor {start, end} = case end of
+    Nothing -> Nothing
+    Just endK -> case start of
+        DragFromInput startK -> Just (startK, endK)
+        DragFromOutput startK -> Just (endK, startK)
+
+updateFlow : FlowEvent -> FlowModel -> FlowModel
 updateFlow e m = case e of
-    StartDrag k -> {m | dragging = Just k}
-    StopDrag -> {m | dragging = Nothing}
+    StartDrag dse pos -> {m | dragging = Just {pos = pos, start = dse, end = Nothing}}
+    StopDrag ->
+      let
+        toggleCon con cons = if Set.member con cons
+            then Set.remove con cons
+            else Set.insert con cons
+        conChange = Maybe.withDefault identity <| Maybe.andThen (Maybe.map toggleCon << connectionFor) <| .dragging m
+      in {m | dragging = Nothing, connections = conChange <| .connections m}
+    DragSetEnd mk -> case .dragging m of
+        Nothing -> m
+        Just d -> {m | dragging = Just {d | end = mk}}
     Dragging x y -> case .dragging m of
         Nothing -> m
-        Just k -> {m | circles = Dict.update k (always <| Just {x = x, y = y}) <| .circles m}
+        Just d -> {m | dragging = Just {d | pos = {x = x, y = y}}}
     DoSodAll -> m
