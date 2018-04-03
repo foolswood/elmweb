@@ -15,48 +15,101 @@ main = H.beginnerProgram
   , update = updateFlow
   }
 
+type alias PortId = String
+type alias ElemId = String
+type alias TermId = (ElemId, PortId)
+
+type DragStartElem a
+  = DragFromInput a
+  | DragFromOutput a
+
+mapDSE : (a -> b) -> DragStartElem a -> DragStartElem b
+mapDSE f e = case e of
+    DragFromInput a -> DragFromInput <| f a
+    DragFromOutput a -> DragFromOutput <| f a
+
 type alias Pos = (Int, Int)
 
-type DragStartElem
-  = DragFromInput String
-  | DragFromOutput String
-
 type alias DragData =
-  { start : DragStartElem
+  { start : DragStartElem TermId
   , pos : Pos
-  , end : Maybe String
+  , end : Maybe TermId
   }
 
-type alias Connection = (String, String)
+type alias Element =
+  -- FIXME: Are these assoc lists?
+  { inputs : Dict PortId String
+  , outputs : Dict PortId {desc : String, cons : Set TermId}
+  }
+
+unionSets : List (Set comparable) -> Set comparable
+unionSets = List.foldl Set.union Set.empty
+
+nextElems : Element -> Set ElemId
+nextElems {outputs} = Set.fromList <| List.concatMap (List.map Tuple.first << Set.toList << .cons) <| Dict.values outputs
+
+elemCons : Dict ElemId Element -> {fwd : Dict ElemId (Set ElemId), rev : Dict ElemId (Set ElemId)}
+elemCons allElems =
+  let
+    fwd = Dict.map (always nextElems) allElems
+    rev = Dict.foldl insertRevEntries Dict.empty fwd
+    insertRevEntries k vs acc = Set.foldl (\v -> Dict.update v <| Just << Set.insert k << Maybe.withDefault Set.empty) acc vs
+  in {fwd = fwd, rev = rev}
+
+allowed : (ElemId -> Maybe (Set ElemId)) -> (Element -> Set PortId) -> ElemId -> Dict ElemId Element -> Set TermId
+allowed next ports targetEid allElems =
+  let
+    getLoopy next eid = Set.insert eid <| case next eid of
+        Nothing -> Set.empty
+        Just n -> unionSets <| List.map (getLoopy next) <| Set.toList n
+    loopyElems = getLoopy next targetEid
+    asTerms eid = Set.map (\pid -> (eid, pid))
+    termsFor eid e acc = if Set.member eid loopyElems
+        then acc
+        else Set.union acc <| asTerms eid <| ports e
+  in Dict.foldl termsFor Set.empty allElems
+
+allowedOuts : TermId -> Dict ElemId Element -> Set TermId
+allowedOuts (inEid, _) allElems =
+  allowed (\eid -> Maybe.map nextElems <| Dict.get eid allElems) (keysSet << .outputs) inEid allElems
+
+allowedIns : TermId -> Dict ElemId Element -> Set TermId
+allowedIns (outEid, _) allElems =
+  let
+    {rev} = elemCons allElems
+  in allowed (\eid -> Dict.get eid rev) (keysSet << .inputs) outEid allElems
 
 type alias FlowModel =
   { dragging : Maybe DragData
-  , inputs : Dict String Pos
-  , outputs : Dict String Pos
-  , connections : Set Connection
+  , elements : Dict ElemId Element
   }
 
 exampleFlow : FlowModel
 exampleFlow =
-  { dragging = Nothing
-  , inputs = Dict.fromList
-    [ ("a", (70, 100))
-    , ("b", (20, 30))
-    ]
-  , outputs = Dict.fromList
-    [ ("o", (100, 30))
-    , ("p", (20, 100))
-    ]
-  , connections = Set.fromList
-    [ ("a", "o")
-    ]
-  }
+  let
+    titoe cons =
+      { inputs = Dict.fromList
+        [ ("a", "A")
+        , ("b", "B")
+        ]
+      , outputs = Dict.fromList
+        [ ("c", {desc = "C", cons = Set.fromList cons})
+        , ("d", {desc = "D", cons = Set.empty})
+        ]
+      }
+  in
+    { dragging = Nothing
+    , elements = Dict.fromList
+      [ ("e0", titoe [("e1", "b")])
+      , ("e1", titoe [])
+      ]
+    }
 
 type FlowEvent
-  = StartDrag DragStartElem Pos
+  = StartDrag (DragStartElem TermId) Pos
   | StopDrag
   | Dragging Int Int
-  | DragSetEnd (Maybe String)
+  | DragSetEnd (Maybe TermId)
   | DoSodAll
 
 mouseMove : (Int -> Int -> evt) -> S.Attribute evt
@@ -71,17 +124,24 @@ preventDragging = HE.onWithOptions "dragstart" {preventDefault = True, stopPropa
 keysSet : Dict comparable v -> Set comparable
 keysSet = Set.fromList << Dict.keys
 
-dragEnds : DragStartElem -> FlowModel -> (Bool, Set String, Set String)
-dragEnds start m = case start of
+dragEnds : DragStartElem TermId -> FlowModel -> (Bool, Set TermId, Set TermId)
+dragEnds start m =
+  let
+    areConnected (outEid, outPid) inK = case Dict.get outEid <| .elements m of
+        Nothing -> False
+        Just e -> case Dict.get outPid <| .outputs e of
+            Nothing -> False
+            Just {cons} -> Set.member inK cons
+  in case start of
     DragFromInput startK ->
       let
-        conExists endK = Set.member (startK, endK) <| .connections m
-        (existing, possibleNew) = Set.partition conExists <| keysSet <| .outputs m
+        conExists endK = areConnected endK startK
+        (existing, possibleNew) = Set.partition conExists <| allowedOuts startK <| .elements m
       in (False, possibleNew, existing)
     DragFromOutput startK ->
       let
-        conExists endK = Set.member (endK, startK) <| .connections m
-        (existing, possibleNew) = Set.partition conExists <| keysSet <| .inputs m
+        conExists = areConnected startK
+        (existing, possibleNew) = Set.partition conExists <| allowedIns startK <| .elements m
       in (True, possibleNew, existing)
 
 type EndpointState
@@ -95,22 +155,104 @@ maybeToList m = case m of
     Nothing -> []
     Just a -> [a]
 
+type PortEvent
+  = PeDragStart (DragStartElem PortId) Pos
+  | PeDragOver (Maybe PortId)
+
+viewElement
+   : (PortId -> EndpointState) -> (PortId -> EndpointState) -> Element
+  -> {size : Pos, hs : List (H.Html PortEvent), ins : Dict PortId Pos, outs : Dict PortId Pos}
+viewElement inState outState e =
+  let
+    midSpaceWidth = 5
+    conWidth = 20
+    headHeight = 30
+    conHeight = 30
+    maxCons = max (Dict.size <| .inputs e) (Dict.size <| .outputs e)
+    totalWidth = midSpaceWidth + (conWidth * 2)
+    totalHeight = headHeight + (maxCons * conHeight)
+    dragTargetActions pid =
+      [ SE.onMouseOver <| PeDragOver <| Just pid
+      , SE.onMouseOut <| PeDragOver Nothing
+      ]
+    inputLoc idx = (0, headHeight + (conHeight * idx))
+    input idx pid =
+      let
+        (x, y) = inputLoc idx
+        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "10"]
+        stateAttrs = case inState pid of
+            EsInactive -> [SA.fill "grey"]
+            EsNormal -> [SA.fill "blue", SE.onMouseDown <| PeDragStart (DragFromInput pid) (x, y)]
+            EsAdd -> SA.fill "green" :: dragTargetActions pid
+            EsRemove -> SA.fill "red" :: dragTargetActions pid
+      in S.circle (commonAttrs ++ stateAttrs) []
+    outputLoc idx = (totalWidth, headHeight + (conHeight * idx))
+    output idx pid =
+      let
+        (x, y) = outputLoc idx
+        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "8"]
+        stateAttrs = case outState pid of
+            EsInactive -> [SA.fill "grey"]
+            EsNormal -> [SA.fill "blue", SE.onMouseDown <| PeDragStart (DragFromOutput pid) (x, y)]
+            EsAdd -> SA.fill "green" :: dragTargetActions pid
+            EsRemove -> SA.fill "red" :: dragTargetActions pid
+      in S.circle (commonAttrs ++ stateAttrs) []
+    box = S.rect
+      [ SA.width <| toString totalWidth, SA.height <| toString totalHeight ]
+      []
+    inHs = List.indexedMap input <| Dict.keys <| .inputs e
+    outHs = List.indexedMap output <| Dict.keys <| .outputs e
+    insPos = Dict.fromList <| List.indexedMap (\idx k -> (k, inputLoc idx)) <| Dict.keys <| .inputs e
+    outsPos = Dict.fromList <| List.indexedMap (\idx k -> (k, outputLoc idx)) <| Dict.keys <| .outputs e
+  in {size = (totalWidth, totalHeight), hs = box :: inHs ++ outHs, ins = insPos, outs = outsPos}
+
+viewElements : (TermId -> EndpointState) -> (TermId -> EndpointState) -> Dict ElemId Element -> {hs : List (H.Html FlowEvent), ins : Dict TermId Pos, outs : Dict TermId Pos}
+viewElements inState outState elems =
+  let
+    elemViews = Dict.map (\eid e -> viewElement (\pid -> inState (eid, pid)) (\pid -> outState (eid, pid)) e) elems
+    positionedElemViews = Dict.fromList <| List.indexedMap (\idx (eid, ev) -> (eid, ((idx * 100, idx * 50), ev))) <| Dict.toList elemViews
+    bindPortEvt eid evt =
+      let
+        bindPid pid = (eid, pid)
+      in case evt of
+        PeDragStart dse pos ->
+          let
+            boundDSE = mapDSE bindPid dse
+          in StartDrag boundDSE <| posOf boundDSE
+        PeDragOver mPid -> DragSetEnd <| Maybe.map bindPid mPid
+    hGroups = List.map
+        (\(eid, (pos, ev)) -> S.map (bindPortEvt eid) <| S.g [SA.transform <| "translate" ++ toString pos] <| .hs ev)
+        <| Dict.toList positionedElemViews
+    tagTerm f eid ((ex, ey), e) acc = Dict.foldl (\pid (px, py) -> Dict.insert (eid, pid) (ex + px, ey + py)) acc <| f e
+    tagTerms f = Dict.foldl (tagTerm f) Dict.empty positionedElemViews
+    insPos = tagTerms .ins
+    outsPos = tagTerms .outs
+    posOf dse = Maybe.withDefault (0,0) <| case dse of
+        DragFromInput tid -> Dict.get tid insPos
+        DragFromOutput tid -> Dict.get tid outsPos
+    oConLines eid (oid, o) =
+      let
+        opos = posOf <| DragFromOutput (eid, oid)
+        endsAt itid = (opos, posOf <| DragFromInput itid)
+      in List.map endsAt <| Set.toList <| .cons o
+    conLines (eid, e) = List.concatMap (oConLines eid) <| Dict.toList <| .outputs e
+    lineEnds = List.concatMap conLines <| Dict.toList elems
+    lines = List.map (\((ax, ay), (bx, by)) -> S.line [SA.x1 <| toString ax, SA.x2 <| toString bx, SA.y1 <| toString ay, SA.y2 <| toString by, SA.stroke "black", SA.strokeWidth "2"] []) lineEnds
+  in {hs = lines ++ hGroups, ins = insPos, outs = outsPos}
+
 viewFlow : FlowModel -> H.Html FlowEvent
 viewFlow m =
   let
-    {inputState, outputState, dragLine, globalAttrs} = case .dragging m of
+    {inputState, outputState, mDrag, globalAttrs} = case .dragging m of
         Nothing ->
           { inputState = always EsNormal
           , outputState = always EsNormal
-          , dragLine = Nothing
+          , mDrag = Nothing
           , globalAttrs = []
           }
         Just {start, pos, end} ->
           let
             (fromOutput, possibleNew, existing) = dragEnds start m
-            mStartingElem = case start of
-                DragFromInput k -> Dict.get k <| .inputs m
-                DragFromOutput k -> Dict.get k <| .outputs m
             dragLineStyle = case end of
                 Nothing -> [SA.strokeWidth "1", SA.strokeDasharray "10,10", SA.stroke "blue"]
                 Just endK -> if Set.member endK possibleNew
@@ -118,10 +260,16 @@ viewFlow m =
                     else if Set.member endK existing
                         then [SA.strokeWidth "2", SA.strokeDasharray "5,5", SA.stroke "red"]
                         else [SA.strokeWidth "1", SA.strokeDasharray "10,10", SA.stroke "grey"]
-            asDragLine (sx, sy) = flip S.line [] <|
-                [ SA.x1 <| toString <| Tuple.first pos, SA.y1 <| toString <| Tuple.second pos
-                , SA.x2 <| toString sx, SA.y2 <| toString sy
-                ] ++ dragLineStyle
+            asDragLine insPos outsPos =
+              let
+                mStartPos = case start of
+                    DragFromInput startK -> Dict.get startK insPos
+                    DragFromOutput startK -> Dict.get startK outsPos
+                l (sx, sy) = flip S.line [] <|
+                    [ SA.x1 <| toString <| Tuple.first pos, SA.y1 <| toString <| Tuple.second pos
+                    , SA.x2 <| toString sx, SA.y2 <| toString sy
+                    ] ++ dragLineStyle
+              in Maybe.map l mStartPos
             keyState k = if Set.member k possibleNew
                 then EsAdd
                 else if Set.member k existing
@@ -136,56 +284,36 @@ viewFlow m =
           in
             { inputState = inputState
             , outputState = outputState
-            , dragLine = Maybe.map asDragLine mStartingElem
+            , mDrag = Just asDragLine
             , globalAttrs = [mouseMove Dragging, SE.onMouseUp StopDrag, preventDragging, HE.onMouseLeave StopDrag]
             }
-    dragTargetActions k =
-      [ SE.onMouseOver <| DragSetEnd <| Just k
-      , SE.onMouseOut <| DragSetEnd Nothing
-      ]
-    input es k (x, y) =
-      let
-        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "10"]
-        stateAttrs = case es of
-            EsInactive -> [SA.fill "grey"]
-            EsNormal -> [SA.fill "blue", SE.onMouseDown <| StartDrag (DragFromInput k) (x, y)]
-            EsAdd -> SA.fill "green" :: dragTargetActions k
-            EsRemove -> SA.fill "red" :: dragTargetActions k
-      in S.circle (commonAttrs ++ stateAttrs) []
-    output es k (x, y) =
-      let
-        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "8"]
-        stateAttrs = case es of
-            EsInactive -> [SA.fill "grey"]
-            EsNormal -> [SA.fill "blue", SE.onMouseDown <| StartDrag (DragFromOutput k) (x, y)]
-            EsAdd -> SA.fill "green" :: dragTargetActions k
-            EsRemove -> SA.fill "red" :: dragTargetActions k
-      in S.circle (commonAttrs ++ stateAttrs) []
-    inputs = List.map (\(k, v) -> input (inputState k) k v) <| Dict.toList <| .inputs m
-    outputs = List.map (\(k, v) -> output (outputState k) k v) <| Dict.toList <| .outputs m
-    addLine (startK, endK) acc = case (Dict.get startK <| .inputs m, Dict.get endK <| .outputs m) of
-        (Just (sx, sy), Just (ex, ey)) -> S.line [SA.strokeWidth "2", SA.stroke "black", SA.x1 <| toString sx, SA.x2 <| toString ex, SA.y1 <| toString sy, SA.y2 <| toString ey] [] :: acc
-        _ -> acc
-    completeLines = Set.foldl addLine [] <| .connections m
-  in S.svg globalAttrs <| completeLines ++ (maybeToList dragLine) ++ inputs ++ outputs
+    {hs, ins, outs} = viewElements inputState outputState <| .elements m
+    mDragLine = Maybe.andThen (\f -> f ins outs) mDrag
+  in S.svg globalAttrs <| maybeToList mDragLine ++ hs
 
-connectionFor : DragData -> Maybe Connection
-connectionFor {start, end} = case end of
-    Nothing -> Nothing
-    Just endK -> case start of
-        DragFromInput startK -> Just (startK, endK)
-        DragFromOutput startK -> Just (endK, startK)
+setToggleElem : comparable -> Set comparable -> Set comparable
+setToggleElem elem elems = if Set.member elem elems
+    then Set.remove elem elems
+    else Set.insert elem elems
 
 updateFlow : FlowEvent -> FlowModel -> FlowModel
 updateFlow e m = case e of
     StartDrag dse pos -> {m | dragging = Just {pos = pos, start = dse, end = Nothing}}
     StopDrag ->
       let
-        toggleCon con cons = if Set.member con cons
-            then Set.remove con cons
-            else Set.insert con cons
-        conChange = Maybe.withDefault identity <| Maybe.andThen (Maybe.map toggleCon << connectionFor) <| .dragging m
-      in {m | dragging = Nothing, connections = conChange <| .connections m}
+        newElems = case .dragging m of
+            Nothing -> .elements m
+            Just {start, end} -> case end of
+                Nothing -> .elements m
+                Just endK -> case start of
+                    DragFromInput startK -> toggleCon endK startK
+                    DragFromOutput startK -> toggleCon startK endK
+        toggleCon (outEid, outPid) inTid =
+          let
+            tc2 = Maybe.map <| \c -> {c | cons = setToggleElem inTid <| .cons c}
+            tc = Maybe.map <| \e -> {e | outputs = Dict.update outPid tc2 <| .outputs e}
+          in Dict.update outEid tc <| .elements m
+      in {m | dragging = Nothing, elements = newElems}
     DragSetEnd mk -> case .dragging m of
         Nothing -> m
         Just d -> {m | dragging = Just {d | end = mk}}
