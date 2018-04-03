@@ -10,6 +10,8 @@ import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
 
+import Futility exposing (unionSets, keysSet, maybeToList, setToggleElem)
+
 main = H.beginnerProgram
   { model = exampleFlow
   , view = viewFlow
@@ -43,9 +45,6 @@ type alias Element =
   , inputs : Dict PortId String
   , outputs : Dict PortId {desc : String, cons : Set TermId}
   }
-
-unionSets : List (Set comparable) -> Set comparable
-unionSets = List.foldl Set.union Set.empty
 
 nextElems : Element -> Set ElemId
 nextElems {outputs} = Set.fromList <| List.concatMap (List.map Tuple.first << Set.toList << .cons) <| Dict.values outputs
@@ -124,9 +123,6 @@ mouseMove e =
 preventDragging : H.Attribute FlowEvent
 preventDragging = HE.onWithOptions "dragstart" {preventDefault = True, stopPropagation = True} <| JD.succeed DoSodAll
 
-keysSet : Dict comparable v -> Set comparable
-keysSet = Set.fromList << Dict.keys
-
 dragEnds : DragStartElem TermId -> FlowModel -> (Bool, Set TermId, Set TermId)
 dragEnds start m =
   let
@@ -152,11 +148,6 @@ type EndpointState
   | EsInactive
   | EsAdd
   | EsRemove
-
-maybeToList : Maybe a -> List a
-maybeToList m = case m of
-    Nothing -> []
-    Just a -> [a]
 
 type PortEvent
   = PeDragStart (DragStartElem PortId) Pos
@@ -318,11 +309,6 @@ viewFlow m =
     {hs, ins, outs} = viewElements inputState outputState <| .elements m
     mDragLine = Maybe.andThen (\f -> f ins outs) mDrag
   in S.svg ([HA.width 1000, HA.height 500] ++ globalAttrs) <| maybeToList mDragLine ++ hs
-
-setToggleElem : comparable -> Set comparable -> Set comparable
-setToggleElem elem elems = if Set.member elem elems
-    then Set.remove elem elems
-    else Set.insert elem elems
 
 updateFlow : FlowEvent -> FlowModel -> FlowModel
 updateFlow e m = case e of

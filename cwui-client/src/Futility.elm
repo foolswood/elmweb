@@ -54,3 +54,19 @@ type alias Conv outer inner =
 type Either l r
   = Left l
   | Right r
+
+unionSets : List (Set comparable) -> Set comparable
+unionSets = List.foldl Set.union Set.empty
+
+keysSet : Dict comparable v -> Set comparable
+keysSet = Set.fromList << Dict.keys
+
+maybeToList : Maybe a -> List a
+maybeToList m = case m of
+    Nothing -> []
+    Just a -> [a]
+
+setToggleElem : comparable -> Set comparable -> Set comparable
+setToggleElem elem elems = if Set.member elem elems
+    then Set.remove elem elems
+    else Set.insert elem elems
