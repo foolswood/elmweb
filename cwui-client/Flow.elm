@@ -168,8 +168,8 @@ viewElement
 viewElement inState outState e =
   let
     midSpaceWidth = 5
-    conWidth = 30
-    headHeight = 25
+    conWidth = 40
+    headHeight = 40
     headBorder = 4
     conHeight = 25
     firstConCenter = round <| headHeight + (conHeight / 2)
@@ -184,7 +184,6 @@ viewElement inState outState e =
     input idx pid =
       let
         (x, y) = inputLoc idx
-        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "10"]
         stateAttrs = case inState pid of
             EsInactive -> [SA.fill "grey"]
             EsNormal -> [SA.fill "blue", SE.onMouseDown <| PeDragStart (DragFromInput pid) (x, y)]
@@ -197,12 +196,11 @@ viewElement inState outState e =
           , "v-20"
           , "Z"
           ]
-      in S.path (inputPath :: commonAttrs ++ stateAttrs) []
+      in S.path (inputPath :: stateAttrs) []
     outputLoc idx = (totalWidth, firstConCenter + (conHeight * idx))
     output idx pid =
       let
         (x, y) = outputLoc idx
-        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "10"]
         stateAttrs = case outState pid of
             EsInactive -> [SA.fill "grey"]
             EsNormal -> [SA.fill "blue", SE.onMouseDown <| PeDragStart (DragFromOutput pid) (x, y)]
@@ -215,14 +213,14 @@ viewElement inState outState e =
           , "a 10 10 0 0 1 0 20"
           , "Z"
           ]
-      in S.path (outputPath :: commonAttrs ++ stateAttrs) []
+      in S.path (outputPath :: stateAttrs) []
     box = S.rect
       [ SA.width <| toString totalWidth, SA.height <| toString totalHeight, SA.fill "lightgrey", SA.stroke "black" ]
       []
     heading = S.foreignObject
       [ SA.transform <| "translate" ++ toString (headBorder/2,headBorder/2)
       , SA.width <| toString <| totalWidth - headBorder, SA.height <| toString <| headHeight - headBorder]
-      [ H.body [HA.attribute "xmlns" "http://www.w3.org/1999/xhtml"] [H.text <| .desc e] ]
+      [ H.div [HA.attribute "xmlns" "http://www.w3.org/1999/xhtml"] [H.input [HA.size 4, HA.type_ "text", HA.value <| .desc e] []] ]
     inHs = List.indexedMap input <| Dict.keys <| .inputs e
     outHs = List.indexedMap output <| Dict.keys <| .outputs e
     insPos = Dict.fromList <| List.indexedMap (\idx k -> (k, inputLoc idx)) <| Dict.keys <| .inputs e
@@ -233,7 +231,7 @@ viewElements : (TermId -> EndpointState) -> (TermId -> EndpointState) -> Dict El
 viewElements inState outState elems =
   let
     elemViews = Dict.map (\eid e -> viewElement (\pid -> inState (eid, pid)) (\pid -> outState (eid, pid)) e) elems
-    positionedElemViews = Dict.fromList <| List.indexedMap (\idx (eid, ev) -> (eid, ((idx * 100, idx * 50), ev))) <| Dict.toList elemViews
+    positionedElemViews = Dict.fromList <| List.indexedMap (\idx (eid, ev) -> (eid, ((idx * 200, idx * 100), ev))) <| Dict.toList elemViews
     bindPortEvt eid evt =
       let
         bindPid pid = (eid, pid)
@@ -312,7 +310,7 @@ viewFlow m =
             }
     {hs, ins, outs} = viewElements inputState outputState <| .elements m
     mDragLine = Maybe.andThen (\f -> f ins outs) mDrag
-  in S.svg globalAttrs <| maybeToList mDragLine ++ hs
+  in S.svg ([HA.width 1000, HA.height 500] ++ globalAttrs) <| maybeToList mDragLine ++ hs
 
 setToggleElem : comparable -> Set comparable -> Set comparable
 setToggleElem elem elems = if Set.member elem elems
