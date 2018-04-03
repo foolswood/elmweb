@@ -3,6 +3,7 @@ import Set exposing (Set)
 import Json.Decode as JD
 
 import Html as H
+import Html.Attributes as HA
 import Html.Events as HE
 
 import Svg as S
@@ -37,8 +38,9 @@ type alias DragData =
   }
 
 type alias Element =
+  { desc : String
   -- FIXME: Are these assoc lists?
-  { inputs : Dict PortId String
+  , inputs : Dict PortId String
   , outputs : Dict PortId {desc : String, cons : Set TermId}
   }
 
@@ -87,8 +89,9 @@ type alias FlowModel =
 exampleFlow : FlowModel
 exampleFlow =
   let
-    titoe cons =
-      { inputs = Dict.fromList
+    titoe desc cons =
+      { desc = desc
+      , inputs = Dict.fromList
         [ ("a", "A")
         , ("b", "B")
         ]
@@ -100,8 +103,8 @@ exampleFlow =
   in
     { dragging = Nothing
     , elements = Dict.fromList
-      [ ("e0", titoe [("e1", "b")])
-      , ("e1", titoe [])
+      [ ("e0", titoe "Eye Eye Eye Eye" [("e1", "b")])
+      , ("e1", titoe "Patch" [])
       ]
     }
 
@@ -165,17 +168,19 @@ viewElement
 viewElement inState outState e =
   let
     midSpaceWidth = 5
-    conWidth = 20
-    headHeight = 30
-    conHeight = 30
+    conWidth = 30
+    headHeight = 25
+    headBorder = 4
+    conHeight = 25
+    firstConCenter = round <| headHeight + (conHeight / 2)
     maxCons = max (Dict.size <| .inputs e) (Dict.size <| .outputs e)
     totalWidth = midSpaceWidth + (conWidth * 2)
-    totalHeight = headHeight + (maxCons * conHeight)
+    totalHeight = firstConCenter + (round <| (toFloat maxCons - 0.5) * conHeight)
     dragTargetActions pid =
       [ SE.onMouseOver <| PeDragOver <| Just pid
       , SE.onMouseOut <| PeDragOver Nothing
       ]
-    inputLoc idx = (0, headHeight + (conHeight * idx))
+    inputLoc idx = (0, firstConCenter + (conHeight * idx))
     input idx pid =
       let
         (x, y) = inputLoc idx
@@ -185,26 +190,44 @@ viewElement inState outState e =
             EsNormal -> [SA.fill "blue", SE.onMouseDown <| PeDragStart (DragFromInput pid) (x, y)]
             EsAdd -> SA.fill "green" :: dragTargetActions pid
             EsRemove -> SA.fill "red" :: dragTargetActions pid
-      in S.circle (commonAttrs ++ stateAttrs) []
-    outputLoc idx = (totalWidth, headHeight + (conHeight * idx))
+        inputPath = SA.d <| String.join " "
+          [ "M0 " ++ toString (y - 10)
+          , "a 10 10 0 0 0 0 20"
+          , "h" ++ toString conWidth
+          , "v-20"
+          , "Z"
+          ]
+      in S.path (inputPath :: commonAttrs ++ stateAttrs) []
+    outputLoc idx = (totalWidth, firstConCenter + (conHeight * idx))
     output idx pid =
       let
         (x, y) = outputLoc idx
-        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "8"]
+        commonAttrs = [SA.cx <| toString x, SA.cy <| toString y, SA.r "10"]
         stateAttrs = case outState pid of
             EsInactive -> [SA.fill "grey"]
             EsNormal -> [SA.fill "blue", SE.onMouseDown <| PeDragStart (DragFromOutput pid) (x, y)]
             EsAdd -> SA.fill "green" :: dragTargetActions pid
             EsRemove -> SA.fill "red" :: dragTargetActions pid
-      in S.circle (commonAttrs ++ stateAttrs) []
+        outputPath = SA.d <| String.join " "
+          [ "M" ++ toString (totalWidth - conWidth) ++ " " ++ toString (y + 10)
+          , "v-20"
+          , "h" ++ toString conWidth
+          , "a 10 10 0 0 1 0 20"
+          , "Z"
+          ]
+      in S.path (outputPath :: commonAttrs ++ stateAttrs) []
     box = S.rect
-      [ SA.width <| toString totalWidth, SA.height <| toString totalHeight ]
+      [ SA.width <| toString totalWidth, SA.height <| toString totalHeight, SA.fill "lightgrey", SA.stroke "black" ]
       []
+    heading = S.foreignObject
+      [ SA.transform <| "translate" ++ toString (headBorder/2,headBorder/2)
+      , SA.width <| toString <| totalWidth - headBorder, SA.height <| toString <| headHeight - headBorder]
+      [ H.body [HA.attribute "xmlns" "http://www.w3.org/1999/xhtml"] [H.text <| .desc e] ]
     inHs = List.indexedMap input <| Dict.keys <| .inputs e
     outHs = List.indexedMap output <| Dict.keys <| .outputs e
     insPos = Dict.fromList <| List.indexedMap (\idx k -> (k, inputLoc idx)) <| Dict.keys <| .inputs e
     outsPos = Dict.fromList <| List.indexedMap (\idx k -> (k, outputLoc idx)) <| Dict.keys <| .outputs e
-  in {size = (totalWidth, totalHeight), hs = box :: inHs ++ outHs, ins = insPos, outs = outsPos}
+  in {size = (totalWidth, totalHeight), hs = box :: heading :: inHs ++ outHs, ins = insPos, outs = outsPos}
 
 viewElements : (TermId -> EndpointState) -> (TermId -> EndpointState) -> Dict ElemId Element -> {hs : List (H.Html FlowEvent), ins : Dict TermId Pos, outs : Dict TermId Pos}
 viewElements inState outState elems =
