@@ -162,6 +162,9 @@ type PortEvent
   = PeDragStart (DragStartElem PortId) Pos
   | PeDragOver (Maybe PortId)
 
+translate : Pos -> S.Attribute a
+translate pos = SA.transform <| "translate" ++ toString pos
+
 viewElement
    : (PortId -> EndpointState) -> (PortId -> EndpointState) -> Element
   -> {size : Pos, hs : List (H.Html PortEvent), ins : Dict PortId Pos, outs : Dict PortId Pos}
@@ -181,48 +184,52 @@ viewElement inState outState e =
       , SE.onMouseOut <| PeDragOver Nothing
       ]
     inputLoc idx = (0, firstConCenter + (conHeight * idx))
-    input idx pid =
+    input idx (pid, desc) =
       let
-        (x, y) = inputLoc idx
-        stateAttrs = case inState pid of
-            EsInactive -> [SA.fill "grey"]
-            EsNormal -> [SA.fill "blue", SE.onMouseDown <| PeDragStart (DragFromInput pid) (x, y)]
-            EsAdd -> SA.fill "green" :: dragTargetActions pid
-            EsRemove -> SA.fill "red" :: dragTargetActions pid
+        pos = inputLoc idx
+        (fillColour, evtAttrs) = case inState pid of
+            EsInactive -> ("grey", [])
+            EsNormal -> ("blue", [SE.onMouseDown <| PeDragStart (DragFromInput pid) pos])
+            EsAdd -> ("green", dragTargetActions pid)
+            EsRemove -> ("red", dragTargetActions pid)
         inputPath = SA.d <| String.join " "
-          [ "M0 " ++ toString (y - 10)
+          [ "m0 -10"
           , "a 10 10 0 0 0 0 20"
           , "h" ++ toString conWidth
           , "v-20"
           , "Z"
           ]
-      in S.path (inputPath :: stateAttrs) []
+      in S.g (translate pos :: evtAttrs)
+        [ S.path [inputPath, SA.fill fillColour] []
+        , S.text_ [SA.fill "white", SA.dominantBaseline "middle"] [S.text desc]]
     outputLoc idx = (totalWidth, firstConCenter + (conHeight * idx))
-    output idx pid =
+    output idx (pid, o) =
       let
-        (x, y) = outputLoc idx
-        stateAttrs = case outState pid of
-            EsInactive -> [SA.fill "grey"]
-            EsNormal -> [SA.fill "blue", SE.onMouseDown <| PeDragStart (DragFromOutput pid) (x, y)]
-            EsAdd -> SA.fill "green" :: dragTargetActions pid
-            EsRemove -> SA.fill "red" :: dragTargetActions pid
+        pos = outputLoc idx
+        (fillColour, evtAttrs) = case outState pid of
+            EsInactive -> ("grey", [])
+            EsNormal -> ("blue", [SE.onMouseDown <| PeDragStart (DragFromOutput pid) pos])
+            EsAdd -> ("green", dragTargetActions pid)
+            EsRemove -> ("red", dragTargetActions pid)
         outputPath = SA.d <| String.join " "
-          [ "M" ++ toString (totalWidth - conWidth) ++ " " ++ toString (y + 10)
+          [ "m-" ++ toString conWidth ++ " 10"
           , "v-20"
           , "h" ++ toString conWidth
           , "a 10 10 0 0 1 0 20"
           , "Z"
           ]
-      in S.path (outputPath :: stateAttrs) []
+      in S.g (translate pos :: evtAttrs)
+        [ S.path [outputPath, SA.fill fillColour] []
+        , S.text_ [SA.fill "white", SA.dominantBaseline "middle", SA.textAnchor "end"] [S.text <| .desc o]]
     box = S.rect
       [ SA.width <| toString totalWidth, SA.height <| toString totalHeight, SA.fill "lightgrey", SA.stroke "black" ]
       []
     heading = S.foreignObject
-      [ SA.transform <| "translate" ++ toString (headBorder/2,headBorder/2)
+      [ translate (headBorder//2,headBorder//2)
       , SA.width <| toString <| totalWidth - headBorder, SA.height <| toString <| headHeight - headBorder]
       [ H.div [HA.attribute "xmlns" "http://www.w3.org/1999/xhtml"] [H.input [HA.size 4, HA.type_ "text", HA.value <| .desc e] []] ]
-    inHs = List.indexedMap input <| Dict.keys <| .inputs e
-    outHs = List.indexedMap output <| Dict.keys <| .outputs e
+    inHs = List.indexedMap input <| Dict.toList <| .inputs e
+    outHs = List.indexedMap output <| Dict.toList <| .outputs e
     insPos = Dict.fromList <| List.indexedMap (\idx k -> (k, inputLoc idx)) <| Dict.keys <| .inputs e
     outsPos = Dict.fromList <| List.indexedMap (\idx k -> (k, outputLoc idx)) <| Dict.keys <| .outputs e
   in {size = (totalWidth, totalHeight), hs = box :: heading :: inHs ++ outHs, ins = insPos, outs = outsPos}
