@@ -12,6 +12,7 @@ import Svg.Events as SE
 
 import Futility exposing (unionSets, keysSet, maybeToList)
 import ClTypes exposing (Attributee)
+import Digraph exposing (Connections)
 
 main = H.beginnerProgram
   { model = exampleFlow
@@ -57,13 +58,11 @@ type alias Element =
 nextElems : Element -> Set ElemId
 nextElems {outputs} = Set.fromList <| List.concatMap (List.map Tuple.first << Dict.keys << .cons) <| Dict.values outputs
 
-elemCons : Dict ElemId Element -> {fwd : Dict ElemId (Set ElemId), rev : Dict ElemId (Set ElemId)}
+elemCons : Dict ElemId Element -> {fwd : Connections ElemId, rev : Connections ElemId}
 elemCons allElems =
   let
     fwd = Dict.map (always nextElems) allElems
-    rev = Dict.foldl insertRevEntries Dict.empty fwd
-    insertRevEntries k vs acc = Set.foldl (\v -> Dict.update v <| Just << Set.insert k << Maybe.withDefault Set.empty) acc vs
-  in {fwd = fwd, rev = rev}
+  in {fwd = fwd, rev = Digraph.reverseConnections fwd}
 
 allowed : (ElemId -> Maybe (Set ElemId)) -> (Element -> Set PortId) -> ElemId -> Dict ElemId Element -> Set TermId
 allowed next ports targetEid allElems =
@@ -113,8 +112,10 @@ exampleFlow =
   in
     { dragging = Nothing
     , elements = Dict.fromList
-      [ ("e0", titoe "Eye Eye Eye Eye" [("e1", "b")])
+      [ ("e0", titoe "Eye Eye Eye Eye" [("e1", "b"), ("e2", "b")])
       , ("e1", titoe "Patch" [])
+      , ("e2", titoe "Watch" [("e3", "a")])
+      , ("e3", titoe "Enter" [])
       ]
     , pending = Dict.empty
     }
@@ -168,9 +169,10 @@ type PortEvent
 translate : Pos -> S.Attribute a
 translate pos = SA.transform <| "translate" ++ toString pos
 
+type alias ElemView = {size : Pos, hs : List (H.Html PortEvent), ins : Dict PortId Pos, outs : Dict PortId Pos}
+
 viewElement
-   : (PortId -> EndpointState) -> (PortId -> EndpointState) -> Element
-  -> {size : Pos, hs : List (H.Html PortEvent), ins : Dict PortId Pos, outs : Dict PortId Pos}
+   : (PortId -> EndpointState) -> (PortId -> EndpointState) -> Element -> ElemView
 viewElement inState outState e =
   let
     midSpaceWidth = 5
@@ -245,7 +247,19 @@ viewElements : (TermId -> EndpointState) -> (TermId -> EndpointState) -> Dict El
 viewElements inState outState elems =
   let
     elemViews = Dict.map (\eid e -> viewElement (\pid -> inState (eid, pid)) (\pid -> outState (eid, pid)) e) elems
-    positionedElemViews = Dict.fromList <| List.indexedMap (\idx (eid, ev) -> (eid, ((idx * 200, idx * 100), ev))) <| Dict.toList elemViews
+    columnAssignments = Digraph.inChainLen <| .rev <| elemCons elems
+    positionElemView : ElemId -> Int -> ElemView -> (Dict ElemId (Pos, ElemView), Dict Int Int) -> (Dict ElemId (Pos, ElemView), Dict Int Int)
+    positionElemView eid col ev (acc, colOffsets) =
+      let
+        yOff = Maybe.withDefault 0 <| Dict.get col colOffsets
+        newColOffsets = Dict.insert col (yOff + (Tuple.second <| .size ev) + 10) colOffsets
+        pos = (col * 150, yOff)
+      in (Dict.insert eid (pos, ev) acc, newColOffsets)
+    positionedElemViews = Tuple.first <| Dict.merge
+        (always <| always identity)
+        positionElemView
+        (always <| always identity)
+        columnAssignments elemViews (Dict.empty, Dict.empty)
     bindPortEvt eid evt =
       let
         bindPid pid = (eid, pid)
