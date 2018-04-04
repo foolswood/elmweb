@@ -65,8 +65,3 @@ maybeToList : Maybe a -> List a
 maybeToList m = case m of
     Nothing -> []
     Just a -> [a]
-
-setToggleElem : comparable -> Set comparable -> Set comparable
-setToggleElem elem elems = if Set.member elem elems
-    then Set.remove elem elems
-    else Set.insert elem elems

@@ -10,7 +10,8 @@ import Svg as S
 import Svg.Attributes as SA
 import Svg.Events as SE
 
-import Futility exposing (unionSets, keysSet, maybeToList, setToggleElem)
+import Futility exposing (unionSets, keysSet, maybeToList)
+import ClTypes exposing (Attributee)
 
 main = H.beginnerProgram
   { model = exampleFlow
@@ -39,15 +40,22 @@ type alias DragData =
   , end : Maybe TermId
   }
 
+type Transience
+  = TSteady
+  | TNew
+  | TRemoved
+
 type alias Element =
   { desc : String
+  , attributee : Maybe Attributee
+  , transience : Transience
   -- FIXME: Are these assoc lists?
   , inputs : Dict PortId String
-  , outputs : Dict PortId {desc : String, cons : Set TermId}
+  , outputs : Dict PortId {desc : String, cons : Dict TermId (Transience, Maybe Attributee)}
   }
 
 nextElems : Element -> Set ElemId
-nextElems {outputs} = Set.fromList <| List.concatMap (List.map Tuple.first << Set.toList << .cons) <| Dict.values outputs
+nextElems {outputs} = Set.fromList <| List.concatMap (List.map Tuple.first << Dict.keys << .cons) <| Dict.values outputs
 
 elemCons : Dict ElemId Element -> {fwd : Dict ElemId (Set ElemId), rev : Dict ElemId (Set ElemId)}
 elemCons allElems =
@@ -83,6 +91,7 @@ allowedIns (outEid, _) allElems =
 type alias FlowModel =
   { dragging : Maybe DragData
   , elements : Dict ElemId Element
+  , pending : Dict (TermId, TermId) Bool
   }
 
 exampleFlow : FlowModel
@@ -90,13 +99,15 @@ exampleFlow =
   let
     titoe desc cons =
       { desc = desc
+      , attributee = Nothing
+      , transience = TSteady
       , inputs = Dict.fromList
         [ ("a", "A")
         , ("b", "B")
         ]
       , outputs = Dict.fromList
-        [ ("c", {desc = "C", cons = Set.fromList cons})
-        , ("d", {desc = "D", cons = Set.empty})
+        [ ("c", {desc = "C", cons = Dict.fromList <| List.map (\c -> (c, (TSteady, Nothing))) cons})
+        , ("d", {desc = "D", cons = Dict.empty})
         ]
       }
   in
@@ -105,6 +116,7 @@ exampleFlow =
       [ ("e0", titoe "Eye Eye Eye Eye" [("e1", "b")])
       , ("e1", titoe "Patch" [])
       ]
+    , pending = Dict.empty
     }
 
 type FlowEvent
@@ -130,7 +142,7 @@ dragEnds start m =
         Nothing -> False
         Just e -> case Dict.get outPid <| .outputs e of
             Nothing -> False
-            Just {cons} -> Set.member inK cons
+            Just {cons} -> Dict.member inK cons
   in case start of
     DragFromInput startK ->
       let
@@ -192,7 +204,7 @@ viewElement inState outState e =
           ]
       in S.g (translate pos :: evtAttrs)
         [ S.path [inputPath, SA.fill fillColour] []
-        , S.text_ [SA.fill "white", SA.dominantBaseline "middle"] [S.text desc]]
+        , S.text_ [SA.fill "white", SA.dominantBaseline "middle", SA.style "user-select: none"] [S.text desc]]
     outputLoc idx = (totalWidth, firstConCenter + (conHeight * idx))
     output idx (pid, o) =
       let
@@ -212,8 +224,12 @@ viewElement inState outState e =
       in S.g (translate pos :: evtAttrs)
         [ S.path [outputPath, SA.fill fillColour] []
         , S.text_ [SA.fill "white", SA.dominantBaseline "middle", SA.textAnchor "end"] [S.text <| .desc o]]
+    bgColour = case .transience e of
+        TSteady -> "lightgrey"
+        TNew -> "lightgreen"
+        TRemoved -> "pink"
     box = S.rect
-      [ SA.width <| toString totalWidth, SA.height <| toString totalHeight, SA.fill "lightgrey", SA.stroke "black" ]
+      [ SA.width <| toString totalWidth, SA.height <| toString totalHeight, SA.fill bgColour, SA.stroke "black" ]
       []
     heading = S.foreignObject
       [ translate (headBorder//2,headBorder//2)
@@ -225,7 +241,7 @@ viewElement inState outState e =
     outsPos = Dict.fromList <| List.indexedMap (\idx k -> (k, outputLoc idx)) <| Dict.keys <| .outputs e
   in {size = (totalWidth, totalHeight), hs = box :: heading :: inHs ++ outHs, ins = insPos, outs = outsPos}
 
-viewElements : (TermId -> EndpointState) -> (TermId -> EndpointState) -> Dict ElemId Element -> {hs : List (H.Html FlowEvent), ins : Dict TermId Pos, outs : Dict TermId Pos}
+viewElements : (TermId -> EndpointState) -> (TermId -> EndpointState) -> Dict ElemId Element -> {lines: List (H.Html a), elems : List (H.Html FlowEvent), ins : Dict TermId Pos, outs : Dict TermId Pos}
 viewElements inState outState elems =
   let
     elemViews = Dict.map (\eid e -> viewElement (\pid -> inState (eid, pid)) (\pid -> outState (eid, pid)) e) elems
@@ -252,12 +268,21 @@ viewElements inState outState elems =
     oConLines eid (oid, o) =
       let
         opos = posOf <| DragFromOutput (eid, oid)
-        endsAt itid = (opos, posOf <| DragFromInput itid)
-      in List.map endsAt <| Set.toList <| .cons o
+        endsAt (itid, x) = (opos, posOf <| DragFromInput itid, x)
+      in List.map endsAt <| Dict.toList <| .cons o
     conLines (eid, e) = List.concatMap (oConLines eid) <| Dict.toList <| .outputs e
     lineEnds = List.concatMap conLines <| Dict.toList elems
-    lines = List.map (\((ax, ay), (bx, by)) -> S.line [SA.x1 <| toString ax, SA.x2 <| toString bx, SA.y1 <| toString ay, SA.y2 <| toString by, SA.stroke "black", SA.strokeWidth "2"] []) lineEnds
-  in {hs = lines ++ hGroups, ins = insPos, outs = outsPos}
+    lineItem ((ax, ay), (bx, by), (trans, attr)) = S.line
+        [ SA.x1 <| toString ax, SA.x2 <| toString bx, SA.y1 <| toString ay, SA.y2 <| toString by
+        , SA.strokeWidth "2"
+        , SA.stroke <| case trans of
+            TSteady -> "black"
+            TNew -> "darkgreen"
+            TRemoved -> "darkred"
+        ]
+        []
+    lines = List.map lineItem lineEnds
+  in {lines = lines, elems = hGroups, ins = insPos, outs = outsPos}
 
 viewFlow : FlowModel -> H.Html FlowEvent
 viewFlow m =
@@ -272,13 +297,14 @@ viewFlow m =
         Just {start, pos, end} ->
           let
             (fromOutput, possibleNew, existing) = dragEnds start m
-            dragLineStyle = case end of
-                Nothing -> [SA.strokeWidth "1", SA.strokeDasharray "10,10", SA.stroke "blue"]
-                Just endK -> if Set.member endK possibleNew
-                    then [SA.strokeWidth "2", SA.strokeDasharray "5,5", SA.stroke "green"]
-                    else if Set.member endK existing
-                        then [SA.strokeWidth "2", SA.strokeDasharray "5,5", SA.stroke "red"]
-                        else [SA.strokeWidth "1", SA.strokeDasharray "10,10", SA.stroke "grey"]
+            dragLineState = case end of
+                Nothing -> EsNormal
+                Just endK -> keyState endK
+            dragLineStyle = case dragLineState of
+                EsNormal -> [SA.strokeWidth "1", SA.strokeDasharray "10,10", SA.stroke "blue"]
+                EsAdd -> [SA.strokeWidth "2", SA.strokeDasharray "5,5", SA.stroke "green"]
+                EsRemove -> [SA.strokeWidth "2", SA.strokeDasharray "5,5", SA.stroke "red"]
+                EsInactive -> []
             asDragLine insPos outsPos =
               let
                 mStartPos = case start of
@@ -289,11 +315,13 @@ viewFlow m =
                     , SA.x2 <| toString sx, SA.y2 <| toString sy
                     ] ++ dragLineStyle
               in Maybe.map l mStartPos
-            keyState k = if Set.member k possibleNew
-                then EsAdd
-                else if Set.member k existing
-                    then EsRemove
-                    else EsInactive
+            keyState k = case Dict.get (asConPair start k) <| .pending m of
+                Just connected -> if connected then EsRemove else EsAdd
+                Nothing -> if Set.member k possibleNew
+                    then EsAdd
+                    else if Set.member k existing
+                        then EsRemove
+                        else EsInactive
             outputState k = if fromOutput
                 then EsNormal
                 else keyState k
@@ -306,28 +334,44 @@ viewFlow m =
             , mDrag = Just asDragLine
             , globalAttrs = [mouseMove Dragging, SE.onMouseUp StopDrag, preventDragging, HE.onMouseLeave StopDrag]
             }
-    {hs, ins, outs} = viewElements inputState outputState <| .elements m
+    {lines, elems, ins, outs} = viewElements inputState outputState <| .elements m
     mDragLine = Maybe.andThen (\f -> f ins outs) mDrag
-  in S.svg ([HA.width 1000, HA.height 500] ++ globalAttrs) <| maybeToList mDragLine ++ hs
+    pendLine (otid, itid) present acc = case (Dict.get otid outs, Dict.get itid ins) of
+        (Just (ox, oy), Just (ix, iy)) -> S.line
+          [ SA.x1 <| toString ox, SA.y1 <| toString oy, SA.x2 <| toString ix, SA.y2 <| toString iy
+          , SA.stroke <| if present then "green" else "red"
+          , SA.strokeWidth "1"
+          ]
+          [] :: acc
+        _ -> acc
+    pending = Dict.foldl pendLine [] <| .pending m
+  in S.svg ([HA.width 1000, HA.height 500] ++ globalAttrs) <| lines ++ pending ++ maybeToList mDragLine ++ elems
+
+asConPair : DragStartElem TermId -> TermId -> (TermId, TermId)
+asConPair dse end = case dse of
+    DragFromInput start -> (end, start)
+    DragFromOutput start -> (start, end)
 
 updateFlow : FlowEvent -> FlowModel -> FlowModel
 updateFlow e m = case e of
     StartDrag dse pos -> {m | dragging = Just {pos = pos, start = dse, end = Nothing}}
     StopDrag ->
       let
-        newElems = case .dragging m of
-            Nothing -> .elements m
+        newPending = case .dragging m of
+            Nothing -> .pending m
             Just {start, end} -> case end of
-                Nothing -> .elements m
-                Just endK -> case start of
-                    DragFromInput startK -> toggleCon endK startK
-                    DragFromOutput startK -> toggleCon startK endK
-        toggleCon (outEid, outPid) inTid =
-          let
-            tc2 = Maybe.map <| \c -> {c | cons = setToggleElem inTid <| .cons c}
-            tc = Maybe.map <| \e -> {e | outputs = Dict.update outPid tc2 <| .outputs e}
-          in Dict.update outEid tc <| .elements m
-      in {m | dragging = Nothing, elements = newElems}
+                Nothing -> .pending m
+                Just endK -> togglePending <| asConPair start endK
+        togglePending (outTid, inTid) = Dict.update (outTid, inTid) (toggleState <| currentState outTid inTid) <| .pending m
+        toggleState current pending = case pending of
+            Just present -> Just <| not present
+            Nothing -> Just <| not current
+        currentState (outEid, outPid) inTid = case Dict.get outEid <| .elements m of
+            Nothing -> False
+            Just e -> case Dict.get outPid <| .outputs e of
+                Nothing -> False
+                Just o -> Dict.member inTid <| .cons o
+      in {m | dragging = Nothing, pending = newPending}
     DragSetEnd mk -> case .dragging m of
         Nothing -> m
         Just d -> {m | dragging = Just {d | end = mk}}
