@@ -181,13 +181,13 @@ update msg model = case msg of
         Err msg -> addGlobalError msg model
         Ok (newFs, newLayout) ->
           let
-            subs = requiredPaths (.state model) (.nodeFs model) newLayout
+            subs = requiredPaths (latestState model) (.nodeFs model) newLayout
           in ({model | layout = newLayout, layoutFs = newFs, subs = subs}, subDiffToCmd (.subs model) subs)
     NodeUiEvent (p, ue) -> case ue of
         EeUpdate v ->
           let
             newFs = formUpdate p (Just v) <| .nodeFs model
-            subs = requiredPaths (.state model) newFs (.layout model)
+            subs = requiredPaths (latestState model) newFs (.layout model)
           in ({model | nodeFs = newFs, subs = subs}, subDiffToCmd (.subs model) subs)
         EeSubmit na -> case na of
             NaConst wvs ->
