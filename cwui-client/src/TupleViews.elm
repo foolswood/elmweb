@@ -147,7 +147,14 @@ viewAtomEdit d =
     _ -> \_ _ -> text <| "Implement me: " ++ toString d
 
 enumEditor : List String -> Maybe Int -> AtomEditState Int -> Html Int
-enumEditor opts me se = text "shuffle"
--- select
---     [onInput (Result.withDefault -1 << String.toInt)]
---     (List.indexedMap (\i o -> option [value (toString i), selected (i == e)] [text o]) opts)
+enumEditor opts me se =
+  let
+    viewSelect current =
+      select
+        [onInput (Result.withDefault -1 << String.toInt)]
+        (List.indexedMap (\i o -> option [value (toString i), selected (i == current)] [text o]) opts)
+    upstream = Maybe.withDefault -1 me
+  in case se of
+    AesViewing -> span [onClick upstream] [enumViewer opts upstream]
+    AesUnfilled -> viewSelect -1
+    AesEditing a -> viewSelect a
