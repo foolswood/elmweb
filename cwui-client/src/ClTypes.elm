@@ -103,3 +103,18 @@ type WireType
   | WtDouble
   | WtString
   | WtList WireType
+
+defWireType : AtomDef -> WireType
+defWireType def = case def of
+    ADTime _ -> WtTime
+    ADEnum _ -> WtWord8
+    ADWord32 _ -> WtWord32
+    ADWord64 _ -> WtWord64
+    ADInt32 _ -> WtInt32
+    ADInt64 _ -> WtInt64
+    ADFloat _ -> WtFloat
+    ADDouble _ -> WtDouble
+    ADString _ -> WtString
+    ADRef _ -> WtString
+    ADList subDef -> WtList <| defWireType subDef
+    ADSet subDef -> WtList <| defWireType subDef

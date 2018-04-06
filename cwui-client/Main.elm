@@ -189,7 +189,31 @@ update msg model = case msg of
             newFs = formUpdate p (Just v) <| .nodeFs model
             subs = requiredPaths (.state model) newFs (.layout model)
           in ({model | nodeFs = newFs, subs = subs}, subDiffToCmd (.subs model) subs)
-        EeSubmit v -> addGlobalError "Node edit not implemented" model
+        EeSubmit na -> case na of
+            NaConst wvs ->
+                case Dict.get p <| .tyAssns <| .state model of
+                    Nothing -> addGlobalError "Attempting to submit to path of unknown type" model
+                    Just (tn, _) -> case Dict.get tn <| .types <| .state model of
+                        Nothing -> addGlobalError "Missing def" model
+                        Just def -> case def of
+                            TupleDef {types} ->
+                              let
+                                -- FIXME: Doesn't check anything lines up
+                                dum = ClMsgTypes.MsgConstSet
+                                  { msgPath = p
+                                  , msgTypes = List.map (defWireType << Tuple.second) types
+                                  , msgArgs = wvs
+                                  , msgAttributee = Nothing
+                                  }
+                                b = ToRelayClientBundle [] [dum] []
+                                newM =
+                                  { model
+                                  | pending = Dict.insert p na <| .pending model
+                                  , nodeFs = formUpdate p Nothing <| .nodeFs model
+                                  }
+                              in (newM, sendBundle b)
+                            _ -> addGlobalError "Def type mismatch" model
+            _ -> addGlobalError "Action not implemented" model
 
 -- Subscriptions
 
