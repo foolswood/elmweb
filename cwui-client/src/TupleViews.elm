@@ -1,13 +1,13 @@
 module TupleViews exposing (viewWithRecent)
 
 import Html exposing (..)
-import Html.Attributes exposing (..)
+import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
 
-import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..))
-import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, AtomDef(..), TupleDefinition)
-import EditTypes exposing (EditEvent(..), NeConstT, NaConstT)
-import Form exposing (AtomEditState(..), castAes, FormState(..))
+import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList)
+import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, asTime, AtomDef(..), TupleDefinition, Time)
+import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, PartialEdit(..), PartialTime)
+import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (DataChange(ConstChange))
 
@@ -100,10 +100,18 @@ enumViewer opts idx = text <| case itemAtIndex idx opts of
         Just v -> v
         Nothing -> "Enum index out of range"
 
+timeViewer : Bounds Time -> Time -> Html a
+timeViewer _ (s, f) = text <| toString s ++ ":" ++ toString f
+
 viewConstNodeEdit
    : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
   -> Html (EditEvent NeConstT NaConstT)
 viewConstNodeEdit d mn s mp = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s mp
+
+allGood : (a -> Maybe b) -> List a -> Maybe (List b)
+allGood f l = case l of
+    [] -> Just []
+    (x :: xs) -> Maybe.andThen (\y -> Maybe.map (\ys -> y :: ys) <| allGood f xs) <| f x
 
 viewConstTupleEdit
    : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT -> Maybe (List WireValue)
@@ -111,50 +119,76 @@ viewConstTupleEdit
 viewConstTupleEdit defs mv s mp =
   let
     nDefs = List.length defs
-    current = case mv of
-        Nothing -> List.repeat nDefs Nothing
-        Just v -> List.map Just v
-    toAes mev = case mev of
-        Nothing -> AesUnfilled
-        Just ev -> AesEditing ev
-    (editBase, atomEditStates) = case s of
-        FsViewing -> (current, List.repeat nDefs AesViewing)
-        FsEditing mevs -> (mevs, List.map toAes mevs)
-    asPartial idx wv = EeUpdate <| Result.withDefault editBase <| replaceIdx idx (Just wv) editBase
-    atomEditor idx def mwv aes = Html.map (asPartial idx) <| viewAtomEdit def mwv aes
-    atomEditors = List.map4 atomEditor (List.range 0 nDefs) defs current atomEditStates
-    filledFields = List.filterMap identity editBase
-    allFilled = List.length filledFields == List.length defs
-    asPending = Just filledFields == mp
-    content = if allFilled && not asPending && editBase /= current
-      then button [onClick <| EeSubmit filledFields] [text "Apply"] :: atomEditors
-      else atomEditors
-  in span [] content
+    indexUpdate pvs idx pv = EeUpdate <| Result.withDefault pvs <| replaceIdx idx pv pvs
+    vae pvs i d s = Html.map (indexUpdate pvs i) <| viewAtomEdit d s
+    -- FIXME: What if the defs change during editing?
+    aevs pvs aess = List.map3 (vae pvs) (List.range 0 nDefs) defs aess
+    tupView vs =
+      let
+        pvs = List.map2 asPartial defs <| List.map Just vs
+      in aevs pvs <| List.map2 AsViewing vs pvs
+    tupEdit pvs =
+      let
+        atomEditStates = List.map AsEditing pvs
+        thing = aevs pvs atomEditStates
+        currentRemote = case mp of
+            Just p -> Just p
+            Nothing -> mv
+        content = case allGood asFull pvs of
+            Just fullVals -> if Just fullVals == currentRemote
+                then thing
+                else button [onClick <| EeSubmit fullVals] [text "Apply"] :: thing
+            Nothing -> thing
+      in content
+  in span [] <| case s of
+    FsViewing -> case mv of
+        Nothing -> [text "No data for editable view"]
+        Just v -> tupView v
+    FsEditing pvs -> tupEdit pvs
 
-viewAtomEdit : AtomDef -> Maybe WireValue -> AtomEditState WireValue -> Html WireValue
+asFull : PartialEdit -> Maybe WireValue
+asFull pe = case pe of
+    PeEnum mi -> Maybe.map WvWord8 mi
+    PeTime pt -> case pt of
+        (Just s, Just f) -> Just <| WvTime (s, f)
+        _ -> Nothing
+
+asPartial : AtomDef -> Maybe WireValue -> PartialEdit
+asPartial d mwv = case (d, mwv) of
+    (ADEnum _, Just (WvWord8 w)) -> PeEnum <| Just w
+    (ADEnum _, _) -> PeEnum Nothing
+    (ADTime _, Just (WvTime (s, f))) -> PeTime (Just s, Just f)
+    (ADTime _, _) -> PeTime (Nothing, Nothing)
+    -- FIXME: This is utter tat!
+    _ -> PeEnum Nothing
+
+viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =
   let
-    castedView
-       : (WireValue -> Result String a) -> (a -> WireValue) -> (Maybe a -> AtomEditState a -> Html a)
-       -> Maybe WireValue -> AtomEditState WireValue -> Html WireValue
-    castedView toA toWv h mwv swv = Html.map toWv <| case castMaybe toA mwv of
+    castedView toA peConv h swv = Html.map (.wrap peConv) <| case castAs toA (.unwrap peConv) swv of
         Err msg -> text msg
-        Ok ma -> case castAes toA swv of
-            Err msg -> text msg
-            Ok sa -> h ma sa
+        Ok sa -> h sa
   in case d of
-    ADEnum opts -> castedView asWord8 WvWord8 <| enumEditor opts
-    _ -> \_ _ -> text <| "Implement me: " ++ toString d
+    ADEnum opts -> castedView asWord8 pEnumConv <| enumEditor opts
+    ADTime bounds -> castedView asTime pTimeConv <| timeEditor bounds
+    _ -> always <| text <| "Implement me: " ++ toString d
 
-enumEditor : List String -> Maybe Int -> AtomEditState Int -> Html Int
-enumEditor opts me se =
-  let
-    viewSelect current =
-      select
-        [onInput (Result.withDefault -1 << String.toInt)]
-        (List.indexedMap (\i o -> option [value (toString i), selected (i == current)] [text o]) opts)
-    upstream = Maybe.withDefault -1 me
-  in case se of
-    AesViewing -> span [onClick upstream] [enumViewer opts upstream]
-    AesUnfilled -> viewSelect -1
-    AesEditing a -> viewSelect a
+enumEditor : List String -> AtomState Int (Maybe Int) -> Html (Maybe Int)
+enumEditor opts aes = case aes of
+    AsViewing upstream ev -> span [onClick ev] [enumViewer opts upstream]
+    AsEditing ev -> select
+        [onInput <| Result.toMaybe << String.toInt]
+        (List.indexedMap (\i o -> option [value <| toString i, selected <| Just i == ev] [text o]) opts)
+
+timeEditor : Bounds Time -> AtomState Time PartialTime -> Html PartialTime
+timeEditor bounds aes = case aes of
+    AsViewing upstream ev -> span [onClick ev] [timeViewer bounds upstream]
+    AsEditing ev ->
+      let
+        mb = Maybe.withDefault (0, 0) <| .minBound bounds
+        attrsFor itemGet mItemGet
+          = maybeToList (Maybe.map (value << toString) <| mItemGet ev)
+          ++ [HA.min <| toString <| itemGet mb]
+          ++ maybeToList (Maybe.map (HA.max << toString << itemGet) <| .maxBound bounds)
+          ++ [type_ "number"]
+      in span [] [input (attrsFor Tuple.first Tuple.first) [], input (attrsFor Tuple.second Tuple.second) []]

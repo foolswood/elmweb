@@ -37,7 +37,29 @@ type alias NeChildState =
   , mod : Maybe NeChildMod
   }
 
-type alias NeConstT = List (Maybe WireValue)
+type alias PartialTime = (Maybe Int, Maybe Int)
+
+type PartialEdit
+  = PeEnum (Maybe Int)
+  | PeTime PartialTime
+
+pTimeConv : Conv PartialEdit PartialTime
+pTimeConv =
+  { wrap = PeTime
+  , unwrap = \pe -> case pe of
+    PeTime v -> Ok v
+    _ -> Err "Not PeTime"
+  }
+
+pEnumConv : Conv PartialEdit (Maybe Int)
+pEnumConv =
+ { wrap = PeEnum
+ , unwrap = \pe -> case pe of
+    PeEnum v -> Ok v
+    _ -> Err "Not PeEnum"
+ }
+
+type alias NeConstT = List PartialEdit
 type alias NeChildrenT = Dict Seg NeChildState
 
 type NodeEdit

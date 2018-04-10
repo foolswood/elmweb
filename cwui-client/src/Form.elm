@@ -2,16 +2,14 @@ module Form exposing (..)
 
 import Dict exposing (Dict)
 
-type AtomEditState a
-  = AesViewing
-  | AesUnfilled
-  | AesEditing a
+type AtomState f e
+  = AsViewing f e
+  | AsEditing e
 
-castAes : (a -> Result String b) -> AtomEditState a -> Result String (AtomEditState b)
-castAes c s = case s of
-    AesViewing -> Ok AesViewing
-    AesUnfilled -> Ok AesUnfilled
-    AesEditing v -> Result.map AesEditing <| c v
+castAs : (a -> Result String c) -> (b -> Result String d) -> AtomState a b -> Result String (AtomState c d)
+castAs ac bc aes = case aes of
+    AsViewing a b -> Result.map2 AsViewing (ac a) (bc b)
+    AsEditing b -> Result.map AsEditing <| bc b
 
 type FormState v
   = FsViewing
