@@ -126,7 +126,7 @@ viewConstTupleEdit defs mv s mp =
     filledFields = List.filterMap identity editBase
     allFilled = List.length filledFields == List.length defs
     asPending = Just filledFields == mp
-    content = if allFilled && not asPending
+    content = if allFilled && not asPending && editBase /= current
       then button [onClick <| EeSubmit filledFields] [text "Apply"] :: atomEditors
       else atomEditors
   in span [] content
