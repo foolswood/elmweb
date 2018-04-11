@@ -186,9 +186,12 @@ timeEditor bounds aes = case aes of
     AsEditing ev ->
       let
         mb = Maybe.withDefault (0, 0) <| .minBound bounds
-        attrsFor itemGet mItemGet
+        attrsFor itemGet mItemGet replaceTgt
           = maybeToList (Maybe.map (value << toString) <| mItemGet ev)
           ++ [HA.min <| toString <| itemGet mb]
           ++ maybeToList (Maybe.map (HA.max << toString << itemGet) <| .maxBound bounds)
-          ++ [type_ "number"]
-      in span [] [input (attrsFor Tuple.first Tuple.first) [], input (attrsFor Tuple.second Tuple.second) []]
+          ++ [type_ "number", onInput <| \s -> replaceTgt (always <| Result.toMaybe <| String.toInt s) ev]
+      in span []
+        [ input (attrsFor Tuple.first Tuple.first Tuple.mapFirst) []
+        , input (attrsFor Tuple.second Tuple.second Tuple.mapSecond) []
+        ]
