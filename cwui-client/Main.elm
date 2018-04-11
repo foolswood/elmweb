@@ -191,9 +191,9 @@ update msg model = case msg of
           in ({model | nodeFs = newFs, subs = subs}, subDiffToCmd (.subs model) subs)
         EeSubmit na -> case na of
             NaConst wvs ->
-                case Dict.get p <| .tyAssns <| .state model of
+                case Dict.get p <| .tyAssns <| latestState model of
                     Nothing -> addGlobalError "Attempting to submit to path of unknown type" model
-                    Just (tn, _) -> case Dict.get tn <| .types <| .state model of
+                    Just (tn, _) -> case Dict.get tn <| .types <| latestState model of
                         Nothing -> addGlobalError "Missing def" model
                         Just def -> case def of
                             TupleDef {types} ->
