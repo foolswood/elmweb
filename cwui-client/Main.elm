@@ -334,8 +334,14 @@ viewNode lib def maybeNode recentCops recentDums formState maybeNas =
     TupleDef d -> case .interpLim d of
         ILUninterpolated -> rcns constNeConv constNaConv (.unwrap constNodeConv) <| viewWithRecent editable d recentDums
         _ -> text "Time series edit not implemented"
-    StructDef d -> text "Struct edit not implemented"
+    StructDef d -> viewStruct d
     ArrayDef d -> rcns childrenNeConv childrenNaConv (.unwrap childrenNodeConv) <| viewArray d
+
+viewStruct : StructDefinition -> Html a
+viewStruct structDef =
+  let
+    iw {name} = Html.li [] [Html.text name]
+  in Html.ol [] <| List.map iw <| .childDescs structDef
 
 viewArray
    : ArrayDefinition
