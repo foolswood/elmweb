@@ -80,7 +80,7 @@ fwdProviderProto = waitThen fwd rev
         fwdProviderProto
 
 usTime :: Time -> Int
-usTime (Time s f) = fromIntegral $ (s * 1000000) + (fromIntegral $ f * (1000000 `div` 2^32))
+usTime (Time s f) = fromIntegral $ (s * 1000000) + (round $ toRational (f * 1000000) / 2^32)
 
 delayer :: IO (Delayed a -> IO (), IO a)
 delayer = do
