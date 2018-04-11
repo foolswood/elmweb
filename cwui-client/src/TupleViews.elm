@@ -180,16 +180,22 @@ enumEditor opts aes = case aes of
         [onInput <| Result.toMaybe << String.toInt]
         (List.indexedMap (\i o -> option [value <| toString i, selected <| Just i == ev] [text o]) opts)
 
+maxWord64 : Int
+maxWord64 = (2 ^ 64) - 1
+
+maxWord32 : Int
+maxWord32 = (2 ^ 32) - 1
+
 timeEditor : Bounds Time -> AtomState Time PartialTime -> Html PartialTime
 timeEditor bounds aes = case aes of
     AsViewing upstream ev -> span [onClick ev] [timeViewer bounds upstream]
     AsEditing ev ->
       let
-        mb = Maybe.withDefault (0, 0) <| .minBound bounds
+        minB = Maybe.withDefault (0, 0) <| .minBound bounds
+        maxB = Maybe.withDefault (maxWord64, maxWord32) <| .maxBound bounds
         attrsFor itemGet mItemGet replaceTgt
           = maybeToList (Maybe.map (value << toString) <| mItemGet ev)
-          ++ [HA.min <| toString <| itemGet mb]
-          ++ maybeToList (Maybe.map (HA.max << toString << itemGet) <| .maxBound bounds)
+          ++ [HA.min <| toString <| itemGet minB, HA.max <| toString <| itemGet maxB]
           ++ [type_ "number", onInput <| \s -> replaceTgt (always <| Result.toMaybe <| String.toInt s) ev]
       in span []
         [ input (attrsFor Tuple.first Tuple.first Tuple.mapFirst) []
