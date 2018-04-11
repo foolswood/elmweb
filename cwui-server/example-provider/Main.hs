@@ -1,11 +1,13 @@
 {-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
 
+import Prelude hiding (fail)
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Int
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Chan.Unagi as Q
-import Control.Monad (forever, void)
+import Control.Monad (forever, void, foldM)
+import Control.Monad.Fail (MonadFail(..))
 import Control.Monad.Trans (lift)
 import System.Clock (TimeSpec(..), Clock(Monotonic), getTime, toNanoSecs)
 import Network.Simple.TCP (connect, Socket, SockAddr)
@@ -13,13 +15,13 @@ import Network.Socket.ByteString (send, recv)
 
 import Clapi.TH (segq, pathq)
 import Clapi.Types
-  ( Seg, TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Liberty(..), TimeStamped(..)
+  ( Path, Seg, TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Liberty(..), TimeStamped(..)
   , FrDigest(..), TrDigest(..), TrpDigest(..), FrpDigest(..)
   , Definition, structDef, arrayDef, tupleDef
   , unbounded, ttInt32, ttTime
-  , alFromList
+  , alFromList, alToMap
   , TimeSeriesDataOp(..), DataChange(..), DefOp(..)
-  , WireValue(..)
+  , WireValue(..), (<|$|>)
   , produceToRelayBundle, digestFromRelayBundle
   )
 import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev, (<<->), mapProtocol, runProtocolIO)
@@ -55,14 +57,24 @@ data DummyApiState = DummyApiState
   { dasDelay :: Time
   }
 
-apiProto :: Monad m => DummyApiState -> Protocol FrpDigest (Delayed TrpDigest) TrpDigest TrpDigest m ()
+handlers :: MonadFail m => Map Path (DataChange -> DummyApiState -> m DummyApiState)
+handlers = Map.fromList
+  [ ([pathq|/delay|], \wvs -> case wvs of
+    ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <|$|> dwv
+    _ -> const $ fail "Unexpected number of wvs")
+  ]
+
+apiProto :: MonadFail m => DummyApiState -> Protocol FrpDigest (Delayed TrpDigest) TrpDigest TrpDigest m ()
 apiProto das = sendRev (initDigest das) >> steadyState das
   where
     steadyState das = waitThen fwd rev
+    handlerFor acc (p, v) = case Map.lookup p handlers of
+        Just handler -> handler v acc
+        Nothing -> fail $ "No handler for " ++ show p
     fwd (FrpDigest tgtNs dd cops) = do
-        -- TODO: Extract info, update state
-        sendFwd $ Delayed (dasDelay das) $ TrpDigest tgtNs mempty dd cops mempty
-        steadyState das
+        das' <- foldM (\acc pv -> lift $ handlerFor acc pv) das $ Map.toList $ alToMap dd
+        sendFwd $ Delayed (dasDelay das') $ TrpDigest tgtNs mempty dd cops mempty
+        steadyState das'
     rev trpd = do
         sendRev trpd
         steadyState das
