@@ -80,6 +80,7 @@ viewAtom def wv =
         Ok a -> h a
         Err msg -> text msg
   in case def of
+    ADTime bounds -> castedView asTime <| timeViewer bounds
     ADEnum opts -> castedView asWord8 <| enumViewer opts
     ADFloat bounds -> castedView asFloat <| floatViewer bounds
     ADString re -> castedView asString <| textViewer re
