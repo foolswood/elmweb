@@ -1,6 +1,7 @@
 module ClSpecParser exposing (parseAtomDef)
 
 import ClTypes exposing (AtomDef(..))
+import Regex exposing (regex)
 
 type alias ConstraintParser = (String, (String -> Result String AtomDef))
 
@@ -13,7 +14,7 @@ constraintParsers =
     enumOpts = Ok << String.split ","
     intBounds = timeBounds
     floatBounds = timeBounds
-    cRegex s = Ok s
+    cRegex s = Ok (s, regex s)
     parsePath s = Ok s
     parseTypeName s = case String.split ":" s of
         [ns, seg] -> Ok (ns, seg)

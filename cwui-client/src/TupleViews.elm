@@ -3,10 +3,11 @@ module TupleViews exposing (viewWithRecent)
 import Html exposing (..)
 import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
+import Regex exposing (Regex)
 
-import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList)
+import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip)
 import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, asTime, AtomDef(..), TupleDefinition, Time)
-import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, PartialEdit(..), PartialTime)
+import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, PartialEdit(..), PartialTime)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (DataChange(ConstChange))
@@ -84,12 +85,12 @@ viewAtom def wv =
     ADTime bounds -> castedView asTime <| timeViewer bounds
     ADEnum opts -> castedView asWord8 <| enumViewer opts
     ADFloat bounds -> castedView asFloat <| floatViewer bounds
-    ADString re -> castedView asString <| textViewer re
+    ADString (reString, _) -> castedView asString <| textViewer reString
     ADRef ty -> castedView asString <| refViewer ty
     _ -> text <| "View not implemented: " ++ toString def
 
 textViewer : String -> String -> Html a
-textViewer re s = text s
+textViewer reString s = text s
 
 refViewer : TypeName -> String -> Html a
 refViewer tn tgt = text tgt
@@ -136,7 +137,7 @@ viewConstTupleEdit defs mv s mp =
         currentRemote = case mp of
             Just p -> Just p
             Nothing -> mv
-        content = case allGood asFull pvs of
+        content = case allGood asFull (zip pvs defs) of
             Just fullVals -> if Just fullVals == currentRemote
                 then thing
                 else button [onClick <| EeSubmit fullVals] [text "Apply"] :: thing
@@ -148,12 +149,16 @@ viewConstTupleEdit defs mv s mp =
         Just v -> tupView v
     FsEditing pvs -> tupEdit pvs
 
-asFull : PartialEdit -> Maybe WireValue
-asFull pe = case pe of
-    PeEnum mi -> Maybe.map WvWord8 mi
-    PeTime pt -> case pt of
+asFull : (PartialEdit, AtomDef) -> Maybe WireValue
+asFull ped = case ped of
+    (PeEnum mi, ADEnum _) -> Maybe.map WvWord8 mi
+    (PeTime pt, ADTime _) -> case pt of
         (Just s, Just f) -> Just <| WvTime (s, f)
         _ -> Nothing
+    (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
+        [] -> Nothing
+        _ -> Just <| WvString s
+    _ -> Nothing
 
 asPartial : AtomDef -> Maybe WireValue -> PartialEdit
 asPartial d mwv = case (d, mwv) of
@@ -176,6 +181,7 @@ viewAtomEdit d =
   in case d of
     ADEnum opts -> castedView asWord8 pEnumConv <| enumEditor opts
     ADTime bounds -> castedView asTime pTimeConv <| timeEditor bounds
+    ADString (reString, _) -> castedView asString pStringConv <| textEditor reString
     _ -> always <| text <| "Implement me: " ++ toString d
 
 enumEditor : List String -> AtomState Int (Maybe Int) -> Html (Maybe Int)
@@ -200,3 +206,8 @@ timeEditor bounds aes = case aes of
         [ input (attrsFor Tuple.first Tuple.first Tuple.mapFirst) []
         , input (attrsFor Tuple.second Tuple.second Tuple.mapSecond) []
         ]
+
+textEditor : String -> AtomState String String -> Html String
+textEditor reString aes = case aes of
+    AsViewing upstream ev -> span [onClick ev] [textViewer reString upstream]
+    AsEditing ev -> input [attribute "regex" reString, value ev, onInput identity] []

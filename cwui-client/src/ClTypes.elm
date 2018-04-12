@@ -1,5 +1,6 @@
 module ClTypes exposing (..)
 import Dict exposing (..)
+import Regex exposing (Regex)
 
 type alias Seg = String
 type alias Path = String
@@ -41,7 +42,7 @@ type AtomDef
   | ADInt64 (Bounds Int)
   | ADFloat (Bounds Float)
   | ADDouble (Bounds Float)
-  | ADString String
+  | ADString (String, Regex)
   | ADRef TypeName
   | ADList AtomDef
   | ADSet AtomDef

@@ -41,6 +41,7 @@ type alias PartialTime = (Maybe Int, Maybe Int)
 type PartialEdit
   = PeEnum (Maybe Int)
   | PeTime PartialTime
+  | PeString String
 
 pTimeConv : Conv PartialEdit PartialTime
 pTimeConv =
@@ -57,6 +58,14 @@ pEnumConv =
     PeEnum v -> Ok v
     _ -> Err "Not PeEnum"
  }
+
+pStringConv : Conv PartialEdit String
+pStringConv =
+  { wrap = PeString
+  , unwrap = \pe -> case pe of
+    PeString s -> Ok s
+    _ -> Err "Not PeString"
+  }
 
 type alias NeConstT = List PartialEdit
 type alias NeChildrenT = Dict Seg NeChildState
