@@ -38,7 +38,7 @@ applySeqOps allOps initialList =
         newAcc = acc ++ Dict.toList ready
         newResolved = Dict.foldl (\k _ -> Set.insert k) resolved ready
       in if Dict.isEmpty unready
-        then Ok acc
+        then Ok newAcc
         else if Dict.isEmpty ready
             then Err <| "Unable to resolve: " ++ toString unready
             else resolve unready newResolved newAcc
