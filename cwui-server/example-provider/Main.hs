@@ -57,20 +57,18 @@ data DummyApiState = DummyApiState
   { dasDelay :: Time
   }
 
-handlers :: MonadFail m => Map Path (DataChange -> DummyApiState -> m DummyApiState)
-handlers = Map.fromList
-  [ ([pathq|/delay|], \wvs -> case wvs of
-    ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <|$|> dwv
-    _ -> const $ fail "Unexpected number of wvs")
-  ]
+getHandler :: MonadFail m => Path -> DataChange -> DummyApiState -> m DummyApiState
+getHandler p
+  | p == [pathq|/delay|] = \dc -> case dc of
+        ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <|$|> dwv
+        _ -> const $ fail "Unexpected number of wvs"
+  | otherwise = const $ const $ fail "No handler"
 
 apiProto :: MonadFail m => DummyApiState -> Protocol FrpDigest (Delayed TrpDigest) TrpDigest TrpDigest m ()
 apiProto das = sendRev (initDigest das) >> steadyState das
   where
     steadyState das = waitThen fwd rev
-    handlerFor acc (p, v) = case Map.lookup p handlers of
-        Just handler -> handler v acc
-        Nothing -> fail $ "No handler for " ++ show p
+    handlerFor acc (p, v) = getHandler p v acc
     fwd (FrpDigest tgtNs dd cops) = do
         das' <- foldM (\acc pv -> lift $ handlerFor acc pv) das $ Map.toList $ alToMap dd
         sendFwd $ Delayed (dasDelay das') $ TrpDigest tgtNs mempty dd cops mempty
