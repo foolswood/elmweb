@@ -10,6 +10,7 @@ import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeCo
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (DataChange(ConstChange))
+import Limits exposing (maxWord64, maxWord32)
 
 type EditTarget k v f a
   = Editable k (Maybe v) (FormState f) (Maybe a)
@@ -183,12 +184,6 @@ enumEditor opts aes = case aes of
     AsEditing ev -> select
         [onInput <| Result.toMaybe << String.toInt]
         (List.indexedMap (\i o -> option [value <| toString i, selected <| Just i == ev] [text o]) opts)
-
-maxWord64 : Int
-maxWord64 = (2 ^ 64) - 1
-
-maxWord32 : Int
-maxWord32 = (2 ^ 32) - 1
 
 timeEditor : Bounds Time -> AtomState Time PartialTime -> Html PartialTime
 timeEditor bounds aes = case aes of
