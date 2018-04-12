@@ -15,7 +15,8 @@ import Network.Socket.ByteString (send, recv)
 
 import Clapi.TH (segq, pathq)
 import Clapi.Types
-  ( Path, Seg, TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Liberty(..), TimeStamped(..)
+  ( Path, Seg, isChildOf
+  , TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Liberty(..), TimeStamped(..)
   , FrDigest(..), TrDigest(..), TrpDigest(..), FrpDigest(..)
   , Definition, structDef, arrayDef, tupleDef
   , unbounded, ttInt32, ttTime
@@ -35,9 +36,11 @@ initialDefs :: Map Seg Definition
 initialDefs = Map.fromList
   [ ([segq|delay|], tupleDef "How long to delay responses" (alFromList [([segq|t|], ttTime)]) ILUninterpolated)
   , ([segq|tsi|], tupleDef "Timeseries of ints" (alFromList [([segq|i|], ttInt32 unbounded)]) ILLinear)
+  , ([segq|arr|], arrayDef "Editable array of times" (TypeName ns [segq|delay|]) Must)
   , (ns, structDef "Example API for client testing" $ alFromList
       [ ([segq|delay|], (TypeName ns [segq|delay|], May))
       , ([segq|tsi|], (TypeName ns [segq|tsi|], May))
+      , ([segq|arr|], (TypeName ns [segq|arr|], Must))
       ]
     )
   ]
@@ -60,8 +63,9 @@ data DummyApiState = DummyApiState
 getHandler :: MonadFail m => Path -> DataChange -> DummyApiState -> m DummyApiState
 getHandler p
   | p == [pathq|/delay|] = \dc -> case dc of
-        ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <|$|> dwv
-        _ -> const $ fail "Unexpected number of wvs"
+    ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <|$|> dwv
+    _ -> const $ fail "Unexpected number of wvs"
+  | isChildOf [pathq|/arr|] p = const pure
   | otherwise = const $ const $ fail "No handler"
 
 apiProto :: MonadFail m => DummyApiState -> Protocol FrpDigest (Delayed TrpDigest) TrpDigest TrpDigest m ()
