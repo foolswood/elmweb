@@ -143,7 +143,7 @@ viewConstTupleEdit defs mv s mp =
       in content
   in span [] <| case s of
     FsViewing -> case mv of
-        Nothing -> [text "No data for editable view"]
+        Nothing -> tupEdit <| emptyPartial defs
         Just v -> tupView v
     FsEditing pvs -> tupEdit pvs
 
@@ -162,6 +162,9 @@ asPartial d mwv = case (d, mwv) of
     (ADTime _, _) -> PeTime (Nothing, Nothing)
     -- FIXME: This is utter tat!
     _ -> PeEnum Nothing
+
+emptyPartial : List AtomDef -> List PartialEdit
+emptyPartial = List.map (flip asPartial Nothing)
 
 viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =

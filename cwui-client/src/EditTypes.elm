@@ -4,10 +4,9 @@ import Dict exposing (Dict)
 
 import Futility exposing (Conv)
 import ClTypes exposing (WireValue, Seg)
+import SequenceOps exposing (SeqOp)
 
-type NeChildMod
-  = NcmPresentAfter Seg
-  | NcmAbsent
+type alias NeChildMod = SeqOp Seg
 
 type alias NaConstT = List WireValue
 type alias NaChildrenT = Dict Seg NeChildMod

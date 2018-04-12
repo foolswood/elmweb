@@ -65,3 +65,11 @@ maybeToList : Maybe a -> List a
 maybeToList m = case m of
     Nothing -> []
     Just a -> [a]
+
+dictMapMaybe : (comparable -> a -> Maybe b) -> Dict comparable a -> Dict comparable b
+dictMapMaybe f =
+  let
+    insertWhenJust k a = case f k a of
+        Just b -> Dict.insert k b
+        Nothing -> identity
+  in Dict.foldl insertWhenJust Dict.empty
