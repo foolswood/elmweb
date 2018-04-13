@@ -1,7 +1,8 @@
-module SequenceOps exposing (SeqOp(..), applySeqOps)
+module SequenceOps exposing (SeqOp(..), applySeqOps, banish)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
+import Futility exposing (takeUntil)
 
 type SeqOp a
   = SoPresentAfter (Maybe a)
@@ -46,3 +47,17 @@ applySeqOps allOps initialList =
     resolvedOps = resolve allOps initiallyResolved []
     applyOps = List.foldl (\(a, op) acc -> Result.andThen (\l -> applyOp a op l) acc) <| Ok initialList
   in Result.andThen applyOps resolvedOps
+
+replacePrev : a -> Maybe a -> SeqOp a -> SeqOp a
+replacePrev v prev op = case op of
+    SoPresentAfter (Just v) -> SoPresentAfter prev
+    _ -> op
+
+banish : List comparable -> comparable -> Dict comparable (SeqOp comparable) -> Dict comparable (SeqOp comparable)
+banish initialList v ops = case Dict.get v ops of
+    Just (SoPresentAfter prev) -> Dict.map (always <| replacePrev v prev) <| Dict.remove v ops
+    Just SoAbsent -> ops
+    Nothing ->
+        let
+            itemBefore = List.head <| takeUntil ((==) v) initialList
+        in Dict.insert v SoAbsent <| Dict.map (always <| replacePrev v itemBefore) ops

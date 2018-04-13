@@ -1,6 +1,7 @@
 module EditTypes exposing (..)
 
 import Dict exposing (Dict)
+import Set exposing (Set)
 
 import Futility exposing (Conv)
 import ClTypes exposing (WireValue, Seg)
@@ -30,11 +31,6 @@ childrenNaConv =
         NaChildren nac -> Ok nac
         _ -> Err "Not NaChildren"
   in {wrap = NaChildren, unwrap = asNaChildren}
-
-type alias NeChildState =
-  { chosen : Bool
-  , mod : Maybe NeChildMod
-  }
 
 type alias PartialTime = (Maybe Int, Maybe Int)
 
@@ -77,7 +73,10 @@ pFloatConv =
   }
 
 type alias NeConstT = List PartialEdit
-type alias NeChildrenT = Dict Seg NeChildState
+type alias NeChildrenT =
+  { ops : Dict Seg (SeqOp Seg)
+  , chosen : Set Seg
+  }
 
 type NodeEdit
   = NeConst NeConstT

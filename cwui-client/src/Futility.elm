@@ -36,6 +36,13 @@ firstMatching pred l = case l of
     [] -> Nothing
     item :: rl -> if pred item then Just item else firstMatching pred rl
 
+takeUntil : (a -> Bool) -> List a -> List a
+takeUntil pred l = case l of
+    [] -> []
+    (a :: remaining) -> if pred a
+        then []
+        else a :: takeUntil pred remaining
+
 castMaybe : (a -> Result String b) -> Maybe a -> Result String (Maybe b)
 castMaybe c m = case m of
     Nothing -> Ok Nothing

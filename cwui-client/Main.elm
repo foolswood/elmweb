@@ -21,8 +21,8 @@ import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
 import TupleViews exposing (viewWithRecent)
-import EditTypes exposing (NodeEdit, EditEvent(..), NeChildrenT, mapEe, NeChildState, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
-import SequenceOps exposing (SeqOp(..), applySeqOps)
+import EditTypes exposing (NodeEdit, EditEvent(..), NeChildrenT, mapEe, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
+import SequenceOps exposing (SeqOp(..), applySeqOps, banish)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -67,10 +67,13 @@ picksSegs mContainees s =
     uSegs = upstreamSegs mContainees
     segs = case s of
         FsViewing -> uSegs
-        FsEditing v -> Result.withDefault ["applySeqOps failed"] <| applySeqOps (dictMapMaybe (always .mod) v) uSegs
-    defaultPicks = case segs of
-        (s :: _) -> Dict.singleton s <| NeChildState True Nothing
-        [] -> Dict.empty
+        FsEditing v -> Result.withDefault ["applySeqOps failed"] <| applySeqOps (.ops v) uSegs
+    defaultPicks =
+      { ops = Dict.empty
+      , chosen = case segs of
+        (s :: _) -> Set.singleton s
+        [] -> Set.empty
+      }
     formStateVal = case s of
         FsViewing -> defaultPicks
         FsEditing v -> v
@@ -89,7 +92,7 @@ chosenChildPaths remoteOnly rs fs p =
           let
             (picks, localSegs) = picksSegs mChildSegs neFs
             segs = if remoteOnly then upstreamSegs mChildSegs else localSegs
-            isChosen seg = Maybe.withDefault False <| Maybe.map (.chosen) <| Dict.get seg picks
+            isChosen seg = Set.member seg <| .chosen picks
           in Array.fromList <| List.map (appendSeg p) <| List.filter isChosen segs
         Err _ -> Array.empty
 
@@ -373,19 +376,16 @@ viewArray
 viewArray editable arrayDef mn s mp =
   let
     (picks, segs) = picksSegs mn s
-    fillChoice seg isPicked mc = case mc of
-        Nothing -> Just <| {chosen = isPicked, mod = Nothing}
-        Just a -> Just <| {a | chosen = isPicked}
-    setChoice seg isPicked = EeUpdate <| Dict.update seg (fillChoice seg isPicked) picks
-    kidChooser = viewChildrenChoose segs <| Dict.map (always .chosen) picks
-    viewChildrenChoose segs chosen =
+    setChoice change = EeUpdate {picks | chosen = change <| .chosen picks}
+    kidChooser = viewChildrenChoose segs
+    viewChildrenChoose segs =
       let
-        selWidget seg = case Maybe.withDefault False <| Dict.get seg chosen of
+        selWidget seg = case Set.member seg <| .chosen picks of
             True -> Html.span
-                [onClick <| setChoice seg False]
+                [onClick <| setChoice <| Set.remove seg]
                 [Html.b [] [Html.text seg]]
             False -> Html.span
-                [onClick <| setChoice seg True]
+                [onClick <| setChoice <| Set.insert seg]
                 [Html.text seg]
         itemWidget seg = Html.div [] <| if editable
             then [selWidget seg, addBtn <| Just seg, removeBtn seg]
@@ -394,17 +394,23 @@ viewArray editable arrayDef mn s mp =
     unusedSeg s = if List.member s segs then unusedSeg <| s ++ "0" else s
     addBtn mPrevSeg =
       let
-        newKid = {chosen = True, mod = Just <| SoPresentAfter mPrevSeg}
+        newKid = SoPresentAfter mPrevSeg
         s = case mPrevSeg of
             Nothing -> unusedSeg "a"
             Just prevSeg -> unusedSeg <| "post" ++ prevSeg
       in Html.span
-        [ onClick <| EeUpdate <| Dict.insert s newKid picks
+        [ onClick <| EeUpdate
+          { ops = Dict.insert s newKid <| .ops picks
+          , chosen = Set.insert s <| .chosen picks
+          }
         , style [("background", "green")]
         ]
         [text "+"]
     removeBtn seg = Html.span
-      [ onClick <| EeUpdate <| Dict.insert seg {chosen = False, mod = Just SoAbsent} picks
+      [ onClick <| EeUpdate
+        { ops = banish segs seg <| .ops picks
+        , chosen = Set.remove seg <| .chosen picks
+        }
       , style [("background", "red")]
       ]
       [text "-"]
