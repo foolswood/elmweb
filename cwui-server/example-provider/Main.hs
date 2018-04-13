@@ -1,11 +1,13 @@
 {-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
 
+import Prelude hiding (fail)
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Int
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Chan.Unagi as Q
-import Control.Monad (forever, void)
+import Control.Monad (forever, void, foldM)
+import Control.Monad.Fail (MonadFail(..))
 import Control.Monad.Trans (lift)
 import System.Clock (TimeSpec(..), Clock(Monotonic), getTime, toNanoSecs)
 import Network.Simple.TCP (connect, Socket, SockAddr)
@@ -13,13 +15,14 @@ import Network.Socket.ByteString (send, recv)
 
 import Clapi.TH (segq, pathq)
 import Clapi.Types
-  ( Seg, TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Liberty(..), TimeStamped(..)
+  ( Path, Seg, isChildOf
+  , TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Liberty(..), TimeStamped(..)
   , FrDigest(..), TrDigest(..), TrpDigest(..), FrpDigest(..)
   , Definition, structDef, arrayDef, tupleDef
   , unbounded, ttInt32, ttTime
-  , alFromList
+  , alFromList, alToMap
   , TimeSeriesDataOp(..), DataChange(..), DefOp(..)
-  , WireValue(..)
+  , WireValue(..), (<|$|>)
   , produceToRelayBundle, digestFromRelayBundle
   )
 import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev, (<<->), mapProtocol, runProtocolIO)
@@ -33,9 +36,11 @@ initialDefs :: Map Seg Definition
 initialDefs = Map.fromList
   [ ([segq|delay|], tupleDef "How long to delay responses" (alFromList [([segq|t|], ttTime)]) ILUninterpolated)
   , ([segq|tsi|], tupleDef "Timeseries of ints" (alFromList [([segq|i|], ttInt32 unbounded)]) ILLinear)
+  , ([segq|arr|], arrayDef "Editable array of times" (TypeName ns [segq|delay|]) Must)
   , (ns, structDef "Example API for client testing" $ alFromList
       [ ([segq|delay|], (TypeName ns [segq|delay|], May))
       , ([segq|tsi|], (TypeName ns [segq|tsi|], May))
+      , ([segq|arr|], (TypeName ns [segq|arr|], Must))
       ]
     )
   ]
@@ -55,14 +60,23 @@ data DummyApiState = DummyApiState
   { dasDelay :: Time
   }
 
-apiProto :: Monad m => DummyApiState -> Protocol FrpDigest (Delayed TrpDigest) TrpDigest TrpDigest m ()
+getHandler :: MonadFail m => Path -> DataChange -> DummyApiState -> m DummyApiState
+getHandler p
+  | p == [pathq|/delay|] = \dc -> case dc of
+    ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <|$|> dwv
+    _ -> const $ fail "Unexpected number of wvs"
+  | isChildOf p [pathq|/arr|] = const pure
+  | otherwise = const $ const $ fail "No handler"
+
+apiProto :: MonadFail m => DummyApiState -> Protocol FrpDigest (Delayed TrpDigest) TrpDigest TrpDigest m ()
 apiProto das = sendRev (initDigest das) >> steadyState das
   where
     steadyState das = waitThen fwd rev
+    handlerFor acc (p, v) = getHandler p v acc
     fwd (FrpDigest tgtNs dd cops) = do
-        -- TODO: Extract info, update state
-        sendFwd $ Delayed (dasDelay das) $ TrpDigest tgtNs mempty dd cops mempty
-        steadyState das
+        das' <- foldM (\acc pv -> lift $ handlerFor acc pv) das $ Map.toList $ alToMap dd
+        sendFwd $ Delayed (dasDelay das') $ TrpDigest tgtNs mempty dd cops mempty
+        steadyState das'
     rev trpd = do
         sendRev trpd
         steadyState das
@@ -81,7 +95,7 @@ fwdProviderProto = waitThen fwd rev
 
 -- Convert a time to a number of microseconds
 usTime :: Time -> Int
-usTime (Time s f) = fromIntegral $ (s * 1000000) + (fromIntegral $ f * (1000000 `div` 2^32))
+usTime (Time s f) = fromIntegral $ (s * 1000000) + (round $ toRational (f * 1000000) / 2^32)
 
 delayer :: IO (Delayed a -> IO (), IO a)
 delayer = do

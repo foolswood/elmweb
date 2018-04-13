@@ -1,16 +1,26 @@
-module PathManipulation exposing (splitBasename)
+module PathManipulation exposing (splitBasename, appendSeg, canonicalise)
+
+import Regex exposing (Regex)
+
 import ClTypes exposing (Path, Seg)
 
 s : String
 s = "/"
 
-pathToSegs : Path -> List Seg
-pathToSegs = List.drop 1 << String.split "/"
-
-segsToPath : List Seg -> Path
-segsToPath = String.append "/" << String.join "/"
+basenameRe : Regex
+basenameRe = Regex.regex "^(/.+)/(\\w+)$"
 
 splitBasename : Path -> Maybe (Path, Seg)
-splitBasename p = case List.reverse (pathToSegs p) of
-    cn :: rSegs -> Just (segsToPath (List.reverse rSegs), cn)
-    [] -> Nothing
+splitBasename p = case Regex.find Regex.All basenameRe p of
+    [{submatches}] -> case submatches of
+        [Just p, Just s] -> Just (p, s)
+        _ -> Nothing
+    _ -> Nothing
+
+appendSeg : Path -> Seg -> Path
+appendSeg p s = p ++ "/" ++ s
+
+canonicalise : Path -> Path
+canonicalise p = if String.endsWith "/" p
+  then String.dropRight 1 p
+  else p
