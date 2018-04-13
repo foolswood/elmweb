@@ -88,6 +88,11 @@ asFloat wv = case wv of
     WvFloat f -> Ok f
     _ -> Err "Not a Float"
 
+asDouble : WireValue -> Result String Float
+asDouble wv = case wv of
+    WvDouble f -> Ok f
+    _ -> Err "Not a double"
+
 asString : WireValue -> Result String String
 asString wv = case wv of
     WvString s -> Ok s

@@ -6,7 +6,7 @@ import Html.Events exposing (onInput, onClick)
 import Regex exposing (Regex)
 
 import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip)
-import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, asTime, AtomDef(..), TupleDefinition, Time)
+import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
@@ -85,6 +85,7 @@ viewAtom def wv =
     ADTime bounds -> castedView asTime <| timeViewer bounds
     ADEnum opts -> castedView asWord8 <| enumViewer opts
     ADFloat bounds -> castedView asFloat <| floatViewer bounds
+    ADDouble bounds -> castedView asDouble <| floatViewer bounds
     ADString (reString, _) -> castedView asString <| textViewer reString
     ADRef ty -> castedView asString <| refViewer ty
     _ -> text <| "View not implemented: " ++ toString def
@@ -183,6 +184,7 @@ viewAtomEdit d =
     ADTime bounds -> castedView asTime pTimeConv <| timeEditor bounds
     ADString (reString, _) -> castedView asString pStringConv <| textEditor reString
     ADFloat bounds -> castedView asFloat pFloatConv <| floatEditor bounds
+    ADDouble bounds -> castedView asDouble pFloatConv <| floatEditor bounds
     _ -> always <| text <| "Implement me: " ++ toString d
 
 enumEditor : List String -> AtomState Int (Maybe Int) -> Html (Maybe Int)
