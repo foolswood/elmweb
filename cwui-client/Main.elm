@@ -22,7 +22,7 @@ import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, vi
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
 import TupleViews exposing (viewWithRecent)
 import EditTypes exposing (NodeEdit, EditEvent(..), NeChildrenT, mapEe, NeChildState, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
-import SequenceOps exposing (SeqOp(SoPresentAfter), applySeqOps)
+import SequenceOps exposing (SeqOp(..), applySeqOps)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -264,6 +264,7 @@ view m = div []
   [ viewErrors <| .errs m
   , button [onClick SwapViewMode] [text "switcheroo"]
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
+  , div [] [text <| toString <| .nodeFs m]
   , case .viewMode m of
     UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
     UmView -> Html.map NodeUiEvent <| viewLayout
@@ -375,18 +376,37 @@ viewArray editable arrayDef mn s mp =
     fillChoice seg isPicked mc = case mc of
         Nothing -> Just <| {chosen = isPicked, mod = Nothing}
         Just a -> Just <| {a | chosen = isPicked}
-    wrapChoice (seg, isPicked) = EeUpdate <| Dict.update seg (fillChoice seg isPicked) picks
-    kidChooser = Html.map wrapChoice <| viewChildrenChoose segs <| Dict.map (always .chosen) picks
-    newKid = {chosen = True, mod = Just <| SoPresentAfter Nothing}
+    setChoice seg isPicked = EeUpdate <| Dict.update seg (fillChoice seg isPicked) picks
+    kidChooser = viewChildrenChoose segs <| Dict.map (always .chosen) picks
+    viewChildrenChoose segs chosen =
+      let
+        selWidget seg = case Maybe.withDefault False <| Dict.get seg chosen of
+            True -> Html.span
+                [onClick <| setChoice seg False]
+                [Html.b [] [Html.text seg]]
+            False -> Html.span
+                [onClick <| setChoice seg True]
+                [Html.text seg]
+        itemWidget seg = Html.div [] <| if editable
+            then [selWidget seg, addBtn <| Just seg, removeBtn seg]
+            else [selWidget seg]
+      in Html.div [] <| List.map itemWidget segs
     unusedSeg s = if List.member s segs then unusedSeg <| s ++ "0" else s
-    addBtn = Html.button [onClick <| EeUpdate <| Dict.insert (unusedSeg "a") newKid picks] [text "+"]
-    content = if editable then [addBtn, kidChooser] else [kidChooser]
+    addBtn mPrevSeg =
+      let
+        newKid = {chosen = True, mod = Just <| SoPresentAfter mPrevSeg}
+        s = case mPrevSeg of
+            Nothing -> unusedSeg "a"
+            Just prevSeg -> unusedSeg <| "post" ++ prevSeg
+      in Html.span
+        [ onClick <| EeUpdate <| Dict.insert s newKid picks
+        , style [("background", "green")]
+        ]
+        [text "+"]
+    removeBtn seg = Html.span
+      [ onClick <| EeUpdate <| Dict.insert seg {chosen = False, mod = Just SoAbsent} picks
+      , style [("background", "red")]
+      ]
+      [text "-"]
+    content = if editable then [addBtn Nothing, kidChooser] else [kidChooser]
   in Html.div [] content
-
-viewChildrenChoose : List Seg -> Dict Seg Bool -> Html (Seg, Bool)
-viewChildrenChoose segs chosen =
-  let
-    selWidget seg = case Maybe.withDefault False <| Dict.get seg chosen of
-        True -> Html.li [onClick (seg, False)] [Html.b [] [Html.text seg]]
-        False -> Html.li [onClick (seg, True)] [Html.text seg]
-  in Html.ol [] <| List.map selWidget segs

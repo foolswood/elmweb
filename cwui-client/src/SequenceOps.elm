@@ -12,7 +12,7 @@ insertAfter tgt ref =
   let
     go acc remaining = case remaining of
         (v :: leftover) -> if v == ref
-            then Ok <| acc ++ (tgt :: remaining)
+            then Ok <| acc ++ (v :: tgt :: leftover)
             else go (acc ++ [v]) leftover
         [] -> Err <| "Ref not present: " ++ toString ref
   in go []
