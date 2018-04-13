@@ -7,7 +7,7 @@ import Regex exposing (Regex)
 
 import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip)
 import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asString, asTime, AtomDef(..), TupleDefinition, Time)
-import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, PartialEdit(..), PartialTime)
+import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (DataChange(ConstChange))
@@ -182,6 +182,7 @@ viewAtomEdit d =
     ADEnum opts -> castedView asWord8 pEnumConv <| enumEditor opts
     ADTime bounds -> castedView asTime pTimeConv <| timeEditor bounds
     ADString (reString, _) -> castedView asString pStringConv <| textEditor reString
+    ADFloat bounds -> castedView asFloat pFloatConv <| floatEditor bounds
     _ -> always <| text <| "Implement me: " ++ toString d
 
 enumEditor : List String -> AtomState Int (Maybe Int) -> Html (Maybe Int)
@@ -211,3 +212,15 @@ textEditor : String -> AtomState String String -> Html String
 textEditor reString aes = case aes of
     AsViewing upstream ev -> span [onClick ev] [textViewer reString upstream]
     AsEditing ev -> input [attribute "regex" reString, value ev, onInput identity] []
+
+floatEditor : Bounds Float -> AtomState Float (Maybe Float) -> Html (Maybe Float)
+floatEditor bounds aes = case aes of
+    AsViewing upstream ev -> span [onClick ev] [floatViewer bounds upstream]
+    AsEditing ev ->
+      let
+        attrs =
+          [ type_ "number", onInput <| Result.toMaybe << String.toFloat ]
+          ++ maybeToList (Maybe.map (HA.min << toString) <| .minBound bounds)
+          ++ maybeToList (Maybe.map (HA.max << toString) <| .maxBound bounds)
+          ++ maybeToList (Maybe.map (value << toString) ev)
+      in input attrs []

@@ -42,6 +42,7 @@ type PartialEdit
   = PeEnum (Maybe Int)
   | PeTime PartialTime
   | PeString String
+  | PeFloat (Maybe Float)
 
 pTimeConv : Conv PartialEdit PartialTime
 pTimeConv =
@@ -65,6 +66,14 @@ pStringConv =
   , unwrap = \pe -> case pe of
     PeString s -> Ok s
     _ -> Err "Not PeString"
+  }
+
+pFloatConv : Conv PartialEdit (Maybe Float)
+pFloatConv =
+  { wrap = PeFloat
+  , unwrap = \pe -> case pe of
+    PeFloat f -> Ok f
+    _ -> Err "Not PeFloat"
   }
 
 type alias NeConstT = List PartialEdit
