@@ -65,7 +65,7 @@ getHandler p
   | p == [pathq|/delay|] = \dc -> case dc of
     ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <|$|> dwv
     _ -> const $ fail "Unexpected number of wvs"
-  | isChildOf [pathq|/arr|] p = const pure
+  | isChildOf p [pathq|/arr|] = const pure
   | otherwise = const $ const $ fail "No handler"
 
 apiProto :: MonadFail m => DummyApiState -> Protocol FrpDigest (Delayed TrpDigest) TrpDigest TrpDigest m ()
