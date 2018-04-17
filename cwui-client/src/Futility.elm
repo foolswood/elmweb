@@ -73,6 +73,9 @@ maybeToList m = case m of
     Nothing -> []
     Just a -> [a]
 
+appendMaybe : Maybe a -> List a -> List a
+appendMaybe ma l = Maybe.withDefault l <| Maybe.map (\a -> l ++ [a]) ma
+
 dictMapMaybe : (comparable -> a -> Maybe b) -> Dict comparable a -> Dict comparable b
 dictMapMaybe f =
   let

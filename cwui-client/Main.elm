@@ -277,9 +277,6 @@ pathEditView mp fs = case fs of
         , input [value partial, type_ "text", onInput EeUpdate] []
         ]
 
-appendMaybe : Maybe a -> List a -> List a
-appendMaybe ma l = Maybe.withDefault l <| Maybe.map (\a -> l ++ [a]) ma
-
 viewLoading : Html a
 viewLoading = text "Loading..."
 
