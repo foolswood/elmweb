@@ -12,7 +12,6 @@ type ErrorIndex
   = GlobalError
   | PathError Path
   | TimePointError Path TpId
-  -- FIXME: Is it impossible for a client to trigger this:
   | TypeError TypeName
 
 type MsgError = MsgError ErrorIndex String
