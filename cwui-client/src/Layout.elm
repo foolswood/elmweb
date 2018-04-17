@@ -6,7 +6,7 @@ import Html exposing (Html)
 import Html.Events as Hevt
 
 import Futility exposing (updateIdx)
-import Form exposing (FormState(..), formState, FormStore, formUpdate)
+import Form exposing (FormState(..), formState, FormStore, formInsert)
 import EditTypes exposing (EditEvent(..), mapEe)
 
 type alias LayoutPath = List Int
@@ -141,7 +141,7 @@ updateLayout lp lee fs l =
             LeeSetDynamic p -> (Nothing, setLayout (LayoutDynamic p) lp l)
             LeeSetLeaf p -> (Nothing, setLeafBinding lp p l)
             LeeAddLeaf p -> (Nothing, addLeaf p lp l)
-    newFs = formUpdate lp newState fs
+    newFs = formInsert lp newState fs
   in Result.map ((,) newFs) rNewLayout
 
 mapSubmitEvt : (c -> d) -> EditEvent a c -> EditEvent a d

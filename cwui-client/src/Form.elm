@@ -28,7 +28,7 @@ formStoreEmpty = Dict.empty
 formState : comparable -> FormStore comparable v -> FormState v
 formState k = Maybe.withDefault FsViewing << Dict.get k
 
-formUpdate : comparable -> Maybe v -> FormStore comparable v -> FormStore comparable v
-formUpdate k mv fs = case mv of
+formInsert : comparable -> Maybe v -> FormStore comparable v -> FormStore comparable v
+formInsert k mv fs = case mv of
     Just v -> Dict.insert k (FsEditing v) fs
     Nothing -> Dict.remove k fs

@@ -19,7 +19,7 @@ import Digests exposing (..)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, tyDef)
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
-import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formUpdate, castFormState)
+import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState)
 import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs)
 import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
@@ -174,7 +174,7 @@ clearPending {dops, cops} =
   in dictMapMaybe clearPath
 
 rectifyCop : (Path -> List Seg) -> Path -> Dict Seg (SeqOp Seg) -> NodeFs -> NodeFs
-rectifyCop initialState path pathCops fs = formUpdate
+rectifyCop initialState path pathCops fs = formInsert
     path
     (case formState path fs of
         FsEditing (NeChildren es) -> Just <| NeChildren <| ArrayView.rectifyEdits
@@ -231,7 +231,7 @@ update msg model = case msg of
     NodeUiEvent (p, ue) -> case ue of
         EeUpdate v ->
           let
-            newFs = formUpdate p (Just v) <| .nodeFs model
+            newFs = formInsert p (Just v) <| .nodeFs model
             pathSubs = requiredPaths (latestState model) newFs (.layout model)
           in
             ( {model | nodeFs = newFs, pathSubs = pathSubs}
@@ -253,7 +253,7 @@ update msg model = case msg of
                         newM =
                           { model
                           | pending = Dict.insert p na <| .pending model
-                          , nodeFs = formUpdate p Nothing <| .nodeFs model
+                          , nodeFs = formInsert p Nothing <| .nodeFs model
                           }
                       in (newM, sendBundle b)
                     _ -> addGlobalError "Def type mismatch" model
