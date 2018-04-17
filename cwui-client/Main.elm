@@ -73,7 +73,7 @@ requiredChildren rs fs p = case remoteChildSegs rs p of
     Just segs ->
       let
         chosen = case chosenChildSegs (formState p fs) of
-            Just c -> c
+            Just c -> Set.filter (flip List.member segs) c
             Nothing -> defaultChildChoice <| Just segs
       in qualifySegs p chosen
 
