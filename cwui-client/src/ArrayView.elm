@@ -82,11 +82,13 @@ viewArray editable arrayDef recentCops mn s mp =
                       [ HA.style [("background", "grey")] ]
               in H.span attrs [H.text "+"]
             delBtn seg = H.span
-              [ HE.onClick <| EeUpdate
-                { editState
-                | ops = banish rSegs seg <| .ops editState
-                , chosen = Set.remove seg <| .chosen editState
-                }
+              [ HE.onClick <| if Dict.member seg <| .ops editState
+                    then EeUpdate
+                      { editState
+                      | ops = banish rSegs seg <| .ops editState
+                      , chosen = Set.remove seg <| .chosen editState
+                      }
+                    else EeSubmit <| Dict.singleton seg SoAbsent
               , HA.style [("background", "red")]
               ]
               [H.text "-"]

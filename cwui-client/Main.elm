@@ -217,28 +217,52 @@ update msg model = case msg of
             ( {model | nodeFs = newFs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
         EeSubmit na -> case na of
-            NaConst wvs ->
-                case tyDef p <| latestState model of
-                    Err msg -> addGlobalError ("Error submitting: " ++ msg) model
-                    Ok (def, _) -> case def of
-                        TupleDef {types} ->
-                          let
-                            -- FIXME: Doesn't check anything lines up
-                            dum = ClMsgTypes.MsgConstSet
-                              { msgPath = p
-                              , msgTypes = List.map (defWireType << Tuple.second) types
-                              , msgArgs = wvs
-                              , msgAttributee = Nothing
-                              }
-                            b = ToRelayClientBundle [] [dum] []
-                            newM =
-                              { model
-                              | pending = Dict.insert p na <| .pending model
-                              , nodeFs = formUpdate p Nothing <| .nodeFs model
-                              }
-                          in (newM, sendBundle b)
-                        _ -> addGlobalError "Def type mismatch" model
-            _ -> addGlobalError "Action not implemented" model
+            NaConst wvs -> case tyDef p <| latestState model of
+                Err msg -> addGlobalError ("Error submitting: " ++ msg) model
+                Ok (def, _) -> case def of
+                    TupleDef {types} ->
+                      let
+                        -- FIXME: Doesn't check anything lines up
+                        dum = ClMsgTypes.MsgConstSet
+                          { msgPath = p
+                          , msgTypes = List.map (defWireType << Tuple.second) types
+                          , msgArgs = wvs
+                          , msgAttributee = Nothing
+                          }
+                        b = ToRelayClientBundle [] [dum] []
+                        newM =
+                          { model
+                          | pending = Dict.insert p na <| .pending model
+                          , nodeFs = formUpdate p Nothing <| .nodeFs model
+                          }
+                      in (newM, sendBundle b)
+                    _ -> addGlobalError "Def type mismatch" model
+            NaChildren cops -> case tyDef p <| latestState model of
+                Err msg -> addGlobalError ("Error submitting: " ++ msg) model
+                Ok (def, _) -> case def of
+                    ArrayDef _ ->
+                      let
+                        mergePending mExisting = Just <| NaChildren <| case mExisting of
+                            Just (NaChildren existing) -> Dict.union cops existing
+                            _ -> cops
+                        newM =
+                          { model
+                          | pending = Dict.update p mergePending <| .pending model
+                          -- FIXME: Should update the edit state too
+                          }
+                        b = ToRelayClientBundle [] [] <| produceCms p cops
+                      in (newM, sendBundle b)
+                    _ -> addGlobalError "Attempted to change children of non-array" model
+
+produceCms : Path -> NaChildrenT -> List ClMsgTypes.ContainerUpdateMsg
+produceCms p =
+  let
+    produceCm (seg, op) = case op of
+        SoAbsent -> ClMsgTypes.MsgAbsent
+            {msgPath = p, msgTgt = seg, msgAttributee = Nothing}
+        SoPresentAfter mRef -> ClMsgTypes.MsgPresentAfter
+            {msgPath = p, msgTgt = seg, msgRef = mRef, msgAttributee = Nothing}
+  in List.map produceCm << Dict.toList
 
 -- Subscriptions
 

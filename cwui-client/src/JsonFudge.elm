@@ -113,13 +113,13 @@ contToJsonValue m =
   let
     encodeTgtField tgt = ("tgt", encodeSeg tgt)
   in case m of
-    MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} -> JE.object
+    MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} -> tagged '>' <| JE.object
       [ encodePathField msgPath
       , encodeTgtField msgTgt
       , ("ref", encodeNullable encodeSeg msgRef)
       , encodeAttributeeField msgAttributee
       ]
-    MsgAbsent {msgPath, msgTgt, msgAttributee} -> JE.object
+    MsgAbsent {msgPath, msgTgt, msgAttributee} -> tagged '-' <| JE.object
       [ encodePathField msgPath
       , encodeTgtField msgTgt
       , encodeAttributeeField msgAttributee
