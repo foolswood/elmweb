@@ -160,6 +160,19 @@ latestState m =
         (_ :: remainder) -> go remainder
   in go <| .recent m
 
+clearPending : Digest -> Pending -> Pending
+-- FIXME: Ignores type changes and errors!
+clearPending {dops, cops} =
+  let
+    clearPath path pending = case pending of
+        NaChildren pendingCops -> Maybe.map NaChildren <| case Dict.get path cops of
+            Nothing -> Just pendingCops
+            Just changed -> nonEmptyDict <| removeKeys (Dict.keys changed) pendingCops
+        NaConst wvs -> Maybe.map NaConst <| case Dict.get path dops of
+            Nothing -> Just wvs
+            Just _ -> Nothing
+  in dictMapMaybe clearPath
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
     AddError idx msg -> ({model | errs = (idx, msg) :: .errs model}, Cmd.none)
@@ -176,6 +189,7 @@ update msg model = case msg of
           , typeSubs = typeSubs
           , recent = .recent model ++ [(d, newState)]
           , bundleCount = .bundleCount model + 1
+          , pending = clearPending d <| .pending model
           }
         subCmd = subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs typeSubs
         queueSquashCmd = Task.perform (always SquashRecent) <| Process.sleep <| .keepRecent model
@@ -199,7 +213,9 @@ update msg model = case msg of
           let
             newFs = formUpdate p (Just v) <| .nodeFs model
             pathSubs = requiredPaths (latestState model) newFs (.layout model)
-          in ({model | nodeFs = newFs, pathSubs = pathSubs}, subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
+          in
+            ( {model | nodeFs = newFs, pathSubs = pathSubs}
+            , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
         EeSubmit na -> case na of
             NaConst wvs ->
                 case tyDef p <| latestState model of
