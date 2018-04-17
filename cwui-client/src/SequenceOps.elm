@@ -1,4 +1,4 @@
-module SequenceOps exposing (SeqOp(..), applySeqOps, banish)
+module SequenceOps exposing (SeqOp(..), applySeqOps, banish, inject)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
@@ -48,16 +48,30 @@ applySeqOps allOps initialList =
     applyOps = List.foldl (\(a, op) acc -> Result.andThen (\l -> applyOp a op l) acc) <| Ok initialList
   in Result.andThen applyOps resolvedOps
 
-replacePrev : a -> Maybe a -> SeqOp a -> SeqOp a
-replacePrev v prev op = case op of
-    SoPresentAfter (Just v) -> SoPresentAfter prev
-    _ -> op
+replacePrev
+   : Maybe comparable -> Maybe comparable
+   -> Dict comparable (SeqOp comparable) -> Dict comparable (SeqOp comparable)
+replacePrev mv prev =
+  let
+    rp _ op = case op of
+        SoPresentAfter mPrev -> if mPrev == mv
+            then SoPresentAfter prev
+            else SoPresentAfter mPrev
+        _ -> op
+  in Dict.map rp
+
+itemBefore : a -> List a -> Maybe a
+itemBefore v = List.head << takeUntil ((==) v)
 
 banish : List comparable -> comparable -> Dict comparable (SeqOp comparable) -> Dict comparable (SeqOp comparable)
 banish initialList v ops = case Dict.get v ops of
-    Just (SoPresentAfter prev) -> Dict.map (always <| replacePrev v prev) <| Dict.remove v ops
+    Just (SoPresentAfter mPrev) -> replacePrev (Just v) mPrev <| Dict.remove v ops
     Just SoAbsent -> ops
-    Nothing ->
-        let
-            itemBefore = List.head <| takeUntil ((==) v) initialList
-        in Dict.insert v SoAbsent <| Dict.map (always <| replacePrev v itemBefore) ops
+    Nothing -> Dict.insert v SoAbsent <| replacePrev (Just v) (itemBefore v initialList) ops
+
+inject
+   : List comparable -> comparable -> Maybe comparable
+   -> Dict comparable (SeqOp comparable) -> Dict comparable (SeqOp comparable)
+inject initialList v mRef ops = Dict.insert v (SoPresentAfter mRef) <| case Dict.get v ops of
+    Just (SoPresentAfter mPrev) -> replacePrev (Just v) mPrev ops
+    _ -> replacePrev mRef (Just v) ops

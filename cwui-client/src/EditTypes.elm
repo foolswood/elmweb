@@ -76,6 +76,7 @@ type alias NeConstT = List PartialEdit
 type alias NeChildrenT =
   { ops : Dict Seg (SeqOp Seg)
   , chosen : Set Seg
+  , addSeg : String
   }
 
 type NodeEdit
