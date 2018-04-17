@@ -173,6 +173,23 @@ clearPending {dops, cops} =
             Just _ -> Nothing
   in dictMapMaybe clearPath
 
+rectifyCop : (Path -> List Seg) -> Path -> Dict Seg (SeqOp Seg) -> NodeFs -> NodeFs
+rectifyCop initialState path pathCops fs = formUpdate
+    path
+    (case formState path fs of
+        FsEditing (NeChildren es) -> Just <| NeChildren <| ArrayView.rectifyEdits
+            (initialState path) pathCops es
+        _ -> Nothing
+    )
+    fs
+
+rectifyEdits : RemoteState -> Digest -> NodeFs -> NodeFs
+-- FIXME: Ignores most of the digest
+rectifyEdits rs {cops} editFormState = Dict.foldl
+    (rectifyCop <| \path -> Maybe.withDefault [] <| remoteChildSegs rs path)
+    editFormState
+    <| Dict.map (always <| Dict.map <| always Tuple.second) cops
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
     AddError idx msg -> ({model | errs = (idx, msg) :: .errs model}, Cmd.none)
@@ -190,6 +207,7 @@ update msg model = case msg of
           , recent = .recent model ++ [(d, newState)]
           , bundleCount = .bundleCount model + 1
           , pending = clearPending d <| .pending model
+          , nodeFs = rectifyEdits newState d <| .nodeFs model
           }
         subCmd = subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs typeSubs
         queueSquashCmd = Task.perform (always SquashRecent) <| Process.sleep <| .keepRecent model
@@ -207,7 +225,9 @@ update msg model = case msg of
         Ok (newFs, newLayout) ->
           let
             pathSubs = requiredPaths (latestState model) (.nodeFs model) newLayout
-          in ({model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}, subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
+          in
+            ( {model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}
+            , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
     NodeUiEvent (p, ue) -> case ue of
         EeUpdate v ->
           let
@@ -248,7 +268,9 @@ update msg model = case msg of
                         newM =
                           { model
                           | pending = Dict.update p mergePending <| .pending model
-                          -- FIXME: Should update the edit state too
+                          , nodeFs = rectifyCop
+                              (Maybe.withDefault [] << remoteChildSegs (latestState model))
+                              p cops <| .nodeFs model
                           }
                         b = ToRelayClientBundle [] [] <| produceCms p cops
                       in (newM, sendBundle b)

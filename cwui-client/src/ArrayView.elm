@@ -1,4 +1,4 @@
-module ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs)
+module ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, rectifyEdits)
 
 import Html as H exposing (Html)
 import Html.Events as HE
@@ -6,7 +6,7 @@ import Html.Attributes as HA
 import Dict exposing (Dict)
 import Set exposing (Set)
 
-import SequenceOps exposing (SeqOp(SoAbsent), applySeqOps, banish, inject)
+import SequenceOps exposing (SeqOp(..), applySeqOps, banish, inject, unref)
 import ClTypes exposing (Path, Seg, ArrayDefinition)
 import ClNodes exposing (Node(ContainerNode), ContainerNodeT)
 import Form exposing (FormState(..))
@@ -36,6 +36,18 @@ partitionRemoveOps =
         SoAbsent -> True
         _ -> False
   in Dict.partition isAbsent
+
+rectifyEdits : List Seg -> Dict Seg (SeqOp Seg) -> NeChildrenT -> NeChildrenT
+rectifyEdits initialList cops edits =
+  let
+    rectifyEdit seg op es = case op of
+        SoAbsent ->
+            { es
+            | ops = unref initialList seg <| .ops es
+            , chosen = Set.remove seg <| .chosen es
+            }
+        SoPresentAfter _ -> {es | ops = Dict.remove seg <| .ops es}
+  in Dict.foldl rectifyEdit edits cops
 
 viewArray
    : Bool -> ArrayDefinition -> List Cops

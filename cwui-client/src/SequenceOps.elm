@@ -1,4 +1,4 @@
-module SequenceOps exposing (SeqOp(..), applySeqOps, banish, inject)
+module SequenceOps exposing (SeqOp(..), applySeqOps, banish, inject, unref)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
@@ -62,6 +62,9 @@ replacePrev mv prev =
 
 itemBefore : a -> List a -> Maybe a
 itemBefore v = List.head << takeUntil ((==) v)
+
+unref : List comparable -> comparable -> Dict comparable (SeqOp comparable) -> Dict comparable (SeqOp comparable)
+unref initialList v = replacePrev (Just v) (itemBefore v initialList) << Dict.remove v
 
 banish : List comparable -> comparable -> Dict comparable (SeqOp comparable) -> Dict comparable (SeqOp comparable)
 banish initialList v ops = case Dict.get v ops of
