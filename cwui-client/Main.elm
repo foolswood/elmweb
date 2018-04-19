@@ -391,17 +391,17 @@ viewNode
    -> Html (EditEvent NodeEdit NodeActions)
 viewNode lib def maybeNode recentCops recentDums formState maybeNas =
   let
-    rcns neConv naConv cn h = viewCasted
-        (\(n, s, a) -> Result.map3 (,,) (castMaybe cn n) (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
-        (\(mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h mn fs mp)
-        (maybeNode, formState, maybeNas)
+    rcns recentCast neConv naConv cn recents h = viewCasted
+        (\(r, n, s, a) -> Result.map4 (,,,) (castList recentCast r) (castMaybe cn n) (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
+        (\(r, mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h r mn fs mp)
+        (recents, maybeNode, formState, maybeNas)
     editable = lib /= Cannot
   in case def of
     TupleDef d -> case .interpLim d of
-        ILUninterpolated -> rcns constNeConv constNaConv (.unwrap constNodeConv) <| viewWithRecent editable d recentDums
+        ILUninterpolated -> rcns constChangeCast constNeConv constNaConv (.unwrap constNodeConv) recentDums <| viewWithRecent editable d
         _ -> text "Time series edit not implemented"
     StructDef d -> viewStruct d
-    ArrayDef d -> rcns childrenNeConv childrenNaConv (.unwrap childrenNodeConv) <| viewArray editable d recentCops
+    ArrayDef d -> rcns Ok childrenNeConv childrenNaConv (.unwrap childrenNodeConv) recentCops <| viewArray editable d
 
 viewStruct : StructDefinition -> Html a
 viewStruct structDef =

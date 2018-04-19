@@ -10,7 +10,7 @@ import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, a
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
-import Digests exposing (DataChange(ConstChange))
+import Digests exposing (ConstChangeT)
 import Limits exposing (maxWord64, maxWord32)
 
 type EditTarget k v f a
@@ -18,16 +18,12 @@ type EditTarget k v f a
   | ReadOnly v
 
 viewWithRecent
-   : Bool -> TupleDefinition -> List DataChange
+   : Bool -> TupleDefinition -> List ConstChangeT
   -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
   -> Html (EditEvent NeConstT NaConstT)
 viewWithRecent editable def recent mn fs mp =
   let
-    -- FIXME: Not otherwise dealing with stuff like this here, sort above?
-    mCd dc = case dc of
-        ConstChange ma _ wvs -> Just (ma, wvs)
-        _ -> Nothing
-    recentAttrVals = List.filterMap mCd recent
+    recentAttrVals = List.map (\(ma, _, wvs) -> (ma, wvs)) recent
     attrVals = case mn of
         Nothing -> recentAttrVals
         Just n -> .values n :: recentAttrVals

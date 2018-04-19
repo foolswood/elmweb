@@ -1,4 +1,4 @@
-module Digests exposing (Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..))
+module Digests exposing (Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT, constChangeCast)
 
 import Dict exposing (Dict)
 
@@ -20,11 +20,17 @@ type TimeSeriesDataOp
   = OpSet Time (List WireType) (List WireValue) Interpolation
   | OpRemove
 
-type alias TimeChangeT = Dict TpId (Maybe Attributee, TimeSeriesDataOp)
+type alias ConstChangeT = (Maybe Attributee, List WireType, List WireValue)
+type alias TimeChangeT = (Maybe Attributee, TimeSeriesDataOp)
 
 type DataChange
-  = ConstChange (Maybe Attributee) (List WireType) (List WireValue)
-  | TimeChange TimeChangeT
+  = ConstChange ConstChangeT
+  | TimeChange (Dict TpId TimeChangeT)
+
+constChangeCast : DataChange -> Result String ConstChangeT
+constChangeCast dc = case dc of
+    ConstChange cc -> Ok cc
+    _ -> Err "Not ConstChange"
 
 type alias DataDigest = Dict Path DataChange
 
@@ -46,7 +52,7 @@ digestDum dum =
         _ -> Dict.singleton tpid (ma, tso)
     up mv = case dum of
         MsgConstSet {msgTypes, msgArgs, msgAttributee} ->
-            Just <| ConstChange msgAttributee msgTypes msgArgs
+            Just <| ConstChange (msgAttributee, msgTypes, msgArgs)
         MsgSet {msgTpId, msgTime, msgTypes, msgArgs, msgInterpolation, msgAttributee} ->
           let
             atp = OpSet msgTime msgTypes msgArgs msgInterpolation
@@ -74,7 +80,7 @@ ddApply dd nodeMap =
       let
         mn = Dict.get p nm
       in case dc of
-        ConstChange ma wts wvs -> case setConstData wts (ma, wvs) mn of
+        ConstChange (ma, wts, wvs) -> case setConstData wts (ma, wvs) mn of
             Ok newN -> (errs, Dict.insert p newN nm)
             Err msg -> ((p, (Nothing, msg)) :: errs, nm)
         TimeChange d ->
