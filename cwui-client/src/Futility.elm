@@ -14,6 +14,12 @@ mapAllFaily act vs = List.foldr
     (Ok [])
     vs
 
+-- Equivalent to mapM for Maybe:
+allGood : (a -> Maybe b) -> List a -> Maybe (List b)
+allGood f l = case l of
+    [] -> Just []
+    (x :: xs) -> Maybe.andThen (\y -> Maybe.map (\ys -> y :: ys) <| allGood f xs) <| f x
+
 itemAtIndex : Int -> List a -> Maybe a
 itemAtIndex idx l = List.head (List.drop idx l)
 

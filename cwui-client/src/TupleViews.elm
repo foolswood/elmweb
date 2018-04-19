@@ -5,7 +5,7 @@ import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
 import Regex exposing (Regex)
 
-import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip)
+import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood)
 import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime)
 import Form exposing (AtomState(..), castAs, FormState(..))
@@ -111,11 +111,6 @@ viewConstNodeEdit
    : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
   -> Html (EditEvent NeConstT NaConstT)
 viewConstNodeEdit d mn s mp = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s mp
-
-allGood : (a -> Maybe b) -> List a -> Maybe (List b)
-allGood f l = case l of
-    [] -> Just []
-    (x :: xs) -> Maybe.andThen (\y -> Maybe.map (\ys -> y :: ys) <| allGood f xs) <| f x
 
 viewConstTupleEdit
    : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT -> Maybe (List WireValue)
