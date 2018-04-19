@@ -27,7 +27,7 @@ type TsMsg
   | PlayheadSet Time
 
 type alias TsModel =
-  { series : List (String, TimeSeries TimePoint)
+  { series : List (String, (TimeSeries TimePoint, ChangedTimes))
   , vZoom : Float
   , hZoom : Float
   , viewport : Viewport
@@ -44,8 +44,9 @@ exampleTimeSeries : TsModel
 exampleTimeSeries =
   let
     asSeries = List.foldl (\(tpid, t, tp) -> TimeSeries.insert tpid t tp) TimeSeries.empty
+    changedTimes = Dict.singleton (1, 0) <| Just (2, 0)
   in
-  { series = List.map (\pts -> ("bob", asSeries pts)) <|
+  { series = List.map (\pts -> ("bob", (asSeries pts, changedTimes))) <|
     [ [ (21, (0, 0), TimePoint Nothing [] ILinear)
       , (22, (50, 0), TimePoint Nothing [] ILinear)
       , (23, (200, 0), TimePoint Nothing [] ILinear)
@@ -103,7 +104,7 @@ viewTimeSeries s =
       , ("left", toEm labelWidth)
       , ("top", toEm controlsHeight)
       ]
-    dataGrid = div [style dgStyles] <| List.map (\ts -> viewTsData (.hZoom s) ts (Dict.singleton (1, 0) <| Just (1, 0))) <| List.map Tuple.second <| .series s
+    dataGrid = div [style dgStyles] <| List.map (\(ts, ct) -> viewTsData (.hZoom s) ts ct) <| List.map Tuple.second <| .series s
     labelGrid = div
       [ style <| rowStyles ++
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
