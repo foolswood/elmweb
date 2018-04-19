@@ -27,8 +27,15 @@ type TsMsg
   | SetViewport Viewport
   | PlayheadSet Time
 
+type alias SeriesInfo =
+  { label : String
+  , transience : Transience
+  , series : TimeSeries TimePoint
+  , changedTimes : ChangedTimes
+  }
+
 type alias TsModel =
-  { series : List ((String, Transience), (TimeSeries TimePoint, ChangedTimes))
+  { series : List SeriesInfo
   , vZoom : Float
   , hZoom : Float
   , viewport : Viewport
@@ -79,13 +86,13 @@ viewTimeSeries s =
       , ("left", toEm labelWidth)
       , ("top", toEm controlsHeight)
       ]
-    dataGrid = div [style dgStyles] <| List.map (\(ts, ct) -> viewTsData (.hZoom s) ts ct) <| List.map Tuple.second <| .series s
+    dataGrid = div [style dgStyles] <| List.map (\si -> viewTsData (.hZoom s) (.series si) (.changedTimes si)) <| .series s
     labelGrid = div
       [ style <| rowStyles ++
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
         , ("background", "gray"), ("z-index", "3")
         ]]
-      <| List.map (uncurry viewTsLabel) <| List.map Tuple.first <| .series s
+      <| List.map (\si -> viewTsLabel (.label si) (.transience si)) <| .series s
     playhead = viewPlayhead totalHeight labelWidth (.hZoom s) <| .playheadPos s
   in div
     [ style [("height", "200px"), ("overflow", "auto"), ("position", "relative")]

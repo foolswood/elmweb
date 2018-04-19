@@ -12,8 +12,14 @@ exampleTimeSeries =
   let
     asSeries = List.foldl (\(tpid, t, tp) -> TimeSeries.insert tpid t tp) TimeSeries.empty
     changedTimes = Dict.singleton (1, 0) <| Just (2, 0)
+    asTsi pts =
+      { label = "bob"
+      , transience = TSteady
+      , series = asSeries pts
+      , changedTimes = changedTimes
+      }
   in
-  { series = List.map (\pts -> (("bob", TSteady), (asSeries pts, changedTimes))) <|
+  { series = List.map asTsi <|
     [ [ (21, (0, 0), TimePoint Nothing [] ILinear)
       , (22, (50, 0), TimePoint Nothing [] ILinear)
       , (23, (200, 0), TimePoint Nothing [] ILinear)
