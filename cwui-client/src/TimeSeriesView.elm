@@ -27,7 +27,7 @@ type TsMsg
   | PlayheadSet Time
 
 type alias TsModel =
-  { series : List (TimeSeries TimePoint)
+  { series : List (String, TimeSeries TimePoint)
   , vZoom : Float
   , hZoom : Float
   , viewport : Viewport
@@ -45,7 +45,7 @@ exampleTimeSeries =
   let
     asSeries = List.foldl (\(tpid, t, tp) -> TimeSeries.insert tpid t tp) TimeSeries.empty
   in
-  { series = List.map asSeries <|
+  { series = List.map (\pts -> ("bob", asSeries pts)) <|
     [ [ (21, (0, 0), TimePoint Nothing [] ILinear)
       , (22, (50, 0), TimePoint Nothing [] ILinear)
       , (23, (200, 0), TimePoint Nothing [] ILinear)
@@ -103,13 +103,13 @@ viewTimeSeries s =
       , ("left", toEm labelWidth)
       , ("top", toEm controlsHeight)
       ]
-    dataGrid = div [style dgStyles] <| List.map (\ts -> viewTsData (.hZoom s) ts (Dict.singleton (1, 0) <| Just (1, 0))) <| .series s
+    dataGrid = div [style dgStyles] <| List.map (\ts -> viewTsData (.hZoom s) ts (Dict.singleton (1, 0) <| Just (1, 0))) <| List.map Tuple.second <| .series s
     labelGrid = div
       [ style <| rowStyles ++
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
         , ("background", "gray"), ("z-index", "3")
         ]]
-      <| List.map viewTsLabel <| List.repeat (List.length <| .series s) "bob"
+      <| List.map viewTsLabel <| List.map Tuple.first <| .series s
     playhead = viewPlayhead totalHeight labelWidth (.hZoom s) <| .playheadPos s
   in div
     [ style [("height", "200px"), ("overflow", "auto"), ("position", "relative")]
