@@ -5,6 +5,7 @@ import Html.Events as HE
 import Html.Attributes as HA
 import Dict exposing (Dict)
 import Set exposing (Set)
+import Json.Encode as JE
 
 import SequenceOps exposing (SeqOp(..), applySeqOps, banish, inject, unref)
 import ClTypes exposing (Path, Seg, ArrayDefinition)
@@ -13,6 +14,7 @@ import Form exposing (FormState(..))
 import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), NaChildrenT, NeChildrenT)
 import RemoteState exposing (RemoteState)
 import Digests exposing (Cops)
+import DragAndDrop exposing (dragStartAttr, dragOverAttr, onDragStart, onDragEnter, onDrop, EffectAllowed(EaMove))
 
 defaultChildChoice : Maybe (List Seg) -> Set Seg
 defaultChildChoice mSegs = case mSegs of
@@ -40,14 +42,36 @@ partitionRemoveOps =
 rectifyEdits : List Seg -> Dict Seg (SeqOp Seg) -> NeChildrenT -> NeChildrenT
 rectifyEdits initialList cops edits =
   let
-    rectifyEdit seg op es = case op of
+    rectifyEdit seg op es =
+      let
+        newDrag = case .dragging es of
+            Nothing -> Nothing
+            Just (startSeg, mEndSeg) -> if startSeg == seg
+                then Nothing
+                else if mEndSeg == Just seg
+                    then Nothing
+                    else .dragging es
+      in case op of
         SoAbsent ->
             { es
             | ops = unref initialList seg <| .ops es
             , chosen = Set.remove seg <| .chosen es
+            , dragging = newDrag
             }
-        SoPresentAfter _ -> {es | ops = Dict.remove seg <| .ops es}
+        SoPresentAfter _ -> {es | ops = Dict.remove seg <| .ops es, dragging = newDrag}
   in Dict.foldl rectifyEdit edits cops
+
+acMime : String
+acMime = "elmweb/arrayChild"
+
+acDragStartAttr = dragStartAttr EaMove <| Dict.singleton acMime <| JE.string "unelmable"
+
+acDragOverAttr =
+  let
+    acHandler dragOverEvt = case Dict.get acMime <| .dataTransfer dragOverEvt of
+        Nothing -> {preventDefault = True, stopPropagation = False}
+        Just _ -> {preventDefault = True, stopPropagation = False}
+  in dragOverAttr acHandler
 
 viewArray
    : Bool -> ArrayDefinition -> List Cops
@@ -63,7 +87,7 @@ viewArray editable arrayDef recentCops mn s mp =
         List.foldl (Dict.union << Dict.map (always Tuple.second)) Dict.empty recentCops
     rSegs = Maybe.withDefault baseSegs <| Result.toMaybe <| applySeqOps recentMoves baseSegs
     editState = case s of
-        FsViewing -> {chosen = defaultChildChoice <| Just rSegs, ops = Dict.empty, addSeg = ""}
+        FsViewing -> {chosen = defaultChildChoice <| Just rSegs, ops = Dict.empty, addSeg = "", dragging = Nothing}
         FsEditing v -> v
     chosenChange op = EeUpdate {editState | chosen = op <| .chosen editState}
     content = if editable
@@ -87,6 +111,7 @@ viewArray editable arrayDef recentCops mn s mp =
                         { ops = inject rSegs addSeg mPrevSeg <| .ops editState
                         , chosen = Set.insert addSeg <| .chosen editState
                         , addSeg = ""
+                        , dragging = Nothing
                         }
                       , HA.style [("background", "green")]
                       ]
@@ -99,11 +124,30 @@ viewArray editable arrayDef recentCops mn s mp =
                       { editState
                       | ops = banish rSegs seg <| .ops editState
                       , chosen = Set.remove seg <| .chosen editState
+                      , dragging = Nothing
                       }
                     else EeSubmit <| Dict.singleton seg SoAbsent
               , HA.style [("background", "red")]
               ]
               [H.text "-"]
+            (dragAttrsFor, mEndSeg) = case .dragging editState of
+                Nothing ->
+                  ( \seg ->
+                      [ onDragStart <| EeUpdate <| {editState | dragging = Just (seg, Nothing)}
+                      , HA.draggable "true"
+                      , acDragStartAttr
+                      ]
+                  , Nothing
+                  )
+                Just (startSeg, mEndSeg) ->
+                  ( \seg ->
+                      let
+                        dragEntered = onDragEnter <| EeUpdate <| {editState | dragging = Just (startSeg, Just seg)}
+                      in if seg == startSeg
+                        then [acDragOverAttr, dragEntered]
+                        else [acDragOverAttr, dragEntered, onDrop <| EeSubmit <| Dict.singleton startSeg <| SoPresentAfter <| Just seg]
+                  , mEndSeg
+                  )
             viewSeg seg =
               let
                 removed = Dict.member seg editRemoves || Dict.member seg pendingRemoves || Dict.member seg recentRemoves
@@ -113,8 +157,12 @@ viewArray editable arrayDef recentCops mn s mp =
                     (Just (Just att), False) -> seg ++ " (" ++ att ++ ")"
                     _ -> seg
                 segWidget = if Set.member seg <| .chosen editState
-                    then H.b [HE.onClick <| chosenChange <| Set.remove seg] [segText]
-                    else H.span [HE.onClick <| chosenChange <| Set.insert seg] [segText]
+                    then H.b
+                        ((HE.onClick <| chosenChange <| Set.remove seg) :: dragAttrsFor seg)
+                        [segText]
+                    else H.span
+                        ((HE.onClick <| chosenChange <| Set.insert seg) :: dragAttrsFor seg)
+                        [segText]
               in if removed
                 then H.div [] [H.del [] [segWidget]]
                 else if added

@@ -77,6 +77,7 @@ type alias NeChildrenT =
   { ops : Dict Seg (SeqOp Seg)
   , chosen : Set Seg
   , addSeg : String
+  , dragging : Maybe (String, Maybe String)
   }
 
 type NodeEdit
