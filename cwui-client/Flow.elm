@@ -13,6 +13,7 @@ import Svg.Events as SE
 import Futility exposing (unionSets, keysSet, maybeToList)
 import ClTypes exposing (Attributee)
 import Digraph exposing (Connections)
+import Transience exposing (Transience)
 
 main = H.beginnerProgram
   { model = exampleFlow
@@ -40,11 +41,6 @@ type alias DragData =
   , pos : Pos
   , end : Maybe TermId
   }
-
-type Transience
-  = TSteady
-  | TNew
-  | TRemoved
 
 type alias Element =
   { desc : String

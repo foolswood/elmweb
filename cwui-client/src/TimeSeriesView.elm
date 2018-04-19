@@ -5,11 +5,12 @@ import Json.Decode as JD
 
 import CSS exposing (emPx, keyFramed, applyKeyFramed)
 
-import ClTypes exposing (TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime)
+import ClTypes exposing (TpId, Time, Attributee, WireValue, Interpolation, fromFloat, fromTime)
 import ClNodes exposing (TimePoint)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
 import EditTypes exposing (NeConstT)
+import Transience exposing (Transience(..))
 
 import Html exposing (..)
 import Html.Attributes as HA exposing (..)
@@ -27,7 +28,7 @@ type TsMsg
   | PlayheadSet Time
 
 type alias TsModel =
-  { series : List (String, (TimeSeries TimePoint, ChangedTimes))
+  { series : List ((String, Transience), (TimeSeries TimePoint, ChangedTimes))
   , vZoom : Float
   , hZoom : Float
   , viewport : Viewport
@@ -38,32 +39,6 @@ type alias TimePointEdit =
   { time : Time
   , value : NeConstT
   , interpolation : Interpolation
-  }
-
-exampleTimeSeries : TsModel
-exampleTimeSeries =
-  let
-    asSeries = List.foldl (\(tpid, t, tp) -> TimeSeries.insert tpid t tp) TimeSeries.empty
-    changedTimes = Dict.singleton (1, 0) <| Just (2, 0)
-  in
-  { series = List.map (\pts -> ("bob", (asSeries pts, changedTimes))) <|
-    [ [ (21, (0, 0), TimePoint Nothing [] ILinear)
-      , (22, (50, 0), TimePoint Nothing [] ILinear)
-      , (23, (200, 0), TimePoint Nothing [] ILinear)
-      ]
-    , [ (33, (3, 0), TimePoint Nothing [] ILinear)
-      ]
-    , [ (21, (5, 0), TimePoint Nothing [] ILinear)
-      ]
-    , [ (12, (7, 0), TimePoint Nothing [] ILinear)
-      ]
-    , [ (99, (9, 0), TimePoint Nothing [] ILinear)
-      ]
-    ]
-  , vZoom = 2.0
-  , hZoom = 1.0
-  , viewport = Viewport 0 0
-  , playheadPos = (42, 0)
   }
 
 getHeights : Float -> List a -> List Float
@@ -110,7 +85,7 @@ viewTimeSeries s =
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
         , ("background", "gray"), ("z-index", "3")
         ]]
-      <| List.map viewTsLabel <| List.map Tuple.first <| .series s
+      <| List.map (uncurry viewTsLabel) <| List.map Tuple.first <| .series s
     playhead = viewPlayhead totalHeight labelWidth (.hZoom s) <| .playheadPos s
   in div
     [ style [("height", "200px"), ("overflow", "auto"), ("position", "relative")]
@@ -203,8 +178,14 @@ viewTsData scale ts cts =
 viewTimePoint : TpId -> TimePoint -> Html a
 viewTimePoint _ _ = div [style [("border-left", "medium solid red"), ("background-color", "rgba(127, 255, 127, 0.7)")]] [text "foo"]
 
-viewTsLabel : String -> Html a
-viewTsLabel name = div [] [text name]
+viewTsLabel : String -> Transience -> Html a
+viewTsLabel name transience =
+  let
+    attrs = case transience of
+        TSteady -> []
+        TNew -> [style [("border", "0.2em solid green")]]
+        TRemoved -> [style [("border", "0.2em solid red")]]
+  in div attrs [text name]
 
 viewPlayhead : Float -> Float -> Float -> Time -> Html a
 viewPlayhead height offset scale t =
