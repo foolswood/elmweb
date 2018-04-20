@@ -5,14 +5,19 @@ import Json.Decode as JD
 
 import CSS exposing (emPx, keyFramed, applyKeyFramed)
 
-import ClTypes exposing (TpId, Time, Attributee, WireValue, Interpolation, fromFloat, fromTime)
-import ClNodes exposing (TimePoint)
+import ClTypes exposing
+  ( TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime
+  , TupleDefinition, InterpolationLimit(..))
+import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
-import EditTypes exposing (NeConstT)
+import EditTypes exposing (EditEvent, NeConstT, NeTimePoint, NaTimePoint, PartialTime)
 import Transience exposing (Transience(..))
+import Form exposing (FormState(..))
+import Digests exposing (TimeChangeT, TimeSeriesDataOp(..))
+import TupleViews
 
-import Html exposing (..)
+import Html as H exposing (..)
 import Html.Attributes as HA exposing (..)
 import Html.Events exposing (..)
 
@@ -70,10 +75,10 @@ viewTimeSeries s =
         , ("position", "sticky"), ("left", "0px"), ("top", "0px")
         , ("z-index", "4"), ("background", "lightgray")
         ]]
-      [ Html.map HZoom <| viewTimeScale <| .hZoom s
-      , Html.map VZoom <| viewTimeScale <| .vZoom s
+      [ H.map HZoom <| viewTimeScale <| .hZoom s
+      , H.map VZoom <| viewTimeScale <| .vZoom s
       ]
-    ticks = Html.map PlayheadSet <| viewTicks controlsHeight labelWidth (.hZoom s) (.left <| .viewport s) (250, 0)
+    ticks = H.map PlayheadSet <| viewTicks controlsHeight labelWidth (.hZoom s) (.left <| .viewport s) (250, 0)
     controls = div [] [scaleControl, ticks]
     seriesHeights = getHeights (.vZoom s) <| .series s
     totalHeight = controlsHeight + List.sum seriesHeights
@@ -184,6 +189,69 @@ viewTsData scale ts cts =
 
 viewTimePoint : TpId -> TimePoint -> Html a
 viewTimePoint _ _ = div [style [("border-left", "medium solid red"), ("background-color", "rgba(127, 255, 127, 0.7)")]] [text "foo"]
+
+actuallyViewTimePoint
+   : Bool -> TupleDefinition -> List TimeChangeT -> Maybe (Time, TimePoint)
+  -> FormState NeTimePoint -> Maybe NaTimePoint
+  -> Html (EditEvent NeTimePoint NaTimePoint)
+actuallyViewTimePoint editable def recents mBasePoint fs mp =
+  let
+    splitRecents (ma, tsdo) (_, recentValAcc, recentPtAcc) = case tsdo of
+        OpSet t wts wvs i -> (False, recentValAcc ++ [(ma, wts, wvs)], recentPtAcc ++ [(ma, t, i)])
+        OpRemove -> (True, recentValAcc, recentPtAcc)
+    (removedUpstream, valueRecents, pointRecents) = List.foldl splitRecents (False, [], []) recents
+    (valueBase, pointBase) = case mBasePoint of
+        -- FIXME: Making up the types here because they're never used (so probably shouldn't flow everywhere)
+        Just (t, {attributee, wvs, interpolation}) ->
+          ( Just {types = [], values = (attributee, wvs)}
+          , Just (attributee, t, interpolation))
+        Nothing -> (Nothing, Nothing)
+    (valueFs, pointFs) = case fs of
+        FsViewing -> (FsViewing, FsViewing)
+        FsEditing {wvs, time, interpolation} -> (FsEditing wvs, FsEditing (time, interpolation))
+    (valueMp, pointMp) = case mp of
+        Just {wvs, time, interpolation} -> (Just wvs, Just (time, interpolation))
+        Nothing -> (Nothing, Nothing)
+    valView = TupleViews.viewWithRecent editable def valueRecents valueBase valueFs valueMp
+    ptView = viewTimePointMeta editable (.interpLim def) pointRecents pointBase pointFs pointMp
+  in div [] []
+
+type alias TimePointMeta = (Maybe Attributee, Time, Interpolation)
+type alias PartialTimePointMeta = (PartialTime, Maybe Interpolation)
+type alias PendingTimePointMeta = (Time, Interpolation)
+
+viewTimePointMeta
+   : Bool -> InterpolationLimit -> List TimePointMeta -> Maybe TimePointMeta
+  -> FormState PartialTimePointMeta -> Maybe PendingTimePointMeta
+  -> Html (EditEvent PartialTimePointMeta TimePointMeta)
+viewTimePointMeta editable iLim recents base fs mp =
+  let
+    finishThisBit
+  in if editable
+    then text "foo"
+    else text "bar"
+
+viewInterpolation : Interpolation -> Html a
+viewInterpolation = H.text << toString
+
+viewEditInterpolation : InterpolationLimit -> PartialInterpolation -> Html PartialInterpolation
+viewEditInterpolation il pi =
+  let
+    toInterp s = if s == "constant"
+        then Just IConstant
+        else if s == "linear"
+            then Just ILinear
+            else Nothing
+    currentModeStr = case pi of
+        Just IConstant -> "constant"
+        Just ILinear -> "linear"
+        Nothing -> ""
+    modeOptStrs= case il of
+        ILConstant -> ["constant"]
+        ILLinear -> ["constant", "linear"]
+        ILUninterpolated -> []
+    modeOpt s = H.option [HA.value s, HA.selected <| currentModeStr == s] [H.text s]
+  in H.select [onInput <| toInterp] <| List.map modeOpt modeOptStrs
 
 viewTsLabel : String -> Transience -> Html a
 viewTsLabel name transience =

@@ -1,10 +1,10 @@
-module Digests exposing (Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT, constChangeCast)
+module Digests exposing (Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT, constChangeCast, TimeChangeT, TimeSeriesDataOp(..))
 
 import Dict exposing (Dict)
 
 import ClTypes exposing (TypeName, Path, Seg, TpId, Interpolation, Time, Attributee, WireValue, WireType, Definition, Liberty)
 import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath, ErrorIndex(..), MsgError(..))
-import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData, TimePoint, TimeSeriesNodeT)
+import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData)
 import SequenceOps exposing (SeqOp(..))
 import RemoteState exposing (RemoteState, NodeMap, TypeAssignMap, TypeMap)
 

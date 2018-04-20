@@ -4,12 +4,19 @@ import Dict exposing (Dict)
 import Set exposing (Set)
 
 import Futility exposing (Conv)
-import ClTypes exposing (WireValue, Seg)
+import ClTypes exposing (WireValue, Seg, Interpolation, Time)
 import SequenceOps exposing (SeqOp)
+import TimeSeries exposing (TimeSeries)
 
+type alias NaTimePoint =
+  { time : Time
+  , interpolation : Interpolation
+  , wvs : NaConstT
+  }
 type alias NeChildMod = SeqOp Seg
 
 type alias NaConstT = List WireValue
+type alias NaSeriesT = TimeSeries NaTimePoint
 type alias NaChildrenT = Dict Seg NeChildMod
 
 type NodeActions
@@ -72,7 +79,15 @@ pFloatConv =
     _ -> Err "Not PeFloat"
   }
 
+type alias PartialInterpolation = Maybe Interpolation  -- This won't be true once IBezier lands
+type alias NeTimePoint =
+  { time : PartialTime
+  , interpolation : PartialInterpolation
+  , wvs : NeConstT
+  }
+
 type alias NeConstT = List PartialEdit
+type alias NeSeriesT = TimeSeries NeTimePoint
 type alias NeChildrenT =
   { ops : Dict Seg (SeqOp Seg)
   , chosen : Set Seg
