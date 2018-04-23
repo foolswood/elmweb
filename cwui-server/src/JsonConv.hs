@@ -5,7 +5,7 @@ import Control.Monad.Fail (MonadFail(..))
 
 import qualified Data.Set as Set
 import Data.Aeson (
-    FromJSON(..), ToJSON(..), Value, withArray, Value(..), Array(..),
+    FromJSON(..), ToJSON(..), Value, withArray, Value(..),
     withObject, (.:), eitherDecode, object, (.=), encode)
 import Data.Aeson.Types (Parser)
 import Data.Maybe (fromJust)
@@ -173,7 +173,7 @@ instance FromJSON Interpolation where
         ILLinear -> return ILinear
 
 instance ToJSON Interpolation where
-    toJSON = buildTaggedJson interpolationTaggedData $ \v -> toJSON (Nothing :: Maybe Int)
+    toJSON = buildTaggedJson interpolationTaggedData $ const $ toJSON (Nothing :: Maybe Int)
 
 instance FromJSON DataUpdateMessage where
     parseJSON = parseTaggedJson dumtTaggedData $ \e -> withObject "DataUpdateMessage" $ case e of
@@ -186,7 +186,7 @@ instance FromJSON DataUpdateMessage where
             <$> v .: "path" <*> v .: "tpid" <*> v .: "att"
 
 instance ToJSON DataUpdateMessage where
-    toJSON = buildTaggedJson dumtTaggedData $ \i -> case i of
+    toJSON = buildTaggedJson dumtTaggedData $ \dum -> case dum of
         MsgConstSet p vs ma -> object ["path" .= p, "args" .= vs, "att" .= ma]
         MsgSet p tpId t vs i ma -> object
           [ "path" .= p, "tpid" .= tpId, "time" .= t, "args" .= vs
