@@ -114,6 +114,7 @@ withWireTypeProxy f wt = case wt of
     applyUnpacked [] p = f p
     applyUnpacked (ct:cts) _ = case ct of
       WcList -> applyUnpacked cts (Proxy :: Proxy [a])
+      WcMaybe -> applyUnpacked cts (Proxy :: Proxy (Maybe a))
 
 instance FromJSON WireType where
     parseJSON v = parseJSON v >>= wtFromString
