@@ -1,13 +1,12 @@
-module TupleViews exposing (viewWithRecent)
+module TupleViews exposing (viewWithRecent, timeViewer, timeEditor)
 
 import Html exposing (..)
 import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
-import Regex exposing (Regex)
 
 import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood)
-import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
-import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime)
+import ClTypes exposing (Bounds, Attributee, TypeName, WireValue, asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
+import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial, fullPartial)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (ConstChangeT)
@@ -120,7 +119,7 @@ viewConstTupleEdit defs mv s mp =
     aevs pvs aess = List.map3 (vae pvs) (List.range 0 nDefs) defs aess
     tupView vs =
       let
-        pvs = List.map2 asPartial defs <| List.map Just vs
+        pvs = fullPartial defs vs
       in aevs pvs <| List.map2 AsViewing vs pvs
     tupEdit pvs =
       let
@@ -140,29 +139,6 @@ viewConstTupleEdit defs mv s mp =
         Nothing -> tupEdit <| emptyPartial defs
         Just v -> tupView v
     FsEditing pvs -> tupEdit pvs
-
-asFull : (PartialEdit, AtomDef) -> Maybe WireValue
-asFull ped = case ped of
-    (PeEnum mi, ADEnum _) -> Maybe.map WvWord8 mi
-    (PeTime pt, ADTime _) -> case pt of
-        (Just s, Just f) -> Just <| WvTime (s, f)
-        _ -> Nothing
-    (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
-        [] -> Nothing
-        _ -> Just <| WvString s
-    _ -> Nothing
-
-asPartial : AtomDef -> Maybe WireValue -> PartialEdit
-asPartial d mwv = case (d, mwv) of
-    (ADEnum _, Just (WvWord8 w)) -> PeEnum <| Just w
-    (ADEnum _, _) -> PeEnum Nothing
-    (ADTime _, Just (WvTime (s, f))) -> PeTime (Just s, Just f)
-    (ADTime _, _) -> PeTime (Nothing, Nothing)
-    -- FIXME: This is utter tat!
-    _ -> PeEnum Nothing
-
-emptyPartial : List AtomDef -> List PartialEdit
-emptyPartial = List.map (flip asPartial Nothing)
 
 viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =

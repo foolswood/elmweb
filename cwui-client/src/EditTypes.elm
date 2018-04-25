@@ -2,9 +2,10 @@ module EditTypes exposing (..)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
+import Regex exposing (Regex)
 
 import Futility exposing (Conv)
-import ClTypes exposing (WireValue, Seg, Interpolation, Time)
+import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireValue(..))
 import SequenceOps exposing (SeqOp)
 import TimeSeries exposing (TimeSeries)
 
@@ -78,6 +79,32 @@ pFloatConv =
     PeFloat f -> Ok f
     _ -> Err "Not PeFloat"
   }
+
+asFull : (PartialEdit, AtomDef) -> Maybe WireValue
+asFull ped = case ped of
+    (PeEnum mi, ADEnum _) -> Maybe.map WvWord8 mi
+    (PeTime pt, ADTime _) -> case pt of
+        (Just s, Just f) -> Just <| WvTime (s, f)
+        _ -> Nothing
+    (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
+        [] -> Nothing
+        _ -> Just <| WvString s
+    _ -> Nothing
+
+asPartial : AtomDef -> Maybe WireValue -> PartialEdit
+asPartial d mwv = case (d, mwv) of
+    (ADEnum _, Just (WvWord8 w)) -> PeEnum <| Just w
+    (ADEnum _, _) -> PeEnum Nothing
+    (ADTime _, Just (WvTime (s, f))) -> PeTime (Just s, Just f)
+    (ADTime _, _) -> PeTime (Nothing, Nothing)
+    -- FIXME: This is utter tat!
+    _ -> PeEnum Nothing
+
+emptyPartial : List AtomDef -> List PartialEdit
+emptyPartial = List.map (flip asPartial Nothing)
+
+fullPartial : List AtomDef -> List WireValue -> List PartialEdit
+fullPartial defs vs = List.map2 asPartial defs <| List.map Just vs
 
 type alias PartialInterpolation = Maybe Interpolation  -- This won't be true once IBezier lands
 type alias NeTimePoint =
