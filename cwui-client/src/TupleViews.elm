@@ -107,34 +107,39 @@ viewConstNodeEdit
   -> Html (EditEvent NeConstT NaConstT)
 viewConstNodeEdit d mn s mp = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s mp
 
+currentRemote : Maybe a -> Maybe a -> Maybe a
+currentRemote mv mp = case mp of
+    Just p -> Just p
+    Nothing -> mv
+
+-- FIXME: What if the defs change during editing?
+getPartials
+  : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT
+  -> List PartialEdit
+getPartials defs mv s = case s of
+    FsViewing -> case mv of
+        Nothing -> emptyPartial defs
+        Just v -> fullPartial defs v
+    FsEditing pvs -> pvs
+
+asSubmittable : List AtomDef -> List PartialEdit -> Maybe (List WireValue)
+asSubmittable defs pvs = allGood asFull (zip pvs defs)
+
 viewConstTupleEdit
    : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT -> Maybe (List WireValue)
    -> Html (EditEvent NeConstT NaConstT)
 viewConstTupleEdit defs mv s mp =
   let
-    nDefs = List.length defs
+    mainPvs = getPartials defs mv s
     indexUpdate pvs idx pv = EeUpdate <| Result.withDefault pvs <| replaceIdx idx pv pvs
     vae pvs i d s = Html.map (indexUpdate pvs i) <| viewAtomEdit d s
-    -- FIXME: What if the defs change during editing?
-    aevs pvs aess = List.map3 (vae pvs) (List.range 0 nDefs) defs aess
-    tupEdit pvs =
-      let
-        atomEditStates = List.map AsEditing pvs
-        thing = aevs pvs atomEditStates
-        currentRemote = case mp of
-            Just p -> Just p
-            Nothing -> mv
-        content = case allGood asFull (zip pvs defs) of
-            Just fullVals -> if Just fullVals == currentRemote
-                then thing
-                else button [onClick <| EeSubmit fullVals] [text "Apply"] :: thing
-            Nothing -> thing
-      in content
-  in span [] <| tupEdit <| case s of
-    FsViewing -> case mv of
-        Nothing -> emptyPartial defs
-        Just v -> fullPartial defs v
-    FsEditing pvs -> pvs
+    aevs pvs aess = List.map3 (vae pvs) (List.range 0 <| List.length defs) defs aess
+    tupAtomEdits = aevs mainPvs <| List.map AsEditing mainPvs
+  in span [] <| case asSubmittable defs mainPvs of
+    Just fullVals -> if Just fullVals == currentRemote mv mp
+        then tupAtomEdits
+        else button [onClick <| EeSubmit fullVals] [text "Apply"] :: tupAtomEdits
+    Nothing -> tupAtomEdits
 
 viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =
