@@ -33,6 +33,9 @@ type Interpolation
 
 type alias Bounds a = {minBound : Maybe a, maxBound : Maybe a}
 
+unbounded : Bounds a
+unbounded = {minBound = Nothing, maxBound = Nothing}
+
 type AtomDef
   = ADTime (Bounds Time)
   | ADEnum (List String)
