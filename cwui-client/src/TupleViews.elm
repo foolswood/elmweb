@@ -117,10 +117,6 @@ viewConstTupleEdit defs mv s mp =
     vae pvs i d s = Html.map (indexUpdate pvs i) <| viewAtomEdit d s
     -- FIXME: What if the defs change during editing?
     aevs pvs aess = List.map3 (vae pvs) (List.range 0 nDefs) defs aess
-    tupView vs =
-      let
-        pvs = fullPartial defs vs
-      in aevs pvs <| List.map2 AsViewing vs pvs
     tupEdit pvs =
       let
         atomEditStates = List.map AsEditing pvs
@@ -134,11 +130,11 @@ viewConstTupleEdit defs mv s mp =
                 else button [onClick <| EeSubmit fullVals] [text "Apply"] :: thing
             Nothing -> thing
       in content
-  in span [] <| case s of
+  in span [] <| tupEdit <| case s of
     FsViewing -> case mv of
-        Nothing -> tupEdit <| emptyPartial defs
-        Just v -> tupView v
-    FsEditing pvs -> tupEdit pvs
+        Nothing -> emptyPartial defs
+        Just v -> fullPartial defs v
+    FsEditing pvs -> pvs
 
 viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =
