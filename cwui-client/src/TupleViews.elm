@@ -102,11 +102,6 @@ enumViewer opts idx = text <| case itemAtIndex idx opts of
 timeViewer : Bounds Time -> Time -> Html a
 timeViewer _ (s, f) = text <| toString s ++ ":" ++ toString f
 
-viewConstNodeEdit
-   : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
-  -> Html (EditEvent NeConstT NaConstT)
-viewConstNodeEdit d mn s mp = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s mp
-
 currentRemote : Maybe a -> Maybe a -> Maybe a
 currentRemote mv mp = case mp of
     Just p -> Just p
@@ -125,21 +120,26 @@ getPartials defs mv s = case s of
 asSubmittable : List AtomDef -> List PartialEdit -> Maybe (List WireValue)
 asSubmittable defs pvs = allGood asFull (zip pvs defs)
 
+viewAtomEditors : List AtomDef -> List PartialEdit -> FormState NeConstT -> List (Html NeConstT)
+viewAtomEditors defs mainPvs s =
+  let
+    indexUpdate pvs idx pv = Result.withDefault pvs <| replaceIdx idx pv pvs
+    vae pvs i d s = Html.map (indexUpdate pvs i) <| viewAtomEdit d s
+    aevs pvs aess = List.map3 (vae pvs) (List.range 0 <| List.length defs) defs aess
+  in aevs mainPvs <| List.map AsEditing mainPvs
+
 viewConstTupleEdit
    : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT -> Maybe (List WireValue)
    -> Html (EditEvent NeConstT NaConstT)
 viewConstTupleEdit defs mv s mp =
   let
-    mainPvs = getPartials defs mv s
-    indexUpdate pvs idx pv = EeUpdate <| Result.withDefault pvs <| replaceIdx idx pv pvs
-    vae pvs i d s = Html.map (indexUpdate pvs i) <| viewAtomEdit d s
-    aevs pvs aess = List.map3 (vae pvs) (List.range 0 <| List.length defs) defs aess
-    tupAtomEdits = aevs mainPvs <| List.map AsEditing mainPvs
-  in span [] <| case asSubmittable defs mainPvs of
+    pvs = getPartials defs mv s
+    tae = List.map (Html.map EeUpdate) <| viewAtomEditors defs pvs s
+  in span [] <| case asSubmittable defs pvs of
     Just fullVals -> if Just fullVals == currentRemote mv mp
-        then tupAtomEdits
-        else button [onClick <| EeSubmit fullVals] [text "Apply"] :: tupAtomEdits
-    Nothing -> tupAtomEdits
+        then tae
+        else button [onClick <| EeSubmit fullVals] [text "Apply"] :: tae
+    Nothing -> tae
 
 viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =
