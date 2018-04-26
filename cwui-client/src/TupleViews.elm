@@ -12,8 +12,8 @@ import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (ConstChangeT)
 import Limits exposing (maxWord64, maxWord32)
 
-type EditTarget k v f a
-  = Editable k (Maybe v) (FormState f) (Maybe a)
+type EditTarget k v p
+  = Editable k p
   | ReadOnly v
 
 viewWithRecent
@@ -36,11 +36,13 @@ viewWithRecentNoSubmission
   -> (Maybe NaConstT, Html NeConstT)
 viewWithRecentNoSubmission editable def recent mn fs mp =
   let
+    ads = List.map Tuple.second <| .types def
     recentAttrVals = List.map (\(ma, _, wvs) -> (ma, wvs)) recent
     attrVals = case mn of
         Nothing -> recentAttrVals
         Just n -> .values n :: recentAttrVals
     finalVal = List.length attrVals - 1
+    latestPartial = getPartials ads (Maybe.map Tuple.second <| List.head <| List.drop (finalVal - 1) attrVals) fs mp
     sourceInfo idx ma = text <| toString (idx - finalVal) ++ Maybe.withDefault "" ma
     latestControls = if editable
       then text "Staging controls?"
@@ -52,42 +54,33 @@ viewWithRecentNoSubmission editable def recent mn fs mp =
           then latestControls
           else sourceInfo idx ma
         et = if isLatest && editable
-          then Editable () (Just wvs) fs mp
+          then Editable () latestPartial
           else ReadOnly wvs
       in (si, et)
     valComps = List.indexedMap asComp attrVals
     comps = case (editable, valComps) of
-        (True, []) -> [(latestControls, Editable () Nothing fs mp)]
+        (True, []) -> [(latestControls, Editable () <| getPartials ads Nothing fs mp)]
         _ -> valComps
     cleanResult r = case r of
         Left a -> never a
         Right (_, evt) -> evt
-    (mSubs, compV) = constDataComp def comps
-    mSub = case mSubs of
-        [((), ms)] -> ms
-        _ -> Nothing
-  in (mSub, Html.map cleanResult compV)
+    compV = constDataComp ads comps
+  in (asSubmittable ads latestPartial, Html.map cleanResult compV)
 
 constDataComp
-   : TupleDefinition
-  -> List (Html a, EditTarget k (List WireValue) NeConstT NaConstT)
-  -> (List (k, Maybe NaConstT), Html (Either a (k, NeConstT)))
-constDataComp def values =
+   : List AtomDef
+  -> List (Html a, EditTarget k (List WireValue) NeConstT)
+  -> Html (Either a (k, NeConstT))
+constDataComp ads values =
   let
-    ads = List.map Tuple.second <| .types def
-    viewRow (sourceInfo, et) (kSubs, cells) =
+    viewRow (sourceInfo, et) =
       let
-        (newKSubs, tupV) = case et of
-            ReadOnly wvs -> (kSubs, viewConstTuple ads wvs)
-            Editable k mwvs fs mp ->
-              let
-                tupP = getPartials ads mwvs fs mp
-                mSub = asSubmittable ads tupP
-                tupV = viewConstTupleEdit ads tupP
-              in ((k, mSub) :: kSubs, Html.map (\e -> (k, e)) <| tupV)
-      in (newKSubs, cells ++ [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]])
-    (kSubs, cells) = List.foldl viewRow ([], []) values
-  in (kSubs, div [style [("display", "grid"), ("grid-template-columns", "auto auto")]] cells)
+        tupV = case et of
+            ReadOnly wvs -> viewConstTuple ads wvs
+            Editable k p -> Html.map ((,) k) <| viewConstTupleEdit ads p
+      in [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]]
+    cells = List.concatMap viewRow values
+  in div [style [("display", "grid"), ("grid-template-columns", "auto auto")]] cells
 
 viewConstTuple : List AtomDef -> List WireValue -> Html a
 viewConstTuple ads wvs = span [] <| List.map2 viewAtom ads wvs
