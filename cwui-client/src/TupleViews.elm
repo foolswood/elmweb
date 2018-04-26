@@ -81,7 +81,9 @@ constDataComp def values =
             ReadOnly wvs -> (kSubs, viewConstTuple ads wvs)
             Editable k mwvs fs mp ->
               let
-                (mSub, tupV) = viewConstTupleEdit ads mwvs fs mp
+                tupP = getPartials ads mwvs fs mp
+                mSub = asSubmittable ads tupP
+                tupV = viewConstTupleEdit ads tupP
               in ((k, mSub) :: kSubs, Html.map (\e -> (k, e)) <| tupV)
       in (newKSubs, cells ++ [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]])
     (kSubs, cells) = List.foldl viewRow ([], []) values
@@ -126,9 +128,9 @@ timeViewer _ (s, f) = text <| toString s ++ ":" ++ toString f
 -- FIXME: What if the defs change during editing?
 getPartials
   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT
-  -> List PartialEdit
-getPartials defs mv s = case s of
-    FsViewing -> case mv of
+  -> Maybe (List WireValue) -> List PartialEdit
+getPartials defs mv s mp = case s of
+    FsViewing -> case lastJust mv mp of
         Nothing -> emptyPartial defs
         Just v -> fullPartial defs v
     FsEditing pvs -> pvs
@@ -136,22 +138,13 @@ getPartials defs mv s = case s of
 asSubmittable : List AtomDef -> List PartialEdit -> Maybe (List WireValue)
 asSubmittable defs pvs = allGood asFull (zip pvs defs)
 
-viewAtomEditors : List AtomDef -> List PartialEdit -> FormState NeConstT -> List (Html NeConstT)
-viewAtomEditors defs mainPvs s =
+viewConstTupleEdit : List AtomDef -> NeConstT -> Html NeConstT
+viewConstTupleEdit defs mainPvs =
   let
     indexUpdate pvs idx pv = Result.withDefault pvs <| replaceIdx idx pv pvs
     vae pvs i d s = Html.map (indexUpdate pvs i) <| viewAtomEdit d s
     aevs pvs aess = List.map3 (vae pvs) (List.range 0 <| List.length defs) defs aess
-  in aevs mainPvs <| List.map AsEditing mainPvs
-
-viewConstTupleEdit
-   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT -> Maybe (List WireValue)
-   -> (Maybe (List WireValue), Html NeConstT)
-viewConstTupleEdit defs mv s mp =
-  let
-    pvs = getPartials defs mv s
-    tae = viewAtomEditors defs pvs s
-  in (asSubmittable defs pvs, span [] tae)
+  in span [] <| aevs mainPvs <| List.map AsEditing mainPvs
 
 viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =
