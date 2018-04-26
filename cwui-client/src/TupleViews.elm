@@ -4,7 +4,7 @@ import Html exposing (..)
 import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
 
-import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood)
+import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood, lastJust)
 import ClTypes exposing (Bounds, Attributee, TypeName, WireValue, asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial, fullPartial)
 import Form exposing (AtomState(..), castAs, FormState(..))
@@ -25,7 +25,7 @@ viewWithRecent editable def recent mn fs mp =
     (mSub, v) = viewWithRecentNoSubmission editable def recent mn fs mp
     vUp = Html.map EeUpdate v
   in case mSub of
-    Just sub -> if Just sub == currentRemote (Maybe.map (Tuple.second << .values) mn) mp
+    Just sub -> if Just sub == lastJust (Maybe.map (Tuple.second << .values) mn) mp
         then vUp
         else div [] [vUp, button [onClick <| EeSubmit sub] [text "Apply"]]
     Nothing -> vUp
@@ -122,11 +122,6 @@ enumViewer opts idx = text <| case itemAtIndex idx opts of
 
 timeViewer : Bounds Time -> Time -> Html a
 timeViewer _ (s, f) = text <| toString s ++ ":" ++ toString f
-
-currentRemote : Maybe a -> Maybe a -> Maybe a
-currentRemote mv mp = case mp of
-    Just p -> Just p
-    Nothing -> mv
 
 -- FIXME: What if the defs change during editing?
 getPartials
