@@ -22,6 +22,20 @@ viewWithRecent
   -> Html (EditEvent NeConstT NaConstT)
 viewWithRecent editable def recent mn fs mp =
   let
+    (mSub, v) = viewWithRecentNoSubmission editable def recent mn fs mp
+    vUp = Html.map EeUpdate v
+  in case mSub of
+    Just sub -> if Just sub == currentRemote (Maybe.map (Tuple.second << .values) mn) mp
+        then vUp
+        else div [] [vUp, button [onClick <| EeSubmit sub] [text "Apply"]]
+    Nothing -> vUp
+
+viewWithRecentNoSubmission
+   : Bool -> TupleDefinition -> List ConstChangeT
+  -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
+  -> (Maybe NaConstT, Html NeConstT)
+viewWithRecentNoSubmission editable def recent mn fs mp =
+  let
     recentAttrVals = List.map (\(ma, _, wvs) -> (ma, wvs)) recent
     attrVals = case mn of
         Nothing -> recentAttrVals
@@ -48,32 +62,30 @@ viewWithRecent editable def recent mn fs mp =
     cleanResult r = case r of
         Left a -> never a
         Right (_, evt) -> evt
-  in Html.map cleanResult <| constDataComp def comps
+    (mSubs, compV) = constDataComp def comps
+    mSub = case mSubs of
+        [((), ms)] -> ms
+        _ -> Nothing
+  in (mSub, Html.map cleanResult compV)
 
 constDataComp
    : TupleDefinition
   -> List (Html a, EditTarget k (List WireValue) NeConstT NaConstT)
-  -> Html (Either a (k, EditEvent NeConstT NaConstT))
+  -> (List (k, Maybe NaConstT), Html (Either a (k, NeConstT)))
 constDataComp def values =
   let
     ads = List.map Tuple.second <| .types def
-    viewRow (sourceInfo, et) =
+    viewRow (sourceInfo, et) (kSubs, cells) =
       let
-        tupV = case et of
-            ReadOnly wvs -> viewConstTuple ads wvs
+        (newKSubs, tupV) = case et of
+            ReadOnly wvs -> (kSubs, viewConstTuple ads wvs)
             Editable k mwvs fs mp ->
               let
-                (submittable, tupVal) = viewConstTupleEdit ads mwvs fs mp
-                tupV = Html.map EeUpdate tupVal
-                subTupV = case submittable of
-                    Just fullVals -> if Just fullVals == currentRemote mwvs mp
-                        then [tupV]
-                        else [button [onClick <| EeSubmit fullVals] [text "Apply"], tupV]
-                    Nothing -> [tupV]
-              in Html.map (\e -> (k, e)) <| span [] subTupV
-      in [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]]
-    cells = List.concatMap viewRow values
-  in div [style [("display", "grid"), ("grid-template-columns", "auto auto")]] cells
+                (mSub, tupV) = viewConstTupleEdit ads mwvs fs mp
+              in ((k, mSub) :: kSubs, Html.map (\e -> (k, e)) <| tupV)
+      in (newKSubs, cells ++ [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]])
+    (kSubs, cells) = List.foldl viewRow ([], []) values
+  in (kSubs, div [style [("display", "grid"), ("grid-template-columns", "auto auto")]] cells)
 
 viewConstTuple : List AtomDef -> List WireValue -> Html a
 viewConstTuple ads wvs = span [] <| List.map2 viewAtom ads wvs
