@@ -61,7 +61,16 @@ constDataComp def values =
       let
         tupV = case et of
             ReadOnly wvs -> viewConstTuple ads wvs
-            Editable k mwvs fs mp -> Html.map (\e -> (k, e)) <| viewConstTupleEdit ads mwvs fs mp
+            Editable k mwvs fs mp ->
+              let
+                (submittable, tupVal) = viewConstTupleEdit ads mwvs fs mp
+                tupV = Html.map EeUpdate tupVal
+                subTupV = case submittable of
+                    Just fullVals -> if Just fullVals == currentRemote mwvs mp
+                        then [tupV]
+                        else [button [onClick <| EeSubmit fullVals] [text "Apply"], tupV]
+                    Nothing -> [tupV]
+              in Html.map (\e -> (k, e)) <| span [] subTupV
       in [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]]
     cells = List.concatMap viewRow values
   in div [style [("display", "grid"), ("grid-template-columns", "auto auto")]] cells
@@ -130,16 +139,12 @@ viewAtomEditors defs mainPvs s =
 
 viewConstTupleEdit
    : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT -> Maybe (List WireValue)
-   -> Html (EditEvent NeConstT NaConstT)
+   -> (Maybe (List WireValue), Html NeConstT)
 viewConstTupleEdit defs mv s mp =
   let
     pvs = getPartials defs mv s
-    tae = List.map (Html.map EeUpdate) <| viewAtomEditors defs pvs s
-  in span [] <| case asSubmittable defs pvs of
-    Just fullVals -> if Just fullVals == currentRemote mv mp
-        then tae
-        else button [onClick <| EeSubmit fullVals] [text "Apply"] :: tae
-    Nothing -> tae
+    tae = viewAtomEditors defs pvs s
+  in (asSubmittable defs pvs, span [] tae)
 
 viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =
