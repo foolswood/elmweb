@@ -7,15 +7,18 @@ import CSS exposing (emPx, keyFramed, applyKeyFramed)
 
 import ClTypes exposing
   ( TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime
-  , TupleDefinition, InterpolationLimit(..))
+  , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded)
 import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
-import EditTypes exposing (EditEvent, NeConstT, NeTimePoint, NaTimePoint, PartialTime)
+import EditTypes exposing
+  ( EditEvent, NeConstT, NeTimePoint, NaTimePoint, PartialTime
+  , PartialInterpolation, emptyPartial, fullPartial)
 import Transience exposing (Transience(..))
-import Form exposing (FormState(..))
+import Form exposing (FormState(..), AtomState(AsEditing))
 import Digests exposing (TimeChangeT, TimeSeriesDataOp(..))
 import TupleViews
+import Futility exposing (maybeToList, lastJust, setFst, setSnd)
 
 import Html as H exposing (..)
 import Html.Attributes as HA exposing (..)
@@ -190,11 +193,11 @@ viewTsData scale ts cts =
 viewTimePoint : TpId -> TimePoint -> Html a
 viewTimePoint _ _ = div [style [("border-left", "medium solid red"), ("background-color", "rgba(127, 255, 127, 0.7)")]] [text "foo"]
 
-actuallyViewTimePoint
-   : Bool -> TupleDefinition -> List TimeChangeT -> Maybe (Time, TimePoint)
+editTimePoint
+   : TupleDefinition -> List TimeChangeT -> Maybe (Time, TimePoint)
   -> FormState NeTimePoint -> Maybe NaTimePoint
   -> Html (EditEvent NeTimePoint NaTimePoint)
-actuallyViewTimePoint editable def recents mBasePoint fs mp =
+editTimePoint def recents mBasePoint fs mp =
   let
     splitRecents (ma, tsdo) (_, recentValAcc, recentPtAcc) = case tsdo of
         OpSet t wts wvs i -> (False, recentValAcc ++ [(ma, wts, wvs)], recentPtAcc ++ [(ma, t, i)])
@@ -212,30 +215,67 @@ actuallyViewTimePoint editable def recents mBasePoint fs mp =
     (valueMp, pointMp) = case mp of
         Just {wvs, time, interpolation} -> (Just wvs, Just (time, interpolation))
         Nothing -> (Nothing, Nothing)
-    valView = TupleViews.viewWithRecent editable def valueRecents valueBase valueFs valueMp
-    ptView = viewTimePointMeta editable (.interpLim def) pointRecents pointBase pointFs pointMp
-  in div [] []
+    ads = List.map Tuple.second <| .types def
+    (valPartials, valSub) = TupleViews.pInfo ads valueBase valueRecents valueFs valueMp
+    valView = TupleViews.viewWithRecentNoSubmission True ads valueRecents valueBase valPartials
+    iLim = .interpLim def
+    ptUpstream = mCurrentMeta pointBase pointRecents
+    ptPartial = getPartialTimePointMeta iLim ptUpstream pointFs pointMp
+    ptSub = asFullTimePointMeta ptPartial
+    ptView = editTimePointMeta iLim ptUpstream ptPartial
+    bolsterPoint = case valueFs of
+        FsViewing -> case valueBase of
+            Nothing -> emptyPartial ads
+            Just wvs -> fullPartial ads <| Tuple.second <| .values wvs
+        FsEditing e -> e
+  in div []
+    [
+    ]
 
 type alias TimePointMeta = (Maybe Attributee, Time, Interpolation)
-type alias PartialTimePointMeta = (PartialTime, Maybe Interpolation)
+type alias PartialTimePointMeta = (PartialTime, PartialInterpolation)
 type alias PendingTimePointMeta = (Time, Interpolation)
 
-viewTimePointMeta
-   : Bool -> InterpolationLimit -> List TimePointMeta -> Maybe TimePointMeta
-  -> FormState PartialTimePointMeta -> Maybe PendingTimePointMeta
-  -> Html (EditEvent PartialTimePointMeta TimePointMeta)
-viewTimePointMeta editable iLim recents base fs mp =
-  let
-    finishThisBit
-  in if editable
-    then text "foo"
-    else text "bar"
+mCurrentMeta : Maybe TimePointMeta -> List TimePointMeta -> Maybe TimePointMeta
+mCurrentMeta base recents = List.head <| List.reverse <| maybeToList base ++ recents
 
-viewInterpolation : Interpolation -> Html a
-viewInterpolation = H.text << toString
+asPendingTimePointMeta : TimePointMeta -> PendingTimePointMeta
+asPendingTimePointMeta (_, t, i) = (t, i)
 
-viewEditInterpolation : InterpolationLimit -> PartialInterpolation -> Html PartialInterpolation
-viewEditInterpolation il pi =
+-- FIXME: Currently doesn't clamp to iLim
+getPartialTimePointMeta
+   : InterpolationLimit -> Maybe TimePointMeta
+   -> FormState PartialTimePointMeta -> Maybe PendingTimePointMeta
+   -> PartialTimePointMeta
+getPartialTimePointMeta iLim mUpstream fs mp = case fs of
+    FsViewing -> case lastJust (Maybe.map asPendingTimePointMeta mUpstream) mp of
+        Just ((s, f), i) -> ((Just s, Just f), Just i)
+        Nothing -> ((Nothing, Nothing), Nothing)
+    FsEditing e -> e
+
+asFullTimePointMeta : PartialTimePointMeta -> Maybe PendingTimePointMeta
+asFullTimePointMeta p = case p of
+    ((Just s, Just f), Just i) -> Just ((s, f), i)
+    _ -> Nothing
+
+editTimePointMeta
+   : InterpolationLimit -> Maybe TimePointMeta
+  -> PartialTimePointMeta
+  -> Html PartialTimePointMeta
+editTimePointMeta iLim upstream p = H.div []
+    [ H.map (setFst p) <| TupleViews.timeEditor unbounded <| AsEditing <| Tuple.first p
+    , H.map (setSnd p) <| interpolationEditor iLim <| Tuple.second p]
+
+viewTimePointMeta : Maybe TimePointMeta -> List TimePointMeta -> Html a
+viewTimePointMeta base recents = case mCurrentMeta base recents of
+    Nothing -> H.text "Loading..."
+    Just (ma, t, i) -> H.div [] [TupleViews.timeViewer unbounded t, interpolationViewer i]
+
+interpolationViewer : Interpolation -> Html a
+interpolationViewer = H.text << toString
+
+interpolationEditor : InterpolationLimit -> PartialInterpolation -> Html PartialInterpolation
+interpolationEditor il pi =
   let
     toInterp s = if s == "constant"
         then Just IConstant

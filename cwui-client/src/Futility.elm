@@ -96,7 +96,19 @@ removeKeys ks d = List.foldl Dict.remove d ks
 nonEmptyDict : Dict k v -> Maybe (Dict k v)
 nonEmptyDict d = if Dict.isEmpty d then Nothing else Just d
 
+last : List a -> Maybe a
+last l = case l of
+    [] -> Nothing
+    (i :: []) -> Just i
+    (_ :: c) -> last c
+
 lastJust : Maybe a -> Maybe a -> Maybe a
 lastJust mv mp = case mp of
     Just p -> Just p
     Nothing -> mv
+
+setFst : (a, b) -> a -> (a, b)
+setFst (_, b) a = (a, b)
+
+setSnd : (a, b) -> b -> (a, b)
+setSnd (a, _) b = (a, b)

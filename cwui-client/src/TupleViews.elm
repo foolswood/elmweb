@@ -1,10 +1,10 @@
-module TupleViews exposing (viewWithRecent, timeViewer, timeEditor)
+module TupleViews exposing (viewWithRecent, viewWithRecentNoSubmission, timeViewer, timeEditor, pInfo)
 
 import Html exposing (..)
 import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
 
-import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood, lastJust)
+import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood, lastJust, last)
 import ClTypes exposing (Bounds, Attributee, TypeName, WireValue, asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial, fullPartial)
 import Form exposing (AtomState(..), castAs, FormState(..))
@@ -22,7 +22,9 @@ viewWithRecent
   -> Html (EditEvent NeConstT NaConstT)
 viewWithRecent editable def recent mn fs mp =
   let
-    (mSub, v) = viewWithRecentNoSubmission editable def recent mn fs mp
+    ads = List.map Tuple.second <| .types def
+    (latestPartial, mSub) = pInfo ads mn recent fs mp
+    v = viewWithRecentNoSubmission editable ads recent mn latestPartial
     vUp = Html.map EeUpdate v
   in case mSub of
     Just sub -> if Just sub == lastJust (Maybe.map (Tuple.second << .values) mn) mp
@@ -30,19 +32,32 @@ viewWithRecent editable def recent mn fs mp =
         else div [] [vUp, button [onClick <| EeSubmit sub] [text "Apply"]]
     Nothing -> vUp
 
-viewWithRecentNoSubmission
-   : Bool -> TupleDefinition -> List ConstChangeT
-  -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
-  -> (Maybe NaConstT, Html NeConstT)
-viewWithRecentNoSubmission editable def recent mn fs mp =
+pInfo
+   : List AtomDef -> Maybe ConstDataNodeT -> List ConstChangeT
+   -> FormState NeConstT -> Maybe NaConstT
+   -> (NeConstT, Maybe NaConstT)
+pInfo ads mn recent fs mp =
   let
-    ads = List.map Tuple.second <| .types def
+    attrVals = upstreamStates mn recent
+    partial = getPartials ads (Maybe.map Tuple.second <| last attrVals) fs mp
+  in (partial, asSubmittable ads partial)
+
+upstreamStates : Maybe ConstDataNodeT -> List ConstChangeT -> List (Maybe Attributee, List WireValue)
+upstreamStates mn recent =
+  let
     recentAttrVals = List.map (\(ma, _, wvs) -> (ma, wvs)) recent
-    attrVals = case mn of
-        Nothing -> recentAttrVals
-        Just n -> .values n :: recentAttrVals
+  in case mn of
+    Nothing -> recentAttrVals
+    Just n -> .values n :: recentAttrVals
+
+viewWithRecentNoSubmission
+   : Bool -> List AtomDef -> List ConstChangeT
+  -> Maybe ConstDataNodeT -> NeConstT
+  -> Html NeConstT
+viewWithRecentNoSubmission editable ads recent mn latestPartial =
+  let
+    attrVals = upstreamStates mn recent
     finalVal = List.length attrVals - 1
-    latestPartial = getPartials ads (Maybe.map Tuple.second <| List.head <| List.drop (finalVal - 1) attrVals) fs mp
     sourceInfo idx ma = text <| toString (idx - finalVal) ++ Maybe.withDefault "" ma
     latestControls = if editable
       then text "Staging controls?"
@@ -59,13 +74,13 @@ viewWithRecentNoSubmission editable def recent mn fs mp =
       in (si, et)
     valComps = List.indexedMap asComp attrVals
     comps = case (editable, valComps) of
-        (True, []) -> [(latestControls, Editable () <| getPartials ads Nothing fs mp)]
+        (True, []) -> [(latestControls, Editable () latestPartial)]
         _ -> valComps
     cleanResult r = case r of
         Left a -> never a
         Right (_, evt) -> evt
     compV = constDataComp ads comps
-  in (asSubmittable ads latestPartial, Html.map cleanResult compV)
+  in Html.map cleanResult compV
 
 constDataComp
    : List AtomDef
