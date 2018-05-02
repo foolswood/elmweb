@@ -12,8 +12,8 @@ import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
 import EditTypes exposing
-  ( EditEvent, NeConstT, NeTimePoint, NaTimePoint, PartialTime
-  , PartialInterpolation, emptyPartial, fullPartial)
+  ( EditEvent(..), NeConstT, NeTimePoint, NaTimePoint, PartialTime
+  , PartialInterpolation)
 import Transience exposing (Transience(..))
 import Form exposing (FormState(..), AtomState(AsEditing))
 import Digests exposing (TimeChangeT, TimeSeriesDataOp(..))
@@ -22,7 +22,7 @@ import Futility exposing (maybeToList, lastJust, setFst, setSnd)
 
 import Html as H exposing (..)
 import Html.Attributes as HA exposing (..)
-import Html.Events exposing (..)
+import Html.Events as HE exposing (..)
 
 type alias Viewport =
   { top : Float
@@ -223,14 +223,14 @@ editTimePoint def recents mBasePoint fs mp =
     ptPartial = getPartialTimePointMeta iLim ptUpstream pointFs pointMp
     ptSub = asFullTimePointMeta ptPartial
     ptView = editTimePointMeta iLim ptUpstream ptPartial
-    bolsterPoint = case valueFs of
-        FsViewing -> case valueBase of
-            Nothing -> emptyPartial ads
-            Just wvs -> fullPartial ads <| Tuple.second <| .values wvs
-        FsEditing e -> e
-  in div []
-    [
-    ]
+    (partialTime, partialInterpolation) = ptPartial
+    subBtn = case (valSub, ptSub) of
+        (Just v, Just (t, i)) -> [H.button [HE.onClick <| EeSubmit {time = t, interpolation = i, wvs = v}] []]
+        _ -> []
+  in div [] <|
+    [ H.map (\(pt, pi) -> EeUpdate {time = pt, interpolation = pi, wvs = valPartials}) ptView
+    , H.map (\pwv -> EeUpdate {time = partialTime, interpolation = partialInterpolation, wvs = pwv}) valView
+    ] ++ subBtn
 
 type alias TimePointMeta = (Maybe Attributee, Time, Interpolation)
 type alias PartialTimePointMeta = (PartialTime, PartialInterpolation)
