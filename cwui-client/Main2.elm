@@ -13,7 +13,8 @@ exampleTimeSeries =
     asSeries = List.foldl (\(tpid, t, tp) -> TimeSeries.insert tpid t tp) TimeSeries.empty
     changedTimes = Dict.singleton (1, 0) <| Just (2, 0)
     asTsi pts =
-      { label = "bob"
+      { path = toString pts
+      , label = "bob"
       , transience = TSteady
       , series = asSeries pts
       , changedTimes = changedTimes
@@ -37,6 +38,7 @@ exampleTimeSeries =
   , hZoom = 1.0
   , viewport = Viewport 0 0
   , playheadPos = (42, 0)
+  , selectedTps = Dict.empty
   }
 
 main = Html.beginnerProgram

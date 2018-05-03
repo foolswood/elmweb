@@ -1,13 +1,14 @@
 module TimeSeriesView exposing (..)
 
-import Dict
+import Dict exposing (Dict)
+import Set exposing (Set)
 import Json.Decode as JD
 
 import CSS exposing (emPx, keyFramed, applyKeyFramed)
 
 import ClTypes exposing
   ( TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime
-  , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded)
+  , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded, Path)
 import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
@@ -34,9 +35,11 @@ type TsMsg
   | HZoom Float
   | SetViewport Viewport
   | PlayheadSet Time
+  | ToggleSelection Path TpId
 
 type alias SeriesInfo =
-  { label : String
+  { path : Path
+  , label : String
   , transience : Transience
   , series : TimeSeries TimePoint
   , changedTimes : ChangedTimes
@@ -48,6 +51,7 @@ type alias TsModel =
   , hZoom : Float
   , viewport : Viewport
   , playheadPos : Time
+  , selectedTps : Dict Path (Set TpId)
   }
 
 type alias TimePointEdit =
@@ -94,7 +98,11 @@ viewTimeSeries s =
       , ("left", toEm labelWidth)
       , ("top", toEm controlsHeight)
       ]
-    dataGrid = div [style dgStyles] <| List.map (\si -> viewTsData (.hZoom s) (.series si) (.changedTimes si)) <| .series s
+    dataGrid = div
+        [style dgStyles]
+        <| List.map
+            (\si -> H.map (ToggleSelection <| .path si) <| viewTsData (.hZoom s) (.series si) (.changedTimes si) <| Maybe.withDefault Set.empty <| Dict.get (.path si) <| .selectedTps s)
+            <| .series s
     labelGrid = div
       [ style <| rowStyles ++
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
@@ -153,8 +161,8 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       ]
       <| List.map viewTick ticks]
 
-viewTsData : Float -> TimeSeries TimePoint -> ChangedTimes -> Html a
-viewTsData scale ts cts =
+viewTsData : Float -> TimeSeries TimePoint -> ChangedTimes -> Set TpId -> Html TpId
+viewTsData scale ts cts selected =
   let
     tFloat = (*) scale << fromTime
     lefts = List.map tFloat <| TimeSeries.times ts
@@ -180,18 +188,22 @@ viewTsData scale ts cts =
         , ("grid-template-columns", String.join " " hlStarts)]
       ]
       <| List.map (\i -> div [style [("grid-column-start", toString <| 2 * (i + 1)), ("background", "purple")]] []) <| List.range 0 <| Dict.size cts - 1
-    popOvers = if True
-      then [div
-        [style
-          [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| 60 * scale)
-          , ("background", "lightblue")]]
-        [text <| toString hlStarts]
-        ]
-      else []
+    asPopOver tpid = case TimeSeries.get tpid ts of
+        Nothing -> H.text <| "Missing TimePoint: " ++ toString tpid
+        Just (t, tp) -> div
+            [style
+              [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| tFloat t)
+              , ("background", "lightblue")]]
+            [text "Selected"]
+    popOvers = List.map asPopOver <| Set.toList selected
   in div [style [("position", "relative")]] <| highlightGrid :: contentGrid :: popOvers
 
-viewTimePoint : TpId -> TimePoint -> Html a
-viewTimePoint _ _ = div [style [("border-left", "medium solid red"), ("background-color", "rgba(127, 255, 127, 0.7)")]] [text "foo"]
+viewTimePoint : TpId -> TimePoint -> Html TpId
+viewTimePoint tpid tp = div
+    [ HE.onClick <| tpid
+    , style [("border-left", "medium solid red"), ("background-color", "rgba(127, 255, 127, 0.7)")]
+    ]
+    [text <| toString tp]
 
 editTimePoint
    : TupleDefinition -> List TimeChangeT -> Maybe (Time, TimePoint)
@@ -336,3 +348,14 @@ updateTimeSeries evt m = case evt of
     HZoom z -> {m | hZoom = z}
     SetViewport v -> {m | viewport = v}
     PlayheadSet t -> {m | playheadPos = t}
+    ToggleSelection p tpid ->
+      let
+        newPathSelection pathSelection = if Set.member tpid pathSelection
+            then Set.remove tpid pathSelection
+            else Set.insert tpid pathSelection
+        newSelectedTps stps =
+          let
+            nps = newPathSelection <| Maybe.withDefault Set.empty stps
+          in
+            if Set.isEmpty nps then Nothing else Just nps
+      in {m | selectedTps = Dict.update p newSelectedTps <| .selectedTps m}
