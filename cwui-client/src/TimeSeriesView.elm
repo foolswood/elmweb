@@ -39,6 +39,7 @@ type TsMsg
 
 type alias SeriesInfo =
   { path : Path
+  , def : TupleDefinition
   , label : String
   , transience : Transience
   , series : TimeSeries TimePoint

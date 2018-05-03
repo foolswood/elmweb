@@ -2,7 +2,7 @@ import Html
 import Dict
 
 import TimeSeriesView exposing (..)
-import ClTypes exposing (Interpolation(..), WireValue(..))
+import ClTypes exposing (Interpolation(..), InterpolationLimit(..), WireValue(..), TupleDefinition)
 import ClNodes exposing (TimePoint)
 import TimeSeries
 import Transience exposing (Transience(..))
@@ -14,6 +14,7 @@ exampleTimeSeries =
     changedTimes = Dict.singleton (1, 0) <| Just (2, 0)
     asTsi pts =
       { path = toString pts
+      , def = TupleDefinition "yo" [] ILLinear
       , label = "bob"
       , transience = TSteady
       , series = asSeries pts
