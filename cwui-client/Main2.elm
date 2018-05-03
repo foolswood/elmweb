@@ -6,6 +6,7 @@ import ClTypes exposing (Interpolation(..), InterpolationLimit(..), WireValue(..
 import ClNodes exposing (TimePoint)
 import TimeSeries
 import Transience exposing (Transience(..))
+import Form exposing (FormState(FsViewing))
 
 exampleTimeSeries : TsModel
 exampleTimeSeries =
@@ -20,19 +21,25 @@ exampleTimeSeries =
       , series = asSeries pts
       , changedTimes = changedTimes
       }
+    pi =
+      { base = Nothing
+      , recents = []
+      , fs = FsViewing
+      , mp = Nothing
+      }
   in
   { series = List.map asTsi <|
-    [ [ (21, (0, 0), TimePoint Nothing [WvInt32 1] ILinear)
-      , (22, (50, 0), TimePoint Nothing [WvInt32 2] ILinear)
-      , (23, (200, 0), TimePoint Nothing [WvInt32 3] ILinear)
+    [ [ (21, (0, 0), pi)
+      , (22, (50, 0), pi)
+      , (23, (200, 0), pi)
       ]
-    , [ (33, (3, 0), TimePoint Nothing [] ILinear)
+    , [ (33, (3, 0), pi)
       ]
-    , [ (21, (5, 0), TimePoint Nothing [] ILinear)
+    , [ (21, (5, 0), pi)
       ]
-    , [ (12, (7, 0), TimePoint Nothing [] ILinear)
+    , [ (12, (7, 0), pi)
       ]
-    , [ (99, (9, 0), TimePoint Nothing [] ILinear)
+    , [ (99, (9, 0), pi)
       ]
     ]
   , vZoom = 2.0

@@ -37,12 +37,19 @@ type TsMsg
   | PlayheadSet Time
   | ToggleSelection Path TpId
 
+type alias PointInfo =
+  { base : Maybe (Time, TimePoint)
+  , recents : List TimeChangeT
+  , fs : FormState NeTimePoint
+  , mp : Maybe NaTimePoint
+  }
+
 type alias SeriesInfo =
   { path : Path
   , def : TupleDefinition
   , label : String
   , transience : Transience
-  , series : TimeSeries TimePoint
+  , series : TimeSeries PointInfo
   , changedTimes : ChangedTimes
   }
 
@@ -162,7 +169,7 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       ]
       <| List.map viewTick ticks]
 
-viewTsData : Float -> TimeSeries TimePoint -> ChangedTimes -> Set TpId -> Html TpId
+viewTsData : Float -> TimeSeries PointInfo -> ChangedTimes -> Set TpId -> Html TpId
 viewTsData scale ts cts selected =
   let
     tFloat = (*) scale << fromTime
@@ -175,7 +182,7 @@ viewTsData scale ts cts selected =
     prePoint = div [] []
     contentGrid = div
       [style <| ("height", "100%") :: ("overflow", "hidden") :: colStyles]
-      <| prePoint :: TimeSeries.fold (\t tpid tp acc -> acc ++ [viewTimePoint tpid tp]) [] ts
+      <| prePoint :: TimeSeries.fold (\t tpid pi acc -> acc ++ [viewTimePoint tpid pi]) [] ts
     asHighlight start mDuration (hlStarts, prevEnd) = case mDuration of
         Nothing -> (toEm ((tFloat start) - prevEnd) :: "1fr" :: hlStarts, prevEnd)
         Just duration ->
@@ -200,24 +207,22 @@ viewTsData scale ts cts selected =
     popOvers = List.map asPopOver <| Set.toList selected
   in div [style [("position", "relative")]] <| highlightGrid :: contentGrid :: popOvers
 
-viewTimePoint : TpId -> TimePoint -> Html TpId
-viewTimePoint tpid tp = div
+viewTimePoint : TpId -> PointInfo -> Html TpId
+viewTimePoint tpid pi = div
     [ HE.onClick <| tpid
     , style [("border-left", "medium solid red"), ("background-color", "rgba(127, 255, 127, 0.7)")]
     ]
-    [text <| toString tp]
+    [text <| toString pi]
 
 editTimePoint
-   : TupleDefinition -> List TimeChangeT -> Maybe (Time, TimePoint)
-  -> FormState NeTimePoint -> Maybe NaTimePoint
-  -> Html (EditEvent NeTimePoint NaTimePoint)
-editTimePoint def recents mBasePoint fs mp =
+   : TupleDefinition -> PointInfo -> Html (EditEvent NeTimePoint NaTimePoint)
+editTimePoint def {recents, base, fs, mp} =
   let
     splitRecents (ma, tsdo) (_, recentValAcc, recentPtAcc) = case tsdo of
         OpSet t wts wvs i -> (False, recentValAcc ++ [(ma, wts, wvs)], recentPtAcc ++ [(ma, t, i)])
         OpRemove -> (True, recentValAcc, recentPtAcc)
     (removedUpstream, valueRecents, pointRecents) = List.foldl splitRecents (False, [], []) recents
-    (valueBase, pointBase) = case mBasePoint of
+    (valueBase, pointBase) = case base of
         -- FIXME: Making up the types here because they're never used (so probably shouldn't flow everywhere)
         Just (t, {attributee, wvs, interpolation}) ->
           ( Just {types = [], values = (attributee, wvs)}
