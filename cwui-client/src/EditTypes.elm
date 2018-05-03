@@ -9,11 +9,13 @@ import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireV
 import SequenceOps exposing (SeqOp)
 import TimeSeries exposing (TimeSeries)
 
-type alias NaTimePoint =
-  { time : Time
-  , interpolation : Interpolation
-  , wvs : NaConstT
-  }
+type NaTimePoint
+  = NatpSet
+      { time : Time
+      , interpolation : Interpolation
+      , wvs : NaConstT
+      }
+  | NatpAbsent
 type alias NeChildMod = SeqOp Seg
 
 type alias NaConstT = List WireValue

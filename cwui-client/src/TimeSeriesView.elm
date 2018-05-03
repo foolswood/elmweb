@@ -12,7 +12,7 @@ import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
 import EditTypes exposing
-  ( EditEvent(..), NeConstT, NeTimePoint, NaTimePoint, PartialTime
+  ( EditEvent(..), NeConstT, NeTimePoint, NaTimePoint(..), PartialTime
   , PartialInterpolation)
 import Transience exposing (Transience(..))
 import Form exposing (FormState(..), AtomState(AsEditing))
@@ -212,9 +212,11 @@ editTimePoint def recents mBasePoint fs mp =
     (valueFs, pointFs) = case fs of
         FsViewing -> (FsViewing, FsViewing)
         FsEditing {wvs, time, interpolation} -> (FsEditing wvs, FsEditing (time, interpolation))
-    (valueMp, pointMp) = case mp of
-        Just {wvs, time, interpolation} -> (Just wvs, Just (time, interpolation))
-        Nothing -> (Nothing, Nothing)
+    (pendingDelete, valueMp, pointMp) = case mp of
+        Just natp -> case natp of
+            NatpSet {wvs, time, interpolation} -> (False, Just wvs, Just (time, interpolation))
+            NatpAbsent -> (True, Nothing, Nothing)
+        Nothing -> (False, Nothing, Nothing)
     ads = List.map Tuple.second <| .types def
     (valPartials, valSub) = TupleViews.pInfo ads valueBase valueRecents valueFs valueMp
     valView = TupleViews.viewWithRecentNoSubmission True ads valueRecents valueBase valPartials
@@ -225,12 +227,18 @@ editTimePoint def recents mBasePoint fs mp =
     ptView = editTimePointMeta iLim ptUpstream ptPartial
     (partialTime, partialInterpolation) = ptPartial
     subBtn = case (valSub, ptSub) of
-        (Just v, Just (t, i)) -> [H.button [HE.onClick <| EeSubmit {time = t, interpolation = i, wvs = v}] []]
+        (Just v, Just (t, i)) ->
+          [ H.button [HE.onClick <| EeSubmit <|
+              NatpSet {time = t, interpolation = i, wvs = v}] []
+          ]
         _ -> []
+    delBtn = if pendingDelete
+        then []
+        else [H.button [HE.onClick <| EeSubmit NatpAbsent] [H.text "Remove"]]
   in div [] <|
     [ H.map (\(pt, pi) -> EeUpdate {time = pt, interpolation = pi, wvs = valPartials}) ptView
     , H.map (\pwv -> EeUpdate {time = partialTime, interpolation = partialInterpolation, wvs = pwv}) valView
-    ] ++ subBtn
+    ] ++ subBtn ++ delBtn
 
 type alias TimePointMeta = (Maybe Attributee, Time, Interpolation)
 type alias PartialTimePointMeta = (PartialTime, PartialInterpolation)
