@@ -2,7 +2,7 @@ import Html
 import Dict
 
 import TimeSeriesView exposing (..)
-import ClTypes exposing (Interpolation(..))
+import ClTypes exposing (Interpolation(..), WireValue(..))
 import ClNodes exposing (TimePoint)
 import TimeSeries
 import Transience exposing (Transience(..))
@@ -21,9 +21,9 @@ exampleTimeSeries =
       }
   in
   { series = List.map asTsi <|
-    [ [ (21, (0, 0), TimePoint Nothing [] ILinear)
-      , (22, (50, 0), TimePoint Nothing [] ILinear)
-      , (23, (200, 0), TimePoint Nothing [] ILinear)
+    [ [ (21, (0, 0), TimePoint Nothing [WvInt32 1] ILinear)
+      , (22, (50, 0), TimePoint Nothing [WvInt32 2] ILinear)
+      , (23, (200, 0), TimePoint Nothing [WvInt32 3] ILinear)
       ]
     , [ (33, (3, 0), TimePoint Nothing [] ILinear)
       ]
