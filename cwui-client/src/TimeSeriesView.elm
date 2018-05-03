@@ -166,14 +166,15 @@ viewTsData scale ts cts selected =
   let
     tFloat = (*) scale << fromTime
     lefts = List.map tFloat <| TimeSeries.times ts
+    widths = Tuple.first <| List.foldl (\l (ws, prev) -> (ws ++ [l - prev], prev + l)) ([], 0.0) lefts
     colStyles =
       [ gridStyle
-      , ("grid-template-columns", mapEm lefts ++ " 1fr")
+      , ("grid-template-columns", mapEm widths ++ " 1fr")
       ]
     prePoint = div [] []
     contentGrid = div
-      [style <| ("height", "100%") :: colStyles]
-      <| prePoint :: TimeSeries.fold (\t tpid tp acc -> viewTimePoint tpid tp :: acc) [] ts
+      [style <| ("height", "100%") :: ("overflow", "hidden") :: colStyles]
+      <| prePoint :: TimeSeries.fold (\t tpid tp acc -> acc ++ [viewTimePoint tpid tp]) [] ts
     asHighlight start mDuration (hlStarts, prevEnd) = case mDuration of
         Nothing -> (toEm ((tFloat start) - prevEnd) :: "1fr" :: hlStarts, prevEnd)
         Just duration ->
