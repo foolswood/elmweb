@@ -264,7 +264,7 @@ editTimePoint def {recents, base, fs, mp} =
     subBtn = case (valSub, ptSub) of
         (Just v, Just (t, i)) ->
           [ H.button [HE.onClick <| EeSubmit <|
-              NatpSet {time = t, interpolation = i, wvs = v}] []
+              NatpSet {time = t, interpolation = i, wvs = v}] [H.text "Submit"]
           ]
         _ -> []
     delBtn = if pendingDelete
@@ -334,7 +334,8 @@ interpolationEditor il pi =
         ILLinear -> ["constant", "linear"]
         ILUninterpolated -> []
     modeOpt s = H.option [HA.value s, HA.selected <| currentModeStr == s] [H.text s]
-  in H.select [onInput <| toInterp] <| List.map modeOpt modeOptStrs
+    unsetOpt = H.option [HA.hidden True, HA.selected <| String.isEmpty currentModeStr] [H.text "<unset>"]
+  in H.select [onInput <| toInterp] <| unsetOpt :: List.map modeOpt modeOptStrs
 
 viewTsLabel : String -> Transience -> Html a
 viewTsLabel name transience =
