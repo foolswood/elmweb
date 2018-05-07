@@ -182,7 +182,7 @@ viewTsData scale ts cts selected =
     prePoint = div [] []
     contentGrid = div
       [style <| ("height", "100%") :: ("overflow", "hidden") :: colStyles]
-      <| prePoint :: TimeSeries.fold (\t tpid pi acc -> acc ++ [viewTimePoint tpid pi]) [] ts
+      <| prePoint :: TimeSeries.fold (\t tpid pi acc -> acc ++ [viewPointMarker tpid pi]) [] ts
     asHighlight start mDuration (hlStarts, prevEnd) = case mDuration of
         Nothing -> (toEm ((tFloat start) - prevEnd) :: "1fr" :: hlStarts, prevEnd)
         Just duration ->
@@ -207,8 +207,8 @@ viewTsData scale ts cts selected =
     popOvers = List.map asPopOver <| Set.toList selected
   in div [style [("position", "relative")]] <| highlightGrid :: contentGrid :: popOvers
 
-viewTimePoint : TpId -> PointInfo -> Html TpId
-viewTimePoint tpid pi = div
+viewPointMarker : TpId -> PointInfo -> Html TpId
+viewPointMarker tpid pi = div
     [ HE.onClick <| tpid
     , style [("border-left", "medium solid red"), ("background-color", "rgba(127, 255, 127, 0.7)")]
     ]
