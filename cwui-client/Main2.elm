@@ -15,11 +15,13 @@ exampleTimeSeries =
     changedTimes = Dict.singleton (1, 0) <| Just (2, 0)
     asTsi pts =
       { path = toString pts
-      , editable = False
+      , editable = True
       , def = TupleDefinition "yo" [] ILLinear
       , label = "bob"
       , transience = TSteady
       , series = asSeries pts
+      , partialSeries = Dict.empty
+      , pendingSeries = Dict.empty
       , changedTimes = changedTimes
       }
     pi =

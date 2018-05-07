@@ -14,12 +14,13 @@ import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
 import EditTypes exposing
   ( EditEvent(..), NeConstT, NeTimePoint, NaTimePoint(..), PartialTime
-  , PartialInterpolation)
+  , PartialInterpolation, mapEe)
 import Transience exposing (Transience(..))
 import Form exposing (FormState(..), AtomState(AsEditing))
 import Digests exposing (TimeChangeT, TimeSeriesDataOp(..))
 import TupleViews
-import Futility exposing (maybeToList, lastJust, setFst, setSnd)
+import Futility exposing
+  ( maybeToList, lastJust, setFst, setSnd, Either(..), either)
 
 import Html as H exposing (..)
 import Html.Attributes as HA exposing (..)
@@ -30,12 +31,17 @@ type alias Viewport =
   , left : Float
   }
 
+type alias PartialSeries = Dict TpId NeTimePoint
+type alias PendingSeries = Dict TpId NaTimePoint
+type alias TsEditEvt = EditEvent PartialSeries PendingSeries
+
 type TsMsg
   = VZoom Float
   | HZoom Float
   | SetViewport Viewport
   | PlayheadSet Time
   | ToggleSelection Path TpId
+  | TsEdit Path TsEditEvt
 
 type alias PointInfo =
   { base : Maybe (Time, TimePoint)
@@ -51,6 +57,8 @@ type alias SeriesInfo =
   , label : String
   , transience : Transience
   , series : TimeSeries PointInfo
+  , partialSeries : PartialSeries
+  , pendingSeries : PendingSeries
   , changedTimes : ChangedTimes
   }
 
@@ -107,11 +115,13 @@ viewTimeSeries s =
       , ("left", toEm labelWidth)
       , ("top", toEm controlsHeight)
       ]
+    eitherToEvent path = either (ToggleSelection path) (TsEdit path)
     dataGrid = div
         [style dgStyles]
         <| List.map
-            (\si -> H.map (ToggleSelection <| .path si) <|
-                viewTsData (.editable si) (.hZoom s) (.series si)
+            (\si -> H.map (eitherToEvent <| .path si) <|
+                viewTsData (.editable si) (.def si) (.hZoom s) (.series si)
+                (.partialSeries si) (.pendingSeries si)
                 (.changedTimes si) <| Maybe.withDefault Set.empty <|
                     Dict.get (.path si) <| .selectedTps s)
             <| .series s
@@ -173,8 +183,10 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       ]
       <| List.map viewTick ticks]
 
-viewTsData : Bool -> Float -> TimeSeries PointInfo -> ChangedTimes -> Set TpId -> Html TpId
-viewTsData editable scale ts cts selected =
+viewTsData
+   : Bool -> TupleDefinition -> Float -> TimeSeries PointInfo -> PartialSeries
+   -> PendingSeries -> ChangedTimes -> Set TpId -> Html (Either TpId TsEditEvt)
+viewTsData editable td scale ts partialSeries pendingSeries cts selected =
   let
     tFloat = (*) scale << fromTime
     lefts = List.map tFloat <| TimeSeries.times ts
@@ -186,7 +198,7 @@ viewTsData editable scale ts cts selected =
     prePoint = div [] []
     contentGrid = div
       [style <| ("height", "100%") :: ("overflow", "hidden") :: colStyles]
-      <| prePoint :: TimeSeries.fold (\t tpid pi acc -> acc ++ [viewPointMarker tpid pi]) [] ts
+      <| prePoint :: TimeSeries.fold (\t tpid pi acc -> acc ++ [H.map Left <| viewPointMarker tpid pi]) [] ts
     asHighlight start mDuration (hlStarts, prevEnd) = case mDuration of
         Nothing -> (toEm ((tFloat start) - prevEnd) :: "1fr" :: hlStarts, prevEnd)
         Just duration ->
@@ -201,6 +213,7 @@ viewTsData editable scale ts cts selected =
         , ("grid-template-columns", String.join " " hlStarts)]
       ]
       <| List.map (\i -> div [style [("grid-column-start", toString <| 2 * (i + 1)), ("background", "purple")]] []) <| List.range 0 <| Dict.size cts - 1
+    wrapTpEe tpid = mapEe (\ptp -> Dict.insert tpid ptp partialSeries) (\tp -> Dict.insert tpid tp pendingSeries)
     asPopOver tpid = case TimeSeries.get tpid ts of
         Nothing -> H.text <| "Missing TimePoint: " ++ toString tpid
         Just (t, tp) -> div
@@ -208,7 +221,7 @@ viewTsData editable scale ts cts selected =
               [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| tFloat t)
               , ("background", "lightblue")]]
             <| if editable
-                then [text "Edit controls here"]
+                then [H.map (Right << wrapTpEe tpid) <| editTimePoint td tp]
                 else [text <| toString tp]
     popOvers = List.map asPopOver <| Set.toList selected
   in div [style [("position", "relative")]] <| highlightGrid :: contentGrid :: popOvers
@@ -372,3 +385,14 @@ updateTimeSeries evt m = case evt of
           in
             if Set.isEmpty nps then Nothing else Just nps
       in {m | selectedTps = Dict.update p newSelectedTps <| .selectedTps m}
+    TsEdit path tpEdit -> case tpEdit of
+        EeUpdate v ->
+          let
+            updateSeriesInfo p op series = case series of
+                (s :: remainder) -> if .path s == p
+                    then op s :: remainder
+                    else s :: updateSeriesInfo path op remainder
+                [] -> []
+          in {m | series = updateSeriesInfo path (\si -> {si | partialSeries = v}) <| .series m}
+        -- FIXME: Submission should do something!
+        EeSubmit _ -> m
