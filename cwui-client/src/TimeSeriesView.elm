@@ -386,13 +386,16 @@ updateTimeSeries evt m = case evt of
     TsEdit path tpEdit -> case tpEdit of
         EeUpdate (t, tpid, v) ->
           let
-            updateSeriesInfo p op series = case series of
-                (s :: remainder) -> if .path s == p
-                    then {s | series = op <| .series s} :: remainder
-                    else s :: updateSeriesInfo p op remainder
-                [] -> []
-            updateSeries : TimeSeries PointInfo -> TimeSeries PointInfo
             updateSeries = TimeSeries.update tpid (\tpi -> {tpi | fs = FsEditing v})
           in {m | series = updateSeriesInfo path updateSeries <| .series m}
         -- FIXME: Submission should do something!
-        EeSubmit _ -> m
+        EeSubmit (_, _) -> m
+
+updateSeriesInfo
+   : Path -> (TimeSeries PointInfo -> TimeSeries PointInfo)
+  -> List SeriesInfo -> List SeriesInfo
+updateSeriesInfo p op series = case series of
+    (s :: remainder) -> if .path s == p
+        then {s | series = op <| .series s} :: remainder
+        else s :: updateSeriesInfo p op remainder
+    [] -> []
