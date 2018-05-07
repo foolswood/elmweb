@@ -31,9 +31,9 @@ type alias Viewport =
   , left : Float
   }
 
-type alias PartialSeries = Dict TpId NeTimePoint
-type alias PendingSeries = Dict TpId NaTimePoint
-type alias TsEditEvt = EditEvent PartialSeries PendingSeries
+type alias TpUpdateT = (Time, TpId, NeTimePoint)
+type alias TpCompleteT = (TpId, NaTimePoint)
+type alias TsEditEvt = EditEvent TpUpdateT TpCompleteT
 
 type TsMsg
   = VZoom Float
@@ -57,8 +57,6 @@ type alias SeriesInfo =
   , label : String
   , transience : Transience
   , series : TimeSeries PointInfo
-  , partialSeries : PartialSeries
-  , pendingSeries : PendingSeries
   , changedTimes : ChangedTimes
   }
 
@@ -119,9 +117,8 @@ viewTimeSeries s =
     dataGrid = div
         [style dgStyles]
         <| List.map
-            (\si -> H.map (eitherToEvent <| .path si) <|
-                viewTsData (.editable si) (.def si) (.hZoom s) (.series si)
-                (.partialSeries si) (.pendingSeries si)
+            (\si -> H.map (eitherToEvent <| .path si) <| viewTsData
+                (.editable si) (.def si) (.hZoom s) (.series si)
                 (.changedTimes si) <| Maybe.withDefault Set.empty <|
                     Dict.get (.path si) <| .selectedTps s)
             <| .series s
@@ -136,7 +133,7 @@ viewTimeSeries s =
     [ style [("height", "200px"), ("overflow", "auto"), ("position", "relative")]
     , onScrollEm SetViewport
     ]
-    [ticks, scaleControl, dataGrid, labelGrid, playhead]
+    [ticks, scaleControl, dataGrid, labelGrid, playhead, text <| toString s]
 
 viewTimeScale : Float -> Html Float
 viewTimeScale s = input
@@ -184,9 +181,9 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       <| List.map viewTick ticks]
 
 viewTsData
-   : Bool -> TupleDefinition -> Float -> TimeSeries PointInfo -> PartialSeries
-   -> PendingSeries -> ChangedTimes -> Set TpId -> Html (Either TpId TsEditEvt)
-viewTsData editable td scale ts partialSeries pendingSeries cts selected =
+   : Bool -> TupleDefinition -> Float -> TimeSeries PointInfo -> ChangedTimes
+   -> Set TpId -> Html (Either TpId TsEditEvt)
+viewTsData editable td scale ts cts selected =
   let
     tFloat = (*) scale << fromTime
     lefts = List.map tFloat <| TimeSeries.times ts
@@ -213,7 +210,7 @@ viewTsData editable td scale ts partialSeries pendingSeries cts selected =
         , ("grid-template-columns", String.join " " hlStarts)]
       ]
       <| List.map (\i -> div [style [("grid-column-start", toString <| 2 * (i + 1)), ("background", "purple")]] []) <| List.range 0 <| Dict.size cts - 1
-    wrapTpEe tpid = mapEe (\ptp -> Dict.insert tpid ptp partialSeries) (\tp -> Dict.insert tpid tp pendingSeries)
+    wrapTpEe t tpid = mapEe ((,,) t tpid) ((,) tpid)
     asPopOver tpid = case TimeSeries.get tpid ts of
         Nothing -> H.text <| "Missing TimePoint: " ++ toString tpid
         Just (t, tp) -> div
@@ -221,7 +218,7 @@ viewTsData editable td scale ts partialSeries pendingSeries cts selected =
               [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| tFloat t)
               , ("z-index", "1"), ("background", "lightblue")]]
             <| if editable
-                then [H.map (Right << wrapTpEe tpid) <| editTimePoint td tp]
+                then [H.map (Right << wrapTpEe t tpid) <| editTimePoint td tp]
                 else [text <| toString tp]
     popOvers = List.map asPopOver <| Set.toList selected
   in div [style [("position", "relative")]] <| highlightGrid :: contentGrid :: popOvers
@@ -386,13 +383,15 @@ updateTimeSeries evt m = case evt of
             if Set.isEmpty nps then Nothing else Just nps
       in {m | selectedTps = Dict.update p newSelectedTps <| .selectedTps m}
     TsEdit path tpEdit -> case tpEdit of
-        EeUpdate v ->
+        EeUpdate (t, tpid, v) ->
           let
             updateSeriesInfo p op series = case series of
                 (s :: remainder) -> if .path s == p
-                    then op s :: remainder
-                    else s :: updateSeriesInfo path op remainder
+                    then {s | series = op <| .series s} :: remainder
+                    else s :: updateSeriesInfo p op remainder
                 [] -> []
-          in {m | series = updateSeriesInfo path (\si -> {si | partialSeries = v}) <| .series m}
+            updateSeries : TimeSeries PointInfo -> TimeSeries PointInfo
+            updateSeries = TimeSeries.update tpid (\tpi -> {tpi | fs = FsEditing v})
+          in {m | series = updateSeriesInfo path updateSeries <| .series m}
         -- FIXME: Submission should do something!
         EeSubmit _ -> m

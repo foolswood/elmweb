@@ -20,8 +20,6 @@ exampleTimeSeries =
       , label = "bob"
       , transience = TSteady
       , series = asSeries pts
-      , partialSeries = Dict.empty
-      , pendingSeries = Dict.empty
       , changedTimes = changedTimes
       }
     pi =

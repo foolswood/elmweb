@@ -1,4 +1,4 @@
-module TimeSeries exposing (TimeSeries, empty, get, insert, remove, singleton, fold, times)
+module TimeSeries exposing (TimeSeries, empty, get, insert, remove, update, singleton, fold, times)
 
 import Dict exposing (Dict)
 
@@ -31,6 +31,11 @@ remove tpid {points, tpIds} =
         Just t -> Dict.remove t points
   , tpIds = removeById tpid tpIds
   }
+
+update : TpId -> (a -> a) -> TimeSeries a -> TimeSeries a
+update tpid op ts = case get tpid ts of
+    Nothing -> ts
+    Just (t, a) -> insert tpid t (op a) ts
 
 singleton : TpId -> Time -> a -> TimeSeries a
 singleton tpid t a = insert tpid t a empty
