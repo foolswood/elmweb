@@ -46,6 +46,7 @@ type alias PointInfo =
 
 type alias SeriesInfo =
   { path : Path
+  , editable : Bool
   , def : TupleDefinition
   , label : String
   , transience : Transience
@@ -109,7 +110,10 @@ viewTimeSeries s =
     dataGrid = div
         [style dgStyles]
         <| List.map
-            (\si -> H.map (ToggleSelection <| .path si) <| viewTsData (.hZoom s) (.series si) (.changedTimes si) <| Maybe.withDefault Set.empty <| Dict.get (.path si) <| .selectedTps s)
+            (\si -> H.map (ToggleSelection <| .path si) <|
+                viewTsData (.editable si) (.hZoom s) (.series si)
+                (.changedTimes si) <| Maybe.withDefault Set.empty <|
+                    Dict.get (.path si) <| .selectedTps s)
             <| .series s
     labelGrid = div
       [ style <| rowStyles ++
@@ -169,8 +173,8 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       ]
       <| List.map viewTick ticks]
 
-viewTsData : Float -> TimeSeries PointInfo -> ChangedTimes -> Set TpId -> Html TpId
-viewTsData scale ts cts selected =
+viewTsData : Bool -> Float -> TimeSeries PointInfo -> ChangedTimes -> Set TpId -> Html TpId
+viewTsData editable scale ts cts selected =
   let
     tFloat = (*) scale << fromTime
     lefts = List.map tFloat <| TimeSeries.times ts
@@ -203,7 +207,9 @@ viewTsData scale ts cts selected =
             [style
               [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| tFloat t)
               , ("background", "lightblue")]]
-            [text "Selected"]
+            <| if editable
+                then [text "Edit controls here"]
+                else [text <| toString tp]
     popOvers = List.map asPopOver <| Set.toList selected
   in div [style [("position", "relative")]] <| highlightGrid :: contentGrid :: popOvers
 
