@@ -68,6 +68,11 @@ type Either l r
   = Left l
   | Right r
 
+either : (a -> c) -> (b -> c) -> Either a b -> c
+either lf rf e = case e of
+    Left a -> lf a
+    Right c -> rf c
+
 unionSets : List (Set comparable) -> Set comparable
 unionSets = List.foldl Set.union Set.empty
 
