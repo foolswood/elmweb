@@ -97,7 +97,7 @@ viewTimeSeries s =
       [style
         [ ("height", toEm controlsHeight), ("width", toEm labelWidth)
         , ("position", "sticky"), ("left", "0px"), ("top", "0px")
-        , ("z-index", "4"), ("background", "lightgray")
+        , ("z-index", "5"), ("background", "lightgray")
         ]]
       [ H.map HZoom <| viewTimeScale <| .hZoom s
       , H.map VZoom <| viewTimeScale <| .vZoom s
@@ -128,7 +128,7 @@ viewTimeSeries s =
     labelGrid = div
       [ style <| rowStyles ++
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
-        , ("background", "gray"), ("z-index", "3")
+        , ("background", "gray"), ("z-index", "4")
         ]]
       <| List.map (\si -> viewTsLabel (.label si) (.transience si)) <| .series s
     playhead = viewPlayhead totalHeight labelWidth (.hZoom s) <| .playheadPos s
@@ -172,7 +172,7 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       [style [("position", "absolute"), ("left", toString (scale * t) ++ "em")]]
       [text <| toString t]
   in div
-    [style [("position", "sticky"), ("top", "0px"), ("z-index", "1"), ("height", "0px")]]
+    [style [("position", "sticky"), ("top", "0px"), ("z-index", "2"), ("height", "0px")]]
     [div
       [ style
           [ ("position", "relative"), ("left", toString leftMargin ++ "em")
@@ -219,7 +219,7 @@ viewTsData editable td scale ts partialSeries pendingSeries cts selected =
         Just (t, tp) -> div
             [style
               [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| tFloat t)
-              , ("background", "lightblue")]]
+              , ("z-index", "1"), ("background", "lightblue")]]
             <| if editable
                 then [H.map (Right << wrapTpEe tpid) <| editTimePoint td tp]
                 else [text <| toString tp]
@@ -360,7 +360,7 @@ viewPlayhead height offset scale t =
         [style
           [ ("position", "absolute"), ("top", "0px"), ("left", left)
           , ("height", toString height ++ "em"), ("width", "1px")
-          , ("background", "green"), ("z-index", "2")
+          , ("background", "green"), ("z-index", "3")
           , ("animation-timing-function", "linear")
           , ("animation-duration", "2s")
           , ("animation-name", "playing")]]
