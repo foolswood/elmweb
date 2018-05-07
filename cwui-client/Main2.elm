@@ -29,7 +29,7 @@ exampleTimeSeries =
       , mp = Nothing
       }
   in
-  { series = List.map asTsi <|
+  {tsModelEmpty | series = List.map asTsi <|
     [ [ (21, (0, 0), pi)
       , (22, (50, 0), pi)
       , (23, (200, 0), pi)
@@ -43,11 +43,6 @@ exampleTimeSeries =
     , [ (99, (9, 0), pi)
       ]
     ]
-  , vZoom = 2.0
-  , hZoom = 1.0
-  , viewport = Viewport 0 0
-  , playheadPos = (42, 0)
-  , selectedTps = Dict.empty
   }
 
 main = Html.beginnerProgram

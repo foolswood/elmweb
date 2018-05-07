@@ -69,6 +69,16 @@ type alias TsModel =
   , selectedTps : Dict Path (Set TpId)
   }
 
+tsModelEmpty : TsModel
+tsModelEmpty =
+  { series = []
+  , vZoom = 1.0
+  , hZoom = 1.0
+  , viewport = Viewport 0 0
+  , playheadPos = (0, 0)
+  , selectedTps = Dict.empty
+  }
+
 type alias TimePointEdit =
   { time : Time
   , value : NeConstT
