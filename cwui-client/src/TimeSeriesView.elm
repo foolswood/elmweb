@@ -366,12 +366,16 @@ viewPlayhead height offset scale t =
     kf = keyFramed kfd h
   in applyKeyFramed kf
 
+-- FIXME: Throws away submission event
 updateTimeSeries : TsMsg -> TsModel -> TsModel
-updateTimeSeries evt m = case evt of
-    VZoom z -> {m | vZoom = z}
-    HZoom z -> {m | hZoom = z}
-    SetViewport v -> {m | viewport = v}
-    PlayheadSet t -> {m | playheadPos = t}
+updateTimeSeries evt m = either (identity) (always m) <| processTimeSeriesEvent evt m
+
+processTimeSeriesEvent : TsMsg -> TsModel -> Either TsModel (Path, TpId, NaTimePoint)
+processTimeSeriesEvent evt m = case evt of
+    VZoom z -> Left {m | vZoom = z}
+    HZoom z -> Left {m | hZoom = z}
+    SetViewport v -> Left {m | viewport = v}
+    PlayheadSet t -> Left {m | playheadPos = t}
     ToggleSelection p tpid ->
       let
         newPathSelection pathSelection = if Set.member tpid pathSelection
@@ -382,14 +386,14 @@ updateTimeSeries evt m = case evt of
             nps = newPathSelection <| Maybe.withDefault Set.empty stps
           in
             if Set.isEmpty nps then Nothing else Just nps
-      in {m | selectedTps = Dict.update p newSelectedTps <| .selectedTps m}
+      in Left {m | selectedTps = Dict.update p newSelectedTps <| .selectedTps m}
     TsEdit path tpEdit -> case tpEdit of
         EeUpdate (t, tpid, v) ->
           let
             updateSeries = TimeSeries.update tpid (\tpi -> {tpi | fs = FsEditing v})
-          in {m | series = updateSeriesInfo path updateSeries <| .series m}
+          in Left {m | series = updateSeriesInfo path updateSeries <| .series m}
         -- FIXME: Submission should do something!
-        EeSubmit (_, _) -> m
+        EeSubmit (tpid, v) -> Right (path, tpid, v)
 
 updateSeriesInfo
    : Path -> (TimeSeries PointInfo -> TimeSeries PointInfo)
