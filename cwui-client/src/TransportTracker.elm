@@ -47,11 +47,14 @@ transport ns rs now =
   let
     structPath = asPath [ns, "transport"]
     rSubNode s = rConstNode (appendSeg structPath s) rs
-    rTimeDiff = Result.andThen asTime <| Result.andThen (flip rConstNode rs) <|
+    rTimeDiff = Result.andThen asFloat <| Result.andThen (flip rConstNode rs) <|
         ownerClockDiffPath ns rs
     rTranspState = Result.andThen asTranspState <| rSubNode "state"
     rChangedTime = Result.andThen asTime <| rSubNode "changed"
     rCueTime = Result.andThen asTime <| rSubNode "cue"
+    asFloat vs = case vs of
+        (ma, [WvFloat f]) -> Ok (ma, f)
+        _ -> Err <| BadWvs <| toString vs
     asTime vs = case vs of
         (ma, [WvTime t]) -> Ok (ma, t)
         _ -> Err <| BadWvs <| toString vs
@@ -63,7 +66,7 @@ transport ns rs now =
                 else Err <| BadTransportVal i
         _ -> Err <| BadWvs <| toString vs
     playheadPos (_, timeDiff) (_, changedTime) (_, cueTime) = fromFloat <|
-        fromTime cueTime + fromTime changedTime + fromTime timeDiff - now
+        fromTime cueTime + fromTime changedTime + timeDiff + now
     toTransport timeDiff changedTime cueTime (ma, transpState) =
       { state = transpState
       , attributee = ma
