@@ -31,14 +31,14 @@ rConstNode p rs = case Dict.get p <| .nodes rs of
     Nothing -> Err NotLoaded
     n -> Err <| BadNodeType <| toString n
 
-ownerInfoPath : Seg -> RemoteState -> Result TransportLoadError Path
-ownerInfoPath ns rs =
+ownerClockDiffPath : Seg -> RemoteState -> Result TransportLoadError Path
+ownerClockDiffPath ns rs =
   let
     nsOwnerRefPath = appendSeg "/relay/owners" ns
     asRef vs = case vs of
         (ma, [WvString s]) -> Ok (ma, s)
         _ -> Err <| BadWvs <| toString vs
-  in Result.map Tuple.second <| Result.andThen asRef <| rConstNode nsOwnerRefPath rs
+  in Result.map (flip appendSeg "clock_diff" << Tuple.second) <| Result.andThen asRef <| rConstNode nsOwnerRefPath rs
 
 -- FIXME: Doesn't check any types so potential for rubbish errors if anything
 -- changes. Also attribution handling is pants.
@@ -48,7 +48,7 @@ transport ns rs now =
     structPath = asPath [ns, "transport"]
     rSubNode s = rConstNode (appendSeg structPath s) rs
     rTimeDiff = Result.andThen asTime <| Result.andThen (flip rConstNode rs) <|
-        ownerInfoPath ns rs
+        ownerClockDiffPath ns rs
     rTranspState = Result.andThen asTranspState <| rSubNode "state"
     rChangedTime = Result.andThen asTime <| rSubNode "changed"
     rCueTime = Result.andThen asTime <| rSubNode "cue"
@@ -78,7 +78,7 @@ transportSubs ns rs =
   let
     structPath = asPath [ns, "transport"]
     ownerRefPath = appendSeg "/relay/owners" ns
-    oipl = case ownerInfoPath ns rs of
+    oipl = case ownerClockDiffPath ns rs of
         Err _ -> []
         Ok p -> [p]
   in Set.fromList <|
