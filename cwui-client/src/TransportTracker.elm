@@ -1,12 +1,13 @@
-module TransportTracker exposing (transport, transportSubs, Transport, TransportLoadError(..), TransportState(..))
+module TransportTracker exposing (transport, transportSubs, Transport, TransportLoadError(..), TransportState(..), transportCueDum)
 
 import Dict
 import Set exposing (Set)
 
-import ClTypes exposing (Time, Seg, WireValue(..), fromTime, fromFloat, Attributee, Path)
+import ClTypes exposing (Time, Seg, WireValue(..), fromTime, fromFloat, Attributee, Path, WireType(WtTime))
 import ClNodes exposing (Node(ConstDataNode), ConstData)
 import RemoteState exposing (RemoteState)
 import PathManipulation exposing (appendSeg, asPath)
+import ClMsgTypes exposing (DataUpdateMsg(MsgConstSet))
 
 type TransportState
   = TransportStopped
@@ -65,8 +66,10 @@ transport ns rs now =
         fromTime cueTime + fromTime changedTime + fromTime timeDiff - now
     toTransport timeDiff changedTime cueTime (ma, transpState) =
       { state = transpState
-      , pos = playheadPos timeDiff changedTime cueTime
       , attributee = ma
+      , pos = case transpState of
+          TransportStopped -> Tuple.second cueTime
+          TransportRolling -> playheadPos timeDiff changedTime cueTime
       }
   in Result.map4 toTransport rTimeDiff rChangedTime rCueTime rTranspState
 
@@ -84,3 +87,11 @@ transportSubs ns rs =
     , appendSeg structPath "cue"
     , appendSeg "/relay/owners" ns
     ] ++ oipl
+
+transportCueDum : Seg -> Time -> DataUpdateMsg
+transportCueDum ns t = MsgConstSet
+  { msgPath = asPath [ns, "transport", "cue"]
+  , msgTypes = [WtTime]
+  , msgArgs = [WvTime t]
+  , msgAttributee = Nothing
+  }

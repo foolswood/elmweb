@@ -1,4 +1,4 @@
-module Digests exposing (Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT, constChangeCast, TimeChangeT, TimeSeriesDataOp(..))
+module Digests exposing (Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT, constChangeCast, TimeChangeT, TimeSeriesDataOp(..), DataDigest)
 
 import Dict exposing (Dict)
 

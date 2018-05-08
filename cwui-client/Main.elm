@@ -24,7 +24,8 @@ import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs)
 import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
 import SequenceOps exposing (SeqOp(..), applySeqOps, banish)
-import TransportTracker exposing (transportSubs)
+import TransportTracker exposing (transportSubs, transport, transportCueDum)
+import TransportClockView exposing (transportClockView)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -52,6 +53,8 @@ type alias Model =
   -- Layout:
   , layout : Layout Path Special
   , layoutFs : FormStore LayoutPath Path
+  -- Special:
+  , clockPartials : Dict Seg EditTypes.PartialTime
   -- Data:
   , recent : List (Digest, RemoteState)
   , pathSubs : Set Path
@@ -64,8 +67,10 @@ type alias Model =
 type Special
   = SpClock Seg
 
-specialsRequire : RemoteState -> Special -> Set Path
-specialsRequire rs sp = case sp of
+type alias SpecialEvent = (Seg, EditEvent EditTypes.PartialTime Time)
+
+specialRequire : RemoteState -> Special -> Set Path
+specialRequire rs sp = case sp of
     SpClock seg -> transportSubs seg rs
 
 qualifySegs : Path -> Set Seg -> Array Path
@@ -89,7 +94,7 @@ requiredChildren rs fs p = case remoteChildSegs rs p of
 requiredPaths : RemoteState -> NodeFs -> Layout Path Special -> Set Path
 requiredPaths rs fs = layoutRequires
     (\pa pb -> PathManipulation.canonicalise <| pa ++ pb) (dynamicLayout rs)
-    (requiredChildren rs fs) (specialsRequire rs)
+    (requiredChildren rs fs) (specialRequire rs)
 
 requiredArrayTypes : RemoteState -> Set TypeName
 requiredArrayTypes rs =
@@ -116,6 +121,7 @@ init =
       , timeNow = 0.0
       , layout = initialLayout
       , layoutFs = formStoreEmpty
+      , clockPartials = Dict.empty
       , recent = []
       , pathSubs = initialSubs
       , typeSubs = Set.empty
@@ -153,6 +159,7 @@ type Msg
   | SquashRecent
   | SecondPassedTick
   | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path Special))
+  | SpecialUiEvent SpecialEvent
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
 
 addGlobalError : String -> Model -> (Model, Cmd Msg)
@@ -235,6 +242,12 @@ update msg model = case msg of
           in
             ( {model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
+    SpecialUiEvent (seg, evt) -> case evt of
+        EeUpdate tp -> ({model | clockPartials = Dict.insert seg tp <| .clockPartials model}, Cmd.none)
+        EeSubmit t ->
+          let
+            dum = transportCueDum seg t
+          in (model, sendBundle <| ToRelayClientBundle [] [dum] [])
     NodeUiEvent (p, ue) -> case ue of
         EeUpdate v ->
           let
@@ -322,13 +335,13 @@ view m = div []
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
   , div [] [text <| toString <| .nodeFs m]
   , case .viewMode m of
-    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView specialsEditView (.layoutFs m) (.layout m)
-    UmView -> Html.map NodeUiEvent <| viewLayout
+    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView specialEditView (.layoutFs m) (.layout m)
+    UmView -> viewLayout
         (++)
         (dynamicLayout <| .state m)
         (visibleChildren (.state m) (.nodeFs m))
-        (viewPath (.nodeFs m) (.state m) (.recent m) (.pending m))
-        (viewSpecial m)
+        (Html.map NodeUiEvent << viewPath (.nodeFs m) (.state m) (.recent m) (.pending m))
+        (Html.map SpecialUiEvent << viewSpecial m)
         (.layout m)
   ]
 
@@ -350,12 +363,15 @@ pathEditView mp fs = case fs of
         , input [value partial, type_ "text", onInput EeUpdate] []
         ]
 
-specialsEditView : Special -> Html Special
-specialsEditView sp = text <| toString sp
+specialEditView : Special -> Html Special
+specialEditView sp = text <| toString sp
 
-viewSpecial : Model -> Special -> Html a
+viewSpecial : Model -> Special -> Html SpecialEvent
 viewSpecial m sp = case sp of
-    SpClock seg -> text <| "Clock for: " ++ seg
+    SpClock seg ->
+      let
+        transp = transport seg (latestState m) (.timeNow m)
+      in Html.map ((,) seg) <| transportClockView transp FsViewing
 
 viewLoading : Html a
 viewLoading = text "Loading..."
