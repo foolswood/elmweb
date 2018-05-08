@@ -128,7 +128,7 @@ init =
 -- Update
 
 sendBundle : ToRelayClientBundle -> Cmd Msg
-sendBundle b = timeStamped (WebSocket.send wsTarget << serialiseBundle b)
+sendBundle b = WebSocket.send wsTarget <| serialiseBundle b <| fromFloat <| MonoTime.rightNow ()
 
 subDiffOps : (comparable -> SubMsg) -> (comparable -> SubMsg) -> Set comparable -> Set comparable -> List SubMsg
 subDiffOps sub unsub old new =
@@ -151,14 +151,9 @@ type Msg
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | SquashRecent
-  | TimeStamped (Time -> Cmd Msg) Float
   | SecondPassedTick
-  | SetTimeNow Float
   | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path Special))
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
-
-timeStamped : (Time -> Cmd Msg) -> Cmd Msg
-timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 
 addGlobalError : String -> Model -> (Model, Cmd Msg)
 addGlobalError msg m = ({m | errs = (GlobalError, msg) :: .errs m}, Cmd.none)
@@ -228,9 +223,7 @@ update msg model = case msg of
         case .recent model of
             ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
             [] -> addGlobalError "Tried to squash but no recent" model
-    TimeStamped c t -> (model, c (fromFloat t))
-    SecondPassedTick -> (model, Task.perform SetTimeNow MonoTime.now)
-    SetTimeNow tf -> ({model | timeNow = tf}, Cmd.none)
+    SecondPassedTick -> ({model | timeNow = MonoTime.rightNow ()} , Cmd.none)
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)

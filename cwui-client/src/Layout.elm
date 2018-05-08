@@ -111,7 +111,9 @@ mapLayout f g l = case l of
 containerHtml : Array (Html a) -> Html a
 containerHtml = H.div [] << Array.toList
 
-viewLayout : (p -> p -> p) -> (p -> Layout p s) -> (p -> Array p) -> (p -> Html a) -> (s -> Html a) -> Layout p s -> Html a
+viewLayout
+   : (p -> p -> p) -> (p -> Layout p s) -> (p -> Array p) -> (p -> Html a)
+   -> (s -> Html a) -> Layout p s -> Html a
 viewLayout joinPath dyn chosenKids h viewSpecial =
   let
     go l = case l of
