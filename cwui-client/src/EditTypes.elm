@@ -5,7 +5,7 @@ import Set exposing (Set)
 import Regex exposing (Regex)
 
 import Futility exposing (Conv)
-import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireValue(..))
+import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireValue(..), Bounds)
 import SequenceOps exposing (SeqOp)
 import TimeSeries exposing (TimeSeries)
 
@@ -82,23 +82,31 @@ pFloatConv =
     _ -> Err "Not PeFloat"
   }
 
+asFullTime : Bounds Time -> PartialTime -> Maybe Time
+asFullTime _ pt = case pt of
+    (Just s, Just f) -> Just (s, f)
+    _ -> Nothing
+
 asFull : (PartialEdit, AtomDef) -> Maybe WireValue
 asFull ped = case ped of
     (PeEnum mi, ADEnum _) -> Maybe.map WvWord8 mi
-    (PeTime pt, ADTime _) -> case pt of
-        (Just s, Just f) -> Just <| WvTime (s, f)
-        _ -> Nothing
+    (PeTime pt, ADTime bs) -> Maybe.map WvTime <| asFullTime bs pt
     (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
         [] -> Nothing
         _ -> Just <| WvString s
     _ -> Nothing
 
+asPartialTime : Bounds Time -> Maybe Time -> PartialTime
+asPartialTime _ mt = case mt of
+    Nothing -> (Nothing, Nothing)
+    Just (s, f) -> (Just s, Just f)
+
 asPartial : AtomDef -> Maybe WireValue -> PartialEdit
 asPartial d mwv = case (d, mwv) of
     (ADEnum _, Just (WvWord8 w)) -> PeEnum <| Just w
     (ADEnum _, _) -> PeEnum Nothing
-    (ADTime _, Just (WvTime (s, f))) -> PeTime (Just s, Just f)
-    (ADTime _, _) -> PeTime (Nothing, Nothing)
+    (ADTime bs, Just (WvTime t)) -> PeTime <| asPartialTime bs <| Just t
+    (ADTime bs, _) -> PeTime <| asPartialTime bs Nothing
     -- FIXME: This is utter tat!
     _ -> PeEnum Nothing
 
