@@ -24,6 +24,7 @@ import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs)
 import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
 import SequenceOps exposing (SeqOp(..), applySeqOps, banish)
+import TransportTracker exposing (transportSubs)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -48,7 +49,7 @@ type alias Model =
   , bundleCount : Int
   , keepRecent : Float
   -- Layout:
-  , layout : Layout Path
+  , layout : Layout Path Special
   , layoutFs : FormStore LayoutPath Path
   -- Data:
   , recent : List (Digest, RemoteState)
@@ -58,6 +59,13 @@ type alias Model =
   , nodeFs : NodeFs
   , pending : Pending
   }
+
+type Special
+  = SpClock Seg
+
+specialsRequire : RemoteState -> Special -> Set Path
+specialsRequire rs sp = case sp of
+    SpClock seg -> transportSubs seg rs
 
 qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
@@ -77,10 +85,10 @@ requiredChildren rs fs p = case remoteChildSegs rs p of
             Nothing -> defaultChildChoice <| Just segs
       in qualifySegs p chosen
 
-requiredPaths : RemoteState -> NodeFs -> Layout Path -> Set Path
+requiredPaths : RemoteState -> NodeFs -> Layout Path Special -> Set Path
 requiredPaths rs fs = layoutRequires
     (\pa pb -> PathManipulation.canonicalise <| pa ++ pb) (dynamicLayout rs)
-    (requiredChildren rs fs)
+    (requiredChildren rs fs) (specialsRequire rs)
 
 requiredArrayTypes : RemoteState -> Set TypeName
 requiredArrayTypes rs =
@@ -96,7 +104,7 @@ init : (Model, Cmd Msg)
 init =
   let
     initialNodeFs = formStoreEmpty
-    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutLeaf "/relay/clients", LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"]
+    initialLayout = LayoutContainer <| Array.fromList [LayoutSpecial <| SpClock "engine",LayoutLeaf "/relay/self", LayoutLeaf "/relay/clients", LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"]
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialNodeFs initialLayout
     initialModel =
@@ -142,7 +150,7 @@ type Msg
   | NetworkEvent FromRelayClientBundle
   | SquashRecent
   | TimeStamped (Time -> Cmd Msg) Time.Time
-  | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path))
+  | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path Special))
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
 
 timeStamped : (Time -> Cmd Msg) -> Cmd Msg
@@ -298,7 +306,7 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
-dynamicLayout : RemoteState -> Path -> Layout Path
+dynamicLayout : RemoteState -> Path -> Layout Path a
 dynamicLayout rs p = case Dict.get p <| .nodes rs of
     Nothing -> LayoutLeaf p
     Just n -> case n of
@@ -312,12 +320,13 @@ view m = div []
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
   , div [] [text <| toString <| .nodeFs m]
   , case .viewMode m of
-    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
+    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView specialsEditView (.layoutFs m) (.layout m)
     UmView -> Html.map NodeUiEvent <| viewLayout
         (++)
         (dynamicLayout <| .state m)
         (visibleChildren (.state m) (.nodeFs m))
         (viewPath (.nodeFs m) (.state m) (.recent m) (.pending m))
+        (viewSpecial m)
         (.layout m)
   ]
 
@@ -338,6 +347,13 @@ pathEditView mp fs = case fs of
         [ button [onClick <| EeSubmit partial] [text buttonText]
         , input [value partial, type_ "text", onInput EeUpdate] []
         ]
+
+specialsEditView : Special -> Html Special
+specialsEditView sp = text <| toString sp
+
+viewSpecial : Model -> Special -> Html a
+viewSpecial m sp = case sp of
+    SpClock seg -> text <| "Clock for: " ++ seg
 
 viewLoading : Html a
 viewLoading = text "Loading..."
