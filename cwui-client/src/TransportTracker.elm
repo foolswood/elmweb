@@ -1,4 +1,4 @@
-module TransportTracker exposing (transport, transportSubs, Transport, TransportLoadError(..))
+module TransportTracker exposing (transport, transportSubs, Transport, TransportLoadError(..), TransportState(..))
 
 import Dict
 import Set exposing (Set)
