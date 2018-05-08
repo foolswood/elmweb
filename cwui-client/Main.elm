@@ -104,7 +104,7 @@ init : (Model, Cmd Msg)
 init =
   let
     initialNodeFs = formStoreEmpty
-    initialLayout = LayoutContainer <| Array.fromList [LayoutSpecial <| SpClock "engine",LayoutLeaf "/relay/self", LayoutLeaf "/relay/clients", LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"]
+    initialLayout = LayoutContainer <| Array.fromList [LayoutSpecial <| SpClock "engine", LayoutLeaf "/relay/self", LayoutLeaf "/relay/clients", LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"]
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialNodeFs initialLayout
     initialModel =
