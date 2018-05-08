@@ -48,6 +48,7 @@ type alias Model =
   , viewMode : UiMode
   , bundleCount : Int
   , keepRecent : Float
+  , timeNow : Float
   -- Layout:
   , layout : Layout Path Special
   , layoutFs : FormStore LayoutPath Path
@@ -112,6 +113,7 @@ init =
       , viewMode = UmEdit
       , bundleCount = 0
       , keepRecent = 5000.0
+      , timeNow = 0.0
       , layout = initialLayout
       , layoutFs = formStoreEmpty
       , recent = []
@@ -149,7 +151,9 @@ type Msg
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | SquashRecent
-  | TimeStamped (Time -> Cmd Msg) Time.Time
+  | TimeStamped (Time -> Cmd Msg) Float
+  | SecondPassedTick
+  | SetTimeNow Float
   | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path Special))
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
 
@@ -225,6 +229,8 @@ update msg model = case msg of
             ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
             [] -> addGlobalError "Tried to squash but no recent" model
     TimeStamped c t -> (model, c (fromFloat t))
+    SecondPassedTick -> (model, Task.perform SetTimeNow MonoTime.now)
+    SetTimeNow tf -> ({model | timeNow = tf}, Cmd.none)
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
@@ -297,7 +303,10 @@ produceCms p =
 -- Subscriptions
 
 subscriptions : Model -> Sub Msg
-subscriptions model = WebSocket.listen wsTarget eventFromNetwork
+subscriptions model = Sub.batch
+  [ WebSocket.listen wsTarget eventFromNetwork
+  , Time.every Time.second <| always SecondPassedTick
+  ]
 
 eventFromNetwork : String -> Msg
 eventFromNetwork s = case parseBundle s of
