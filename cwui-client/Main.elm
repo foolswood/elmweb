@@ -54,7 +54,7 @@ type alias Model =
   , layout : Layout Path Special
   , layoutFs : FormStore LayoutPath Path
   -- Special:
-  , clockPartials : Dict Seg EditTypes.PartialTime
+  , clockFs : Dict Seg (FormState EditTypes.PartialTime)
   -- Data:
   , recent : List (Digest, RemoteState)
   , pathSubs : Set Path
@@ -121,7 +121,7 @@ init =
       , timeNow = 0.0
       , layout = initialLayout
       , layoutFs = formStoreEmpty
-      , clockPartials = Dict.empty
+      , clockFs = Dict.empty
       , recent = []
       , pathSubs = initialSubs
       , typeSubs = Set.empty
@@ -243,7 +243,7 @@ update msg model = case msg of
             ( {model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
     SpecialUiEvent (seg, evt) -> case evt of
-        EeUpdate tp -> ({model | clockPartials = Dict.insert seg tp <| .clockPartials model}, Cmd.none)
+        EeUpdate tp -> ({model | clockFs = Dict.insert seg (FsEditing tp) <| .clockFs model}, Cmd.none)
         EeSubmit t ->
           let
             dum = transportCueDum seg t
@@ -371,7 +371,7 @@ viewSpecial m sp = case sp of
     SpClock seg ->
       let
         transp = transport seg (latestState m) (.timeNow m)
-      in Html.map ((,) seg) <| transportClockView transp FsViewing
+      in Html.map ((,) seg) <| transportClockView transp <| formState seg <| .clockFs m
 
 viewLoading : Html a
 viewLoading = text "Loading..."

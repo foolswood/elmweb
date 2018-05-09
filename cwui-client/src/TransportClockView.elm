@@ -24,5 +24,7 @@ transportClockView transp fsTime = case transp of
                 else AsViewing pos pt
             contents = case asFullTime unbounded pt of
                 Nothing -> [timeEdit]
-                Just t -> [timeEdit, H.button [HE.onClick <| EeSubmit t] [H.text "Set"]]
+                Just t -> if t == pos
+                    then [timeEdit]
+                    else [timeEdit, H.button [HE.onClick <| EeSubmit t] [H.text "Set"]]
           in H.div [] contents
