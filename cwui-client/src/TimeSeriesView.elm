@@ -360,9 +360,10 @@ viewPlayhead height offset scale transp =
   let
     t = fromTime <| .pos transp
     left = toEm <| offset + (scale * t)
+    animName = "playing" ++ (String.filter ((/=) '.') <| toString t)
     kfd = case .state transp of
         TransportStopped -> Dict.empty
-        TransportRolling -> Dict.singleton "playing" <| Dict.fromList
+        TransportRolling -> Dict.singleton animName <| Dict.fromList
           [ (0, Dict.singleton "left" left)
           , (100, Dict.singleton "left" <| toEm <| offset + (scale * (t + 2)))
           ]
@@ -373,7 +374,7 @@ viewPlayhead height offset scale transp =
           , ("background", "green"), ("z-index", "3")
           , ("animation-timing-function", "linear")
           , ("animation-duration", "2s")
-          , ("animation-name", "playing")]]
+          , ("animation-name", animName)]]
         []
   in applyKeyFramed <| keyFramed kfd h
 
