@@ -143,7 +143,7 @@ viewTimeSeries s =
     [ style [("height", "200px"), ("overflow", "auto"), ("position", "relative")]
     , onScrollEm SetViewport
     ]
-    [ticks, scaleControl, dataGrid, labelGrid, playhead, text <| toString s]
+    [ticks, scaleControl, dataGrid, labelGrid, playhead]
 
 viewTimeScale : Float -> Html Float
 viewTimeScale s = input
