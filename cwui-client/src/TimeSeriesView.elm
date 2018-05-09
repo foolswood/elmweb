@@ -21,6 +21,7 @@ import Digests exposing (TimeChangeT, TimeSeriesDataOp(..))
 import TupleViews
 import Futility exposing
   ( maybeToList, lastJust, setFst, setSnd, Either(..), either)
+import TransportTracker exposing (Transport, TransportState(..))
 
 import Html as H exposing (..)
 import Html.Attributes as HA exposing (..)
@@ -65,7 +66,6 @@ type alias TsModel =
   , vZoom : Float
   , hZoom : Float
   , viewport : Viewport
-  , playheadPos : Time
   , selectedTps : Dict Path (Set TpId)
   }
 
@@ -75,7 +75,6 @@ tsModelEmpty =
   , vZoom = 1.0
   , hZoom = 1.0
   , viewport = Viewport 0 0
-  , playheadPos = (0, 0)
   , selectedTps = Dict.empty
   }
 
@@ -96,8 +95,8 @@ toEm f = toString f ++ "em"
 mapEm : List Float -> String
 mapEm = String.join " " << List.map toEm
 
-viewTimeSeries : TsModel -> Html TsMsg
-viewTimeSeries s =
+viewTimeSeries : TsModel -> Transport -> Html TsMsg
+viewTimeSeries s transp =
   let
     controlsHeight = 2.0
     labelWidth = 8.0
@@ -138,7 +137,7 @@ viewTimeSeries s =
         , ("background", "gray"), ("z-index", "4")
         ]]
       <| List.map (\si -> viewTsLabel (.label si) (.transience si)) <| .series s
-    playhead = viewPlayhead totalHeight labelWidth (.hZoom s) <| .playheadPos s
+    playhead = viewPlayhead totalHeight labelWidth (.hZoom s) transp
   in div
     [ style [("height", "200px"), ("overflow", "auto"), ("position", "relative")]
     , onScrollEm SetViewport
@@ -356,14 +355,17 @@ viewTsLabel name transience =
         TRemoved -> [style [("border", "0.2em solid red")]]
   in div attrs [text name]
 
-viewPlayhead : Float -> Float -> Float -> Time -> Html a
-viewPlayhead height offset scale t =
+viewPlayhead : Float -> Float -> Float -> Transport -> Html a
+viewPlayhead height offset scale transp =
   let
-    left = (toEm <| offset + (scale * fromTime t))
-    kfd = Dict.singleton "playing" <| Dict.fromList
-      [ (0, Dict.singleton "left" left)
-      , (100, Dict.singleton "left" <| toEm <| offset + (scale * (fromTime t + 2)))
-      ]
+    t = fromTime <| .pos transp
+    left = toEm <| offset + (scale * t)
+    kfd = case .state transp of
+        TransportStopped -> Dict.empty
+        TransportRolling -> Dict.singleton "playing" <| Dict.fromList
+          [ (0, Dict.singleton "left" left)
+          , (100, Dict.singleton "left" <| toEm <| offset + (scale * (t + 2)))
+          ]
     h = div
         [style
           [ ("position", "absolute"), ("top", "0px"), ("left", left)
@@ -373,20 +375,12 @@ viewPlayhead height offset scale t =
           , ("animation-duration", "2s")
           , ("animation-name", "playing")]]
         []
-    kf = keyFramed kfd h
-  in applyKeyFramed kf
+  in applyKeyFramed <| keyFramed kfd h
 
 type TsExternalMsg
   = TsemUpdate TsModel
   | TsemPointChange Path TpId NaTimePoint
   | TsemSeek Time
-
-updateTimeSeries : TsMsg -> TsModel -> TsModel
-updateTimeSeries evt m = case processTimeSeriesEvent evt m of
-    TsemUpdate newM -> newM
-    TsemSeek t -> {m | playheadPos = t}
-    -- FIXME: Throws away submission event
-    TsemPointChange _ _ _ -> m
 
 processTimeSeriesEvent : TsMsg -> TsModel -> TsExternalMsg
 processTimeSeriesEvent evt m = case evt of

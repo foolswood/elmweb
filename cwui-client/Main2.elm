@@ -7,8 +7,7 @@ import ClNodes exposing (TimePoint)
 import TimeSeries
 import Transience exposing (Transience(..))
 import Form exposing (FormState(FsViewing))
-import TransportTracker
-import TransportClockView
+import TransportTracker exposing (Transport, TransportState(..))
 
 exampleTimeSeries : TsModel
 exampleTimeSeries =
@@ -47,8 +46,21 @@ exampleTimeSeries =
     ]
   }
 
+type alias Model = {tsm : TsModel, transp : Transport}
+
+updateTimeSeries : TsMsg -> Model -> Model
+updateTimeSeries evt m = case processTimeSeriesEvent evt <| .tsm m of
+    TsemUpdate tsm -> {m | tsm = tsm}
+    TsemSeek t ->
+      let
+        oldTransp = .transp m
+        transp = {oldTransp | pos = t}
+      in {m | transp = transp}
+    -- FIXME: Throws away submission event
+    TsemPointChange _ _ _ -> m
+
 main = Html.beginnerProgram
-  { model = exampleTimeSeries
-  , view = viewTimeSeries
+  { model = {tsm = exampleTimeSeries, transp = {pos = (0,0), state = TransportStopped, attributee = Nothing}}
+  , view = \{tsm, transp} -> viewTimeSeries tsm transp
   , update = updateTimeSeries
   }
