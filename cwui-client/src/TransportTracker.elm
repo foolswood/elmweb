@@ -66,7 +66,7 @@ transport ns rs now =
                 else Err <| BadTransportVal i
         _ -> Err <| BadWvs <| toString vs
     playheadPos (_, timeDiff) (_, changedTime) (_, cueTime) = fromFloat <|
-        fromTime cueTime + fromTime changedTime + timeDiff + now
+        fromTime cueTime - fromTime changedTime - timeDiff + now
     toTransport timeDiff changedTime cueTime (ma, transpState) =
       { state = transpState
       , attributee = ma
