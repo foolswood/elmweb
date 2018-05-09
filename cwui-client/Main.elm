@@ -26,6 +26,7 @@ import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActio
 import SequenceOps exposing (SeqOp(..), applySeqOps, banish)
 import TransportTracker exposing (transportSubs, transport, transportCueDum)
 import TransportClockView exposing (transportClockView)
+import TimeSeriesView exposing (TsModel, tsModelEmpty, TsMsg, viewTimeSeries, TsExternalMsg(..), processTimeSeriesEvent)
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -55,6 +56,7 @@ type alias Model =
   , layoutFs : FormStore LayoutPath Path
   -- Special:
   , clockFs : Dict Seg (FormState EditTypes.PartialTime)
+  , timelines : Dict Seg TsModel
   -- Data:
   , recent : List (Digest, RemoteState)
   , pathSubs : Set Path
@@ -66,12 +68,19 @@ type alias Model =
 
 type Special
   = SpClock Seg
+  | SpTimeline Seg
 
-type alias SpecialEvent = (Seg, EditEvent EditTypes.PartialTime Time)
+type SpecialEvent
+  = SpeClock Seg (EditEvent EditTypes.PartialTime Time)
+  | SpeTimeline Seg TsMsg
 
 specialRequire : RemoteState -> Special -> Set Path
 specialRequire rs sp = case sp of
     SpClock seg -> transportSubs seg rs
+    SpTimeline seg -> transportSubs seg rs
+
+getTsModel : Seg -> Model -> TsModel
+getTsModel ns = Maybe.withDefault tsModelEmpty << Dict.get ns << .timelines
 
 qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
@@ -110,7 +119,14 @@ init : (Model, Cmd Msg)
 init =
   let
     initialNodeFs = formStoreEmpty
-    initialLayout = LayoutContainer <| Array.fromList [LayoutSpecial <| SpClock "engine", LayoutLeaf "/relay/self", LayoutLeaf "/relay/clients", LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"]
+    initialLayout = LayoutContainer <| Array.fromList
+      [ LayoutSpecial <| SpClock "engine"
+      , LayoutSpecial <| SpTimeline "engine"
+      , LayoutLeaf "/engine/transport/state"
+      , LayoutLeaf "/relay/self"
+      , LayoutLeaf "/relay/clients"
+      , LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"
+      ]
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialNodeFs initialLayout
     initialModel =
@@ -122,6 +138,7 @@ init =
       , layout = initialLayout
       , layoutFs = formStoreEmpty
       , clockFs = Dict.empty
+      , timelines = Dict.empty
       , recent = []
       , pathSubs = initialSubs
       , typeSubs = Set.empty
@@ -242,12 +259,16 @@ update msg model = case msg of
           in
             ( {model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
-    SpecialUiEvent (seg, evt) -> case evt of
-        EeUpdate tp -> ({model | clockFs = Dict.insert seg (FsEditing tp) <| .clockFs model}, Cmd.none)
-        EeSubmit t ->
-          let
-            dum = transportCueDum seg t
-          in (model, sendBundle <| ToRelayClientBundle [] [dum] [])
+    SpecialUiEvent se -> case se of
+        SpeClock seg evt -> case evt of
+            EeUpdate tp -> ({model | clockFs = Dict.insert seg (FsEditing tp) <| .clockFs model}, Cmd.none)
+            EeSubmit t ->
+              (model, sendBundle <| ToRelayClientBundle [] [transportCueDum seg t] [])
+        SpeTimeline ns evt -> case processTimeSeriesEvent evt <| getTsModel ns model of
+            TsemUpdate tsm -> ({model | timelines = Dict.insert ns tsm <| .timelines model}, Cmd.none)
+            TsemSeek t -> (model, sendBundle <| ToRelayClientBundle [] [transportCueDum ns t] [])
+            -- FIXME: time point changes go nowhere:
+            TsemPointChange _ _ _ -> (model, Cmd.none)
     NodeUiEvent (p, ue) -> case ue of
         EeUpdate v ->
           let
@@ -371,7 +392,8 @@ viewSpecial m sp = case sp of
     SpClock seg ->
       let
         transp = transport seg (latestState m) (.timeNow m)
-      in Html.map ((,) seg) <| transportClockView transp <| formState seg <| .clockFs m
+      in Html.map (SpeClock seg) <| transportClockView transp <| formState seg <| .clockFs m
+    SpTimeline seg -> Html.map (SpeTimeline seg) <| viewTimeSeries <| Maybe.withDefault tsModelEmpty <| Dict.get seg <| .timelines m
 
 viewLoading : Html a
 viewLoading = text "Loading..."

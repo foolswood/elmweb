@@ -376,16 +376,24 @@ viewPlayhead height offset scale t =
     kf = keyFramed kfd h
   in applyKeyFramed kf
 
--- FIXME: Throws away submission event
-updateTimeSeries : TsMsg -> TsModel -> TsModel
-updateTimeSeries evt m = either (identity) (always m) <| processTimeSeriesEvent evt m
+type TsExternalMsg
+  = TsemUpdate TsModel
+  | TsemPointChange Path TpId NaTimePoint
+  | TsemSeek Time
 
-processTimeSeriesEvent : TsMsg -> TsModel -> Either TsModel (Path, TpId, NaTimePoint)
+updateTimeSeries : TsMsg -> TsModel -> TsModel
+updateTimeSeries evt m = case processTimeSeriesEvent evt m of
+    TsemUpdate newM -> newM
+    TsemSeek t -> {m | playheadPos = t}
+    -- FIXME: Throws away submission event
+    TsemPointChange _ _ _ -> m
+
+processTimeSeriesEvent : TsMsg -> TsModel -> TsExternalMsg
 processTimeSeriesEvent evt m = case evt of
-    VZoom z -> Left {m | vZoom = z}
-    HZoom z -> Left {m | hZoom = z}
-    SetViewport v -> Left {m | viewport = v}
-    PlayheadSet t -> Left {m | playheadPos = t}
+    VZoom z -> TsemUpdate {m | vZoom = z}
+    HZoom z -> TsemUpdate {m | hZoom = z}
+    SetViewport v -> TsemUpdate {m | viewport = v}
+    PlayheadSet t -> TsemSeek t
     ToggleSelection p tpid ->
       let
         newPathSelection pathSelection = if Set.member tpid pathSelection
@@ -396,14 +404,14 @@ processTimeSeriesEvent evt m = case evt of
             nps = newPathSelection <| Maybe.withDefault Set.empty stps
           in
             if Set.isEmpty nps then Nothing else Just nps
-      in Left {m | selectedTps = Dict.update p newSelectedTps <| .selectedTps m}
+      in TsemUpdate {m | selectedTps = Dict.update p newSelectedTps <| .selectedTps m}
     TsEdit path tpEdit -> case tpEdit of
         EeUpdate (t, tpid, v) ->
           let
             updateSeries = TimeSeries.update tpid (\tpi -> {tpi | fs = FsEditing v})
-          in Left {m | series = updateSeriesInfo path updateSeries <| .series m}
+          in TsemUpdate {m | series = updateSeriesInfo path updateSeries <| .series m}
         -- FIXME: Submission should do something!
-        EeSubmit (tpid, v) -> Right (path, tpid, v)
+        EeSubmit (tpid, v) -> TsemPointChange path tpid v
 
 updateSeriesInfo
    : Path -> (TimeSeries PointInfo -> TimeSeries PointInfo)
