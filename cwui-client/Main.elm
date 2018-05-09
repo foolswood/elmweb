@@ -393,7 +393,15 @@ viewSpecial m sp = case sp of
       let
         transp = transport seg (latestState m) (.timeNow m)
       in Html.map (SpeClock seg) <| transportClockView transp <| formState seg <| .clockFs m
-    SpTimeline seg -> Html.map (SpeTimeline seg) <| viewTimeSeries <| Maybe.withDefault tsModelEmpty <| Dict.get seg <| .timelines m
+    SpTimeline seg ->
+      let
+        -- FIXME: This mucking about hints at the TsModel being off, also error handling
+        pos = case transport seg (latestState m) (.timeNow m) of
+            Err _ -> (0, 0)
+            Ok {pos} -> pos
+        storedTsm = getTsModel seg m
+        tsm = {storedTsm | playheadPos = pos}
+      in Html.map (SpeTimeline seg) <| viewTimeSeries tsm
 
 viewLoading : Html a
 viewLoading = text "Loading..."
