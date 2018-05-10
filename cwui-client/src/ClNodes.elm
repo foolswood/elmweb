@@ -44,8 +44,8 @@ constNodeConv =
         _ -> Err "Not a const node"
   in {wrap = ConstDataNode, unwrap = asConstDataNode}
 
-timeseriesNodeConv : Conv Node TimeSeriesNodeT
-timeseriesNodeConv =
+seriesNodeConv : Conv Node TimeSeriesNodeT
+seriesNodeConv =
   let
     asTimeSeriesNode n = case n of
         TimeSeriesNode tsn -> Ok tsn

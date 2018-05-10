@@ -1,4 +1,7 @@
-module Digests exposing (Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT, constChangeCast, TimeChangeT, TimeSeriesDataOp(..), DataDigest)
+module Digests exposing
+  ( Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT
+  , constChangeCast, TimeChangeT, seriesChangeCast, TimeSeriesDataOp(..)
+  , DataDigest)
 
 import Dict exposing (Dict)
 
@@ -31,6 +34,11 @@ constChangeCast : DataChange -> Result String ConstChangeT
 constChangeCast dc = case dc of
     ConstChange cc -> Ok cc
     _ -> Err "Not ConstChange"
+
+seriesChangeCast : DataChange -> Result String (Dict TpId TimeChangeT)
+seriesChangeCast dc = case dc of
+    TimeChange tc -> Ok tc
+    _ -> Err "Not TimeChange"
 
 type alias DataDigest = Dict Path DataChange
 

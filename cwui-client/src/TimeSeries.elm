@@ -1,4 +1,6 @@
-module TimeSeries exposing (TimeSeries, empty, get, insert, remove, update, singleton, fold, times)
+module TimeSeries exposing
+  ( TimeSeries, empty, nonEmpty, get, insert, remove, update, singleton, fold
+  , times)
 
 import Dict exposing (Dict)
 
@@ -11,6 +13,9 @@ type alias TimeSeries a =
 
 empty : TimeSeries a
 empty = {points = Dict.empty, tpIds = emptyBiMap}
+
+nonEmpty : TimeSeries a -> Maybe (TimeSeries a)
+nonEmpty a = if Dict.isEmpty <| .points a then Nothing else Just a
 
 get : TpId -> TimeSeries a -> Maybe (Time, a)
 get tpid {points, tpIds} =

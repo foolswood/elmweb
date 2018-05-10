@@ -22,11 +22,15 @@ import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, vi
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState)
 import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs)
-import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
+import EditTypes exposing
+  ( NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActions(..), NaChildrenT
+  , NeConstT, constNeConv, seriesNeConv, childrenNeConv, constNaConv
+  , seriesNaConv, childrenNaConv)
 import SequenceOps exposing (SeqOp(..), applySeqOps, banish)
 import TransportTracker exposing (transportSubs, transport, transportCueDum)
 import TransportClockView exposing (transportClockView)
 import TimeSeriesView exposing (TsModel, tsModelEmpty, TsMsg, viewTimeSeries, TsExternalMsg(..), processTimeSeriesEvent)
+import TimeSeries
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -202,6 +206,12 @@ clearPending {dops, cops} =
         NaConst wvs -> Maybe.map NaConst <| case Dict.get path dops of
             Nothing -> Just wvs
             Just _ -> Nothing
+        NaSeries pendingSeries -> case Dict.get path dops of
+            Nothing -> Just <| NaSeries pendingSeries
+            Just changes -> case changes of
+                TimeChange changedPoints -> Maybe.map NaSeries <| TimeSeries.nonEmpty <|
+                    List.foldl TimeSeries.remove pendingSeries <| Dict.keys changedPoints
+                _ -> Nothing
   in dictMapMaybe clearPath
 
 rectifyCop : (Path -> List Seg) -> Path -> Dict Seg (SeqOp Seg) -> NodeFs -> NodeFs
@@ -298,6 +308,7 @@ update msg model = case msg of
                           }
                       in (newM, sendBundle b)
                     _ -> addGlobalError "Def type mismatch" model
+            NaSeries sops -> addGlobalError "Series submit not implemented" model
             NaChildren cops -> case tyDef p <| latestState model of
                 Err msg -> addGlobalError ("Error submitting: " ++ msg) model
                 Ok (def, _) -> case def of
@@ -461,7 +472,8 @@ viewNode lib def maybeNode recentCops recentDums formState maybeNas =
         ILUninterpolated -> withCasts
             constChangeCast constNeConv constNaConv (.unwrap constNodeConv)
             recentDums (viewWithRecent editable d)
-        _ -> text "Time series outside timeline"
+        _ -> withCasts seriesChangeCast seriesNeConv seriesNaConv (.unwrap seriesNodeConv)
+            recentDums (\rs mn fs mp -> Html.text <| toString (rs, mn, fs, mp))
     StructDef d -> viewStruct d
     ArrayDef d -> withCasts
         Ok childrenNeConv childrenNaConv (.unwrap childrenNodeConv) recentCops

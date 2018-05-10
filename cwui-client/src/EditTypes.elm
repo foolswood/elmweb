@@ -24,6 +24,7 @@ type alias NaChildrenT = Dict Seg NeChildMod
 
 type NodeActions
   = NaConst NaConstT
+  | NaSeries NaSeriesT
   | NaChildren NaChildrenT
 
 constNaConv : Conv NodeActions NaConstT
@@ -33,6 +34,14 @@ constNaConv =
         NaConst nac -> Ok nac
         _ -> Err "Not NaConst"
   in {wrap = NaConst, unwrap = asNaConst}
+
+seriesNaConv : Conv NodeActions NaSeriesT
+seriesNaConv =
+  let
+    asNaSeries na = case na of
+        NaSeries nas -> Ok nas
+        _ -> Err "Not NaSeries"
+  in {wrap = NaSeries, unwrap = asNaSeries}
 
 childrenNaConv : Conv NodeActions NaChildrenT
 childrenNaConv =
@@ -134,6 +143,7 @@ type alias NeChildrenT =
 
 type NodeEdit
   = NeConst NeConstT
+  | NeSeries NeSeriesT
   | NeChildren NeChildrenT
 
 constNeConv : Conv NodeEdit NeConstT
@@ -143,6 +153,14 @@ constNeConv =
         NeConst e -> Ok e
         _ -> Err "Not NeConst"
   in {wrap = NeConst, unwrap = asNeConst}
+
+seriesNeConv : Conv NodeEdit NeSeriesT
+seriesNeConv =
+  let
+    asNeSeries edit = case edit of
+        NeSeries e -> Ok e
+        _ -> Err "Not NeSeries"
+  in {wrap = NeSeries, unwrap = asNeSeries}
 
 childrenNeConv : Conv NodeEdit NeChildrenT
 childrenNeConv =
