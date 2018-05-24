@@ -19,7 +19,7 @@ import Clapi.Types
   , TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Liberty(..), TimeStamped(..)
   , FrDigest(..), TrDigest(..), TrpDigest(..), FrpDigest(..)
   , Definition, structDef, arrayDef, tupleDef
-  , unbounded, ttInt32, ttTime
+  , unbounded, TreeType(..)
   , alFromList, alToMap
   , TimeSeriesDataOp(..), DataChange(..), DefOp(..)
   , WireValue(..), (<|$|>)
@@ -34,8 +34,8 @@ ns = [segq|example|]
 
 initialDefs :: Map Seg Definition
 initialDefs = Map.fromList
-  [ ([segq|delay|], tupleDef "How long to delay responses" (alFromList [([segq|t|], ttTime)]) ILUninterpolated)
-  , ([segq|tsi|], tupleDef "Timeseries of ints" (alFromList [([segq|i|], ttInt32 unbounded)]) ILLinear)
+  [ ([segq|delay|], tupleDef "How long to delay responses" (alFromList [([segq|t|], TtTime)]) ILUninterpolated)
+  , ([segq|tsi|], tupleDef "Timeseries of ints" (alFromList [([segq|i|], TtInt32 unbounded)]) ILLinear)
   , ([segq|arr|], arrayDef "Editable array of times" (TypeName ns [segq|delay|]) Must)
   , (ns, structDef "Example API for client testing" $ alFromList
       [ ([segq|delay|], (TypeName ns [segq|delay|], May))
