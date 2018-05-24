@@ -1,5 +1,12 @@
-{-# LANGUAGE OverloadedStrings, ScopedTypeVariables, TypeApplications, Rank2Types #-}
+{-# LANGUAGE
+    OverloadedStrings
+  , Rank2Types
+  , ScopedTypeVariables
+  , TemplateHaskell
+  , TypeApplications
+#-}
 module JsonConv (toRelayClientBundleToClapi, fromRelayClientBundleToJson) where
+
 import Prelude hiding (fail)
 import Control.Monad.Fail (MonadFail(..))
 
@@ -24,24 +31,25 @@ import Data.Attoparsec.ByteString (parseOnly, endOfInput)
 
 import Clapi.Types.Path (Path, Seg)
 import qualified Clapi.Types.Path as Path
+import Clapi.Types.WireTH (mkWithWtProxy)
 import Clapi.TaggedData
 import Clapi.Serialisation
   ( subMsgTaggedData, SubMsgType(..), interpolationTaggedData
   , dumtTaggedData, DataUpdateMsgType(..), cumtTaggedData
-  , ContainerUpdateMsgType(..), errIdxTaggedData, wireValueWireType
-  , WireType(..), WireConcreteType(..), WireContainerType(..), Encodable(..)
-  , unpackWireType, defMsgTaggedData, ilTaggedData)
--- FIXME: once clapi PR 66 is in this can go into the above import block
-import Clapi.Serialisation.Definitions (defTaggedData)
+  , ContainerUpdateMsgType(..), errIdxTaggedData
+  , Encodable(..)
+  , defMsgTaggedData, ilTaggedData, defTaggedData)
 import Clapi.Types
-  ( Time(..), Interpolation(..), InterpolationLimit(..), DataUpdateMessage(..)
+  ( Time(..), Interpolation(..), InterpolationType(..), InterpolationLimit(..)
+  , DataUpdateMessage(..)
   , TimeStamped(..), FromRelayClientBundle(..), MsgError(..)
   , ToRelayClientBundle(..), SubMessage(..), ContainerUpdateMessage(..)
   , TypeMessage(..), TypeName(..), Liberty(..), ErrorIndex(..), WireValue(..)
-  , Wireable, Tag, mkTag, unTag, (<|$|>)
+  , Wireable, WireType(..), wireValueWireType, Tag, mkTag, unTag, (<|$|>)
   , DefMessage(..), Definition(..), ArrayDefinition(..), StructDefinition(..)
   , TupleDefinition(..), unAssocList, TreeType)
 import Clapi.TextSerialisation (ttToText)
+import Clapi.Util (proxyF, proxyF3)
 
 parseTaggedJson :: TaggedData e a -> (e -> Value -> Parser a) -> Value -> Parser a
 parseTaggedJson td p = withArray "Tagged" (handleTagged . Vec.toList)
@@ -84,37 +92,7 @@ instance FromJSON TypeName where
 instance ToJSON TypeName where
     toJSON (TypeName ns seg) = object ["ns" .= ns, "seg" .= seg]
 
--- FIXME: Should there be some template haskell or something for this and the
--- function below
-withWireConcreteTypeProxy
-  :: (forall a. (Wireable a, ToJSON a, FromJSON a) => Proxy a -> r)
-  -> WireConcreteType -> r
-withWireConcreteTypeProxy f t = case t of
-  WcTime -> f (Proxy @Time)
-  WcWord8 -> f (Proxy @Word8)
-  WcWord32 -> f (Proxy @Word32)
-  WcWord64 -> f (Proxy @Word64)
-  WcInt32 -> f (Proxy @Int32)
-  WcInt64 -> f (Proxy @Int64)
-  WcFloat -> f (Proxy @Float)
-  WcDouble -> f (Proxy @Double)
-  WcString -> f (Proxy @Text)
-
-withWireTypeProxy
-  :: forall r. (forall a. (Wireable a, ToJSON a, FromJSON a) => Proxy a -> r)
-  -> WireType -> r
-withWireTypeProxy f wt = case wt of
-    WtConc concT -> withWireConcreteTypeProxy f concT
-    _ -> let (concT, contTs) = unpackWireType wt in
-      withWireConcreteTypeProxy (applyUnpacked contTs) concT
-  where
-    applyUnpacked
-      :: forall a. (Wireable a, ToJSON a, FromJSON a)
-      => [WireContainerType] -> Proxy a -> r
-    applyUnpacked [] p = f p
-    applyUnpacked (ct:cts) _ = case ct of
-      WcList -> applyUnpacked cts (Proxy :: Proxy [a])
-      WcMaybe -> applyUnpacked cts (Proxy :: Proxy (Maybe a))
+mkWithWtProxy "withJsonWtProxy" [''Wireable, ''ToJSON, ''FromJSON]
 
 instance FromJSON WireType where
     parseJSON v = parseJSON v >>= wtFromString
@@ -132,7 +110,7 @@ instance FromJSON WireValue where
     parseJSON = withObject "WireValue" $ \o -> do
         t <- o .: "type"
         v <- o .: "val"
-        withWireTypeProxy go t v
+        withJsonWtProxy t go v
       where
         go :: forall a. (Wireable a, FromJSON a) => Proxy a -> Value -> Parser WireValue
         go _ = fmap WireValue . parseJSON @a
@@ -144,7 +122,7 @@ instance ToJSON WireValue where
         wt = wireValueWireType wv
         wvj :: forall a. (Wireable a, ToJSON a) => Proxy a -> Value
         wvj _ = fromJust $ toJSON @a <|$|> wv
-        wtjv = withWireTypeProxy wvj wt
+        wtjv = withJsonWtProxy wt wvj
       in object ["type" .= toJSON wt, "val" .= wtjv]
 
 instance FromJSON SubMessage where
@@ -170,8 +148,8 @@ buildTaggedJson td b i = toJSON [toJSON $ tdInstanceToTag td i, b i]
 
 instance FromJSON Interpolation where
     parseJSON = parseTaggedJson interpolationTaggedData $ \e v -> case e of
-        ILConstant -> return IConstant
-        ILLinear -> return ILinear
+        ItConstant -> return IConstant
+        ItLinear -> return ILinear
 
 instance ToJSON Interpolation where
     toJSON = buildTaggedJson interpolationTaggedData $ const $ toJSON (Nothing :: Maybe Int)
