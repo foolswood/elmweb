@@ -262,7 +262,7 @@ editTimePoint def {recents, base, fs, mp} =
             NatpAbsent -> (True, Nothing, Nothing)
         Nothing -> (False, Nothing, Nothing)
     ads = List.map Tuple.second <| .types def
-    (valPartials, valSub) = TupleViews.pInfo ads valueBase valueRecents valueFs valueMp
+    (valPartials, valLatest, valSub) = TupleViews.pInfo ads valueBase valueRecents valueFs valueMp
     valView = TupleViews.viewWithRecentNoSubmission True ads valueRecents valueBase valPartials
     iLim = .interpLim def
     ptUpstream = mCurrentMeta pointBase pointRecents
