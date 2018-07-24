@@ -1,4 +1,4 @@
-module PathManipulation exposing (splitBasename, appendSeg, canonicalise)
+module PathManipulation exposing (splitBasename, appendSeg, canonicalise, asPath)
 
 import Regex exposing (Regex)
 
@@ -24,3 +24,6 @@ canonicalise : Path -> Path
 canonicalise p = if String.endsWith "/" p
   then String.dropRight 1 p
   else p
+
+asPath : List Seg -> Path
+asPath segs = "/" ++ String.join "/" segs

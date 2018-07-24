@@ -1,36 +1,63 @@
-module TupleViews exposing (viewWithRecent)
+module TupleViews exposing (viewWithRecent, viewWithRecentNoSubmission, timeViewer, timeEditor, pInfo)
 
 import Html exposing (..)
 import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
-import Regex exposing (Regex)
 
-import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip)
-import ClTypes exposing (Bounds, Attributee, TypeName, WireValue(..), asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
-import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime)
+import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood, lastJust, last)
+import ClTypes exposing (Bounds, Attributee, TypeName, WireValue, asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
+import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial, fullPartial)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
-import Digests exposing (DataChange(ConstChange))
+import Digests exposing (ConstChangeT)
 import Limits exposing (maxWord64, maxWord32)
 
-type EditTarget k v f a
-  = Editable k (Maybe v) (FormState f) (Maybe a)
+type EditTarget k v p
+  = Editable k p
   | ReadOnly v
 
 viewWithRecent
-   : Bool -> TupleDefinition -> List DataChange
+   : Bool -> TupleDefinition -> List ConstChangeT
   -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
   -> Html (EditEvent NeConstT NaConstT)
 viewWithRecent editable def recent mn fs mp =
   let
-    -- FIXME: Not otherwise dealing with stuff like this here, sort above?
-    mCd dc = case dc of
-        ConstChange ma _ wvs -> Just (ma, wvs)
-        _ -> Nothing
-    recentAttrVals = List.filterMap mCd recent
-    attrVals = case mn of
-        Nothing -> recentAttrVals
-        Just n -> .values n :: recentAttrVals
+    ads = List.map Tuple.second <| .types def
+    (latestPartial, mLatest, mSub) = pInfo ads mn recent fs mp
+    v = viewWithRecentNoSubmission editable ads recent mn latestPartial
+    vUp = Html.map EeUpdate v
+  in case mSub of
+    Just sub -> if Just sub == mLatest
+        then vUp
+        else div [] [vUp, button [onClick <| EeSubmit sub] [text "Apply"]]
+    Nothing -> vUp
+
+pInfo
+   : List AtomDef -> Maybe ConstDataNodeT -> List ConstChangeT
+   -> FormState NeConstT -> Maybe NaConstT
+   -> (NeConstT, Maybe NaConstT, Maybe NaConstT)
+pInfo ads mn recent fs mp =
+  let
+    attrVals = upstreamStates mn recent
+    mRemote = Maybe.map Tuple.second <| last attrVals
+    partial = getPartials ads mRemote fs mp
+  in (partial, lastJust mRemote mp, asSubmittable ads partial)
+
+upstreamStates : Maybe ConstDataNodeT -> List ConstChangeT -> List (Maybe Attributee, List WireValue)
+upstreamStates mn recent =
+  let
+    recentAttrVals = List.map (\(ma, _, wvs) -> (ma, wvs)) recent
+  in case mn of
+    Nothing -> recentAttrVals
+    Just n -> .values n :: recentAttrVals
+
+viewWithRecentNoSubmission
+   : Bool -> List AtomDef -> List ConstChangeT
+  -> Maybe ConstDataNodeT -> NeConstT
+  -> Html NeConstT
+viewWithRecentNoSubmission editable ads recent mn latestPartial =
+  let
+    attrVals = upstreamStates mn recent
     finalVal = List.length attrVals - 1
     sourceInfo idx ma = text <| toString (idx - finalVal) ++ Maybe.withDefault "" ma
     latestControls = if editable
@@ -43,30 +70,30 @@ viewWithRecent editable def recent mn fs mp =
           then latestControls
           else sourceInfo idx ma
         et = if isLatest && editable
-          then Editable () (Just wvs) fs mp
+          then Editable () latestPartial
           else ReadOnly wvs
       in (si, et)
     valComps = List.indexedMap asComp attrVals
     comps = case (editable, valComps) of
-        (True, []) -> [(latestControls, Editable () Nothing fs mp)]
+        (True, []) -> [(latestControls, Editable () latestPartial)]
         _ -> valComps
     cleanResult r = case r of
         Left a -> never a
         Right (_, evt) -> evt
-  in Html.map cleanResult <| constDataComp def comps
+    compV = constDataComp ads comps
+  in Html.map cleanResult compV
 
 constDataComp
-   : TupleDefinition
-  -> List (Html a, EditTarget k (List WireValue) NeConstT NaConstT)
-  -> Html (Either a (k, EditEvent NeConstT NaConstT))
-constDataComp def values =
+   : List AtomDef
+  -> List (Html a, EditTarget k (List WireValue) NeConstT)
+  -> Html (Either a (k, NeConstT))
+constDataComp ads values =
   let
-    ads = List.map Tuple.second <| .types def
     viewRow (sourceInfo, et) =
       let
         tupV = case et of
             ReadOnly wvs -> viewConstTuple ads wvs
-            Editable k mwvs fs mp -> Html.map (\e -> (k, e)) <| viewConstTupleEdit ads mwvs fs mp
+            Editable k p -> Html.map ((,) k) <| viewConstTupleEdit ads p
       in [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]]
     cells = List.concatMap viewRow values
   in div [style [("display", "grid"), ("grid-template-columns", "auto auto")]] cells
@@ -107,71 +134,26 @@ enumViewer opts idx = text <| case itemAtIndex idx opts of
 timeViewer : Bounds Time -> Time -> Html a
 timeViewer _ (s, f) = text <| toString s ++ ":" ++ toString f
 
-viewConstNodeEdit
-   : TupleDefinition -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
-  -> Html (EditEvent NeConstT NaConstT)
-viewConstNodeEdit d mn s mp = viewConstTupleEdit (List.map Tuple.second <| .types d) (Maybe.map (Tuple.second << .values) mn) s mp
+-- FIXME: What if the defs change during editing?
+getPartials
+  : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT
+  -> Maybe (List WireValue) -> List PartialEdit
+getPartials defs mv s mp = case s of
+    FsViewing -> case lastJust mv mp of
+        Nothing -> emptyPartial defs
+        Just v -> fullPartial defs v
+    FsEditing pvs -> pvs
 
-allGood : (a -> Maybe b) -> List a -> Maybe (List b)
-allGood f l = case l of
-    [] -> Just []
-    (x :: xs) -> Maybe.andThen (\y -> Maybe.map (\ys -> y :: ys) <| allGood f xs) <| f x
+asSubmittable : List AtomDef -> List PartialEdit -> Maybe (List WireValue)
+asSubmittable defs pvs = allGood asFull (zip pvs defs)
 
-viewConstTupleEdit
-   : List AtomDef -> Maybe (List WireValue) -> FormState NeConstT -> Maybe (List WireValue)
-   -> Html (EditEvent NeConstT NaConstT)
-viewConstTupleEdit defs mv s mp =
+viewConstTupleEdit : List AtomDef -> NeConstT -> Html NeConstT
+viewConstTupleEdit defs mainPvs =
   let
-    nDefs = List.length defs
-    indexUpdate pvs idx pv = EeUpdate <| Result.withDefault pvs <| replaceIdx idx pv pvs
+    indexUpdate pvs idx pv = Result.withDefault pvs <| replaceIdx idx pv pvs
     vae pvs i d s = Html.map (indexUpdate pvs i) <| viewAtomEdit d s
-    -- FIXME: What if the defs change during editing?
-    aevs pvs aess = List.map3 (vae pvs) (List.range 0 nDefs) defs aess
-    tupView vs =
-      let
-        pvs = List.map2 asPartial defs <| List.map Just vs
-      in aevs pvs <| List.map2 AsViewing vs pvs
-    tupEdit pvs =
-      let
-        atomEditStates = List.map AsEditing pvs
-        thing = aevs pvs atomEditStates
-        currentRemote = case mp of
-            Just p -> Just p
-            Nothing -> mv
-        content = case allGood asFull (zip pvs defs) of
-            Just fullVals -> if Just fullVals == currentRemote
-                then thing
-                else button [onClick <| EeSubmit fullVals] [text "Apply"] :: thing
-            Nothing -> thing
-      in content
-  in span [] <| case s of
-    FsViewing -> case mv of
-        Nothing -> tupEdit <| emptyPartial defs
-        Just v -> tupView v
-    FsEditing pvs -> tupEdit pvs
-
-asFull : (PartialEdit, AtomDef) -> Maybe WireValue
-asFull ped = case ped of
-    (PeEnum mi, ADEnum _) -> Maybe.map WvWord8 mi
-    (PeTime pt, ADTime _) -> case pt of
-        (Just s, Just f) -> Just <| WvTime (s, f)
-        _ -> Nothing
-    (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
-        [] -> Nothing
-        _ -> Just <| WvString s
-    _ -> Nothing
-
-asPartial : AtomDef -> Maybe WireValue -> PartialEdit
-asPartial d mwv = case (d, mwv) of
-    (ADEnum _, Just (WvWord8 w)) -> PeEnum <| Just w
-    (ADEnum _, _) -> PeEnum Nothing
-    (ADTime _, Just (WvTime (s, f))) -> PeTime (Just s, Just f)
-    (ADTime _, _) -> PeTime (Nothing, Nothing)
-    -- FIXME: This is utter tat!
-    _ -> PeEnum Nothing
-
-emptyPartial : List AtomDef -> List PartialEdit
-emptyPartial = List.map (flip asPartial Nothing)
+    aevs pvs aess = List.map3 (vae pvs) (List.range 0 <| List.length defs) defs aess
+  in span [] <| aevs mainPvs <| List.map AsEditing mainPvs
 
 viewAtomEdit : AtomDef -> AtomState WireValue PartialEdit -> Html PartialEdit
 viewAtomEdit d =

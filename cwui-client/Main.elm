@@ -22,8 +22,15 @@ import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, vi
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState)
 import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs)
-import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActions(..), NaChildrenT, NeConstT, constNeConv, childrenNeConv, constNaConv, childrenNaConv)
+import EditTypes exposing
+  ( NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActions(..), NaChildrenT
+  , NeConstT, constNeConv, seriesNeConv, childrenNeConv, constNaConv
+  , seriesNaConv, childrenNaConv)
 import SequenceOps exposing (SeqOp(..), applySeqOps, banish)
+import TransportTracker exposing (transportSubs, transport, transportCueDum)
+import TransportClockView exposing (transportClockView)
+import TimeSeriesView exposing (TsModel, tsModelEmpty, TsMsg, viewTimeSeries, TsExternalMsg(..), processTimeSeriesEvent)
+import TimeSeries
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -47,9 +54,13 @@ type alias Model =
   , viewMode : UiMode
   , bundleCount : Int
   , keepRecent : Float
+  , timeNow : Float
   -- Layout:
-  , layout : Layout Path
+  , layout : Layout Path Special
   , layoutFs : FormStore LayoutPath Path
+  -- Special:
+  , clockFs : Dict Seg (FormState EditTypes.PartialTime)
+  , timelines : Dict Seg TsModel
   -- Data:
   , recent : List (Digest, RemoteState)
   , pathSubs : Set Path
@@ -58,6 +69,22 @@ type alias Model =
   , nodeFs : NodeFs
   , pending : Pending
   }
+
+type Special
+  = SpClock Seg
+  | SpTimeline Seg
+
+type SpecialEvent
+  = SpeClock Seg (EditEvent EditTypes.PartialTime Time)
+  | SpeTimeline Seg TsMsg
+
+specialRequire : RemoteState -> Special -> Set Path
+specialRequire rs sp = case sp of
+    SpClock seg -> transportSubs seg rs
+    SpTimeline seg -> transportSubs seg rs
+
+getTsModel : Seg -> Model -> TsModel
+getTsModel ns = Maybe.withDefault tsModelEmpty << Dict.get ns << .timelines
 
 qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
@@ -77,10 +104,10 @@ requiredChildren rs fs p = case remoteChildSegs rs p of
             Nothing -> defaultChildChoice <| Just segs
       in qualifySegs p chosen
 
-requiredPaths : RemoteState -> NodeFs -> Layout Path -> Set Path
+requiredPaths : RemoteState -> NodeFs -> Layout Path Special -> Set Path
 requiredPaths rs fs = layoutRequires
     (\pa pb -> PathManipulation.canonicalise <| pa ++ pb) (dynamicLayout rs)
-    (requiredChildren rs fs)
+    (requiredChildren rs fs) (specialRequire rs)
 
 requiredArrayTypes : RemoteState -> Set TypeName
 requiredArrayTypes rs =
@@ -96,7 +123,14 @@ init : (Model, Cmd Msg)
 init =
   let
     initialNodeFs = formStoreEmpty
-    initialLayout = LayoutContainer <| Array.fromList [LayoutLeaf "/relay/self", LayoutLeaf "/relay/clients", LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"]
+    initialLayout = LayoutContainer <| Array.fromList
+      [ LayoutSpecial <| SpClock "engine"
+      , LayoutSpecial <| SpTimeline "engine"
+      , LayoutLeaf "/engine/transport/state"
+      , LayoutLeaf "/relay/self"
+      , LayoutLeaf "/relay/clients"
+      , LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"
+      ]
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialNodeFs initialLayout
     initialModel =
@@ -104,8 +138,11 @@ init =
       , viewMode = UmEdit
       , bundleCount = 0
       , keepRecent = 5000.0
+      , timeNow = 0.0
       , layout = initialLayout
       , layoutFs = formStoreEmpty
+      , clockFs = Dict.empty
+      , timelines = Dict.empty
       , recent = []
       , pathSubs = initialSubs
       , typeSubs = Set.empty
@@ -118,7 +155,7 @@ init =
 -- Update
 
 sendBundle : ToRelayClientBundle -> Cmd Msg
-sendBundle b = timeStamped (WebSocket.send wsTarget << serialiseBundle b)
+sendBundle b = WebSocket.send wsTarget <| serialiseBundle b <| fromFloat <| MonoTime.rightNow ()
 
 subDiffOps : (comparable -> SubMsg) -> (comparable -> SubMsg) -> Set comparable -> Set comparable -> List SubMsg
 subDiffOps sub unsub old new =
@@ -141,12 +178,10 @@ type Msg
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | SquashRecent
-  | TimeStamped (Time -> Cmd Msg) Time.Time
-  | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path))
+  | SecondPassedTick
+  | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path Special))
+  | SpecialUiEvent SpecialEvent
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
-
-timeStamped : (Time -> Cmd Msg) -> Cmd Msg
-timeStamped c = Task.perform (TimeStamped c) MonoTime.now
 
 addGlobalError : String -> Model -> (Model, Cmd Msg)
 addGlobalError msg m = ({m | errs = (GlobalError, msg) :: .errs m}, Cmd.none)
@@ -171,6 +206,12 @@ clearPending {dops, cops} =
         NaConst wvs -> Maybe.map NaConst <| case Dict.get path dops of
             Nothing -> Just wvs
             Just _ -> Nothing
+        NaSeries pendingSeries -> case Dict.get path dops of
+            Nothing -> Just <| NaSeries pendingSeries
+            Just changes -> case changes of
+                TimeChange changedPoints -> Maybe.map NaSeries <| TimeSeries.nonEmpty <|
+                    List.foldl TimeSeries.remove pendingSeries <| Dict.keys changedPoints
+                _ -> Nothing
   in dictMapMaybe clearPath
 
 rectifyCop : (Path -> List Seg) -> Path -> Dict Seg (SeqOp Seg) -> NodeFs -> NodeFs
@@ -216,7 +257,7 @@ update msg model = case msg of
         case .recent model of
             ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
             [] -> addGlobalError "Tried to squash but no recent" model
-    TimeStamped c t -> (model, c (fromFloat t))
+    SecondPassedTick -> ({model | timeNow = MonoTime.rightNow ()} , Cmd.none)
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
@@ -228,6 +269,16 @@ update msg model = case msg of
           in
             ( {model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
+    SpecialUiEvent se -> case se of
+        SpeClock seg evt -> case evt of
+            EeUpdate tp -> ({model | clockFs = Dict.insert seg (FsEditing tp) <| .clockFs model}, Cmd.none)
+            EeSubmit t ->
+              (model, sendBundle <| ToRelayClientBundle [] [transportCueDum seg t] [])
+        SpeTimeline ns evt -> case processTimeSeriesEvent evt <| getTsModel ns model of
+            TsemUpdate tsm -> ({model | timelines = Dict.insert ns tsm <| .timelines model}, Cmd.none)
+            TsemSeek t -> (model, sendBundle <| ToRelayClientBundle [] [transportCueDum ns t] [])
+            -- FIXME: time point changes go nowhere:
+            TsemPointChange _ _ _ -> (model, Cmd.none)
     NodeUiEvent (p, ue) -> case ue of
         EeUpdate v ->
           let
@@ -257,6 +308,7 @@ update msg model = case msg of
                           }
                       in (newM, sendBundle b)
                     _ -> addGlobalError "Def type mismatch" model
+            NaSeries sops -> addGlobalError "Series submit not implemented" model
             NaChildren cops -> case tyDef p <| latestState model of
                 Err msg -> addGlobalError ("Error submitting: " ++ msg) model
                 Ok (def, _) -> case def of
@@ -289,7 +341,10 @@ produceCms p =
 -- Subscriptions
 
 subscriptions : Model -> Sub Msg
-subscriptions model = WebSocket.listen wsTarget eventFromNetwork
+subscriptions model = Sub.batch
+  [ WebSocket.listen wsTarget eventFromNetwork
+  , Time.every Time.second <| always SecondPassedTick
+  ]
 
 eventFromNetwork : String -> Msg
 eventFromNetwork s = case parseBundle s of
@@ -298,7 +353,7 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
-dynamicLayout : RemoteState -> Path -> Layout Path
+dynamicLayout : RemoteState -> Path -> Layout Path a
 dynamicLayout rs p = case Dict.get p <| .nodes rs of
     Nothing -> LayoutLeaf p
     Just n -> case n of
@@ -312,12 +367,13 @@ view m = div []
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
   , div [] [text <| toString <| .nodeFs m]
   , case .viewMode m of
-    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView (.layoutFs m) (.layout m)
-    UmView -> Html.map NodeUiEvent <| viewLayout
+    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView specialEditView (.layoutFs m) (.layout m)
+    UmView -> viewLayout
         (++)
         (dynamicLayout <| .state m)
         (visibleChildren (.state m) (.nodeFs m))
-        (viewPath (.nodeFs m) (.state m) (.recent m) (.pending m))
+        (Html.map NodeUiEvent << viewPath (.nodeFs m) (.state m) (.recent m) (.pending m))
+        (Html.map SpecialUiEvent << viewSpecial m)
         (.layout m)
   ]
 
@@ -338,6 +394,19 @@ pathEditView mp fs = case fs of
         [ button [onClick <| EeSubmit partial] [text buttonText]
         , input [value partial, type_ "text", onInput EeUpdate] []
         ]
+
+specialEditView : Special -> Html Special
+specialEditView sp = text <| toString sp
+
+viewSpecial : Model -> Special -> Html SpecialEvent
+viewSpecial m sp = case sp of
+    SpClock seg ->
+      let
+        transp = transport seg (latestState m) (.timeNow m)
+      in Html.map (SpeClock seg) <| transportClockView transp <| formState seg <| .clockFs m
+    SpTimeline seg -> case transport seg (latestState m) (.timeNow m) of
+        Err e -> Html.text <| toString e
+        Ok transp -> Html.map (SpeTimeline seg) <| viewTimeSeries (getTsModel seg m) transp
 
 viewLoading : Html a
 viewLoading = text "Loading..."
@@ -391,17 +460,24 @@ viewNode
    -> Html (EditEvent NodeEdit NodeActions)
 viewNode lib def maybeNode recentCops recentDums formState maybeNas =
   let
-    rcns neConv naConv cn h = viewCasted
-        (\(n, s, a) -> Result.map3 (,,) (castMaybe cn n) (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
-        (\(mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h mn fs mp)
-        (maybeNode, formState, maybeNas)
+    withCasts recentCast neConv naConv cn recents h = viewCasted
+        (\(r, n, s, a) -> Result.map4 (,,,)
+            (castList recentCast r) (castMaybe cn n)
+            (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
+        (\(r, mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h r mn fs mp)
+        (recents, maybeNode, formState, maybeNas)
     editable = lib /= Cannot
   in case def of
     TupleDef d -> case .interpLim d of
-        ILUninterpolated -> rcns constNeConv constNaConv (.unwrap constNodeConv) <| viewWithRecent editable d recentDums
-        _ -> text "Time series edit not implemented"
+        ILUninterpolated -> withCasts
+            constChangeCast constNeConv constNaConv (.unwrap constNodeConv)
+            recentDums (viewWithRecent editable d)
+        _ -> withCasts seriesChangeCast seriesNeConv seriesNaConv (.unwrap seriesNodeConv)
+            recentDums (\rs mn fs mp -> Html.text <| toString (rs, mn, fs, mp))
     StructDef d -> viewStruct d
-    ArrayDef d -> rcns childrenNeConv childrenNaConv (.unwrap childrenNodeConv) <| viewArray editable d recentCops
+    ArrayDef d -> withCasts
+        Ok childrenNeConv childrenNaConv (.unwrap childrenNodeConv) recentCops
+        (viewArray editable d)
 
 viewStruct : StructDefinition -> Html a
 viewStruct structDef =
