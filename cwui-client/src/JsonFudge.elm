@@ -29,11 +29,13 @@ encodeTypeName (ns, seg) = JE.object
   , ("seg", encodeSeg seg)]
 
 encodeSubMsg : SubMsg -> JE.Value
-encodeSubMsg sm = JE.list (case sm of
+encodeSubMsg sm = JE.list <| case sm of
     MsgSub p -> [JE.string "s", encodePath p]
     MsgTypeSub tn -> [JE.string "S", encodeTypeName tn]
+    MsgPostTypeSub tn -> [JE.string "pS", encodeTypeName tn]
     MsgUnsub p -> [JE.string "u", encodePath p]
-    MsgTypeUnsub tn -> [JE.string "U", encodeTypeName tn])
+    MsgTypeUnsub tn -> [JE.string "U", encodeTypeName tn]
+    MsgPostTypeUnsub tn -> [JE.string "pU", encodeTypeName tn]
 
 encodeTime : Time -> JE.Value
 encodeTime (s, f) = JE.list [JE.int s, JE.int f]

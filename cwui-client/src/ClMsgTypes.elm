@@ -4,8 +4,10 @@ import ClTypes exposing (Path, Seg, TypeName, Attributee, TpId, Time, Interpolat
 type SubMsg
   = MsgSub Path
   | MsgTypeSub TypeName
+  | MsgPostTypeSub TypeName
   | MsgUnsub Path
   | MsgTypeUnsub TypeName
+  | MsgPostTypeUnsub TypeName
 
 -- Note: unlike the haskell one this is always TypeName
 type ErrorIndex
