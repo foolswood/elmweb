@@ -1,9 +1,12 @@
 {-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
 
 import Prelude hiding (fail)
+
+import Data.Bifunctor (first)
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Int
+import Data.Tagged (Tagged(..))
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Chan.Unagi as Q
 import Control.Monad (forever, void, foldM)
@@ -15,9 +18,9 @@ import Network.Socket.ByteString (send, recv)
 
 import Clapi.TH (segq, pathq)
 import Clapi.Types
-  ( Path, Seg, isChildOf
+  ( Path, Seg, Namespace(..), Placeholder(..), isChildOf
   , TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Liberty(..), TimeStamped(..)
-  , FrDigest(..), TrDigest(..), TrpDigest(..), FrpDigest(..)
+  , FrDigest(..), TrDigest(..), TrpDigest(..), trpdEmpty, FrpDigest(..)
   , Definition, structDef, arrayDef, tupleDef
   , unbounded, TreeType(..)
   , alFromList, alToMap
@@ -32,27 +35,36 @@ import Clapi.Serialisation.Messages ()
 ns :: Seg
 ns = [segq|example|]
 
-initialDefs :: Map Seg Definition
-initialDefs = Map.fromList
-  [ ([segq|delay|], tupleDef "How long to delay responses" (alFromList [([segq|t|], TtTime)]) ILUninterpolated)
-  , ([segq|tsi|], tupleDef "Timeseries of ints" (alFromList [([segq|i|], TtInt32 unbounded)]) ILLinear)
-  , ([segq|arr|], arrayDef "Editable array of times" (TypeName ns [segq|delay|]) Must)
-  , (ns, structDef "Example API for client testing" $ alFromList
-      [ ([segq|delay|], (TypeName ns [segq|delay|], May))
-      , ([segq|tsi|], (TypeName ns [segq|tsi|], May))
-      , ([segq|arr|], (TypeName ns [segq|arr|], Must))
+ttn :: Seg -> Tagged a TypeName
+ttn = Tagged . TypeName (Namespace ns)
+
+initialDefs :: Map (Tagged Definition Seg) Definition
+initialDefs = Map.fromList $ fmap (first Tagged) $
+  [ ( [segq|delay|]
+    , tupleDef "How long to delay responses" (alFromList [([segq|t|], TtTime)]) ILUninterpolated)
+  , ( [segq|tsi|]
+    , tupleDef "Timeseries of ints" (alFromList [([segq|i|], TtInt32 unbounded)]) ILLinear)
+  , ( [segq|arr|]
+    , arrayDef "Editable array of times" Nothing (ttn [segq|delay|]) Must)
+  , ( ns
+    , structDef "Example API for client testing" $ alFromList
+      [ ([segq|delay|], (ttn [segq|delay|], May))
+      , ([segq|tsi|], (ttn [segq|tsi|], May))
+      , ([segq|arr|], (ttn [segq|arr|], Must))
       ]
     )
   ]
 
 initDigest :: DummyApiState -> TrpDigest
-initDigest das = TrpDigest ns (OpDefine <$> initialDefs) initDd initCops mempty
-  where
-    initDd = alFromList
-      [ ([pathq|/delay|], ConstChange Nothing [WireValue $ dasDelay das])
-      , ([pathq|/tsi|], TimeChange $ Map.singleton 24 (Nothing, OpSet (Time 1 0) [WireValue (64 :: Int32)] ILinear))
-      ]
-    initCops = mempty
+initDigest das = (trpdEmpty $ Namespace ns)
+  { trpdDefinitions = OpDefine <$> initialDefs
+  , trpdData = alFromList
+    [ ([pathq|/delay|], ConstChange Nothing [WireValue $ dasDelay das])
+    , ( [pathq|/tsi|]
+      , TimeChange $ Map.singleton 24
+        (Nothing, OpSet (Time 1 0) [WireValue (64 :: Int32)] ILinear))
+    ]
+  }
 
 data Delayed a = Delayed Time a
 
@@ -73,9 +85,13 @@ apiProto das = sendRev (initDigest das) >> steadyState das
   where
     steadyState das = waitThen fwd rev
     handlerFor acc (p, v) = getHandler p v acc
-    fwd (FrpDigest tgtNs dd cops) = do
+    fwd (FrpDigest tgtNs dd _creates cops) =
+      let
+        cops' = (fmap . fmap . fmap . fmap) (either unPlaceholder id) cops
+      in do
         das' <- foldM (\acc pv -> lift $ handlerFor acc pv) das $ Map.toList $ alToMap dd
-        sendFwd $ Delayed (dasDelay das') $ TrpDigest tgtNs mempty dd cops mempty
+        sendFwd $ Delayed (dasDelay das') $
+          (trpdEmpty tgtNs) {trpdData = dd, trpdContOps = cops'}
         steadyState das'
     rev trpd = do
         sendRev trpd
@@ -88,6 +104,7 @@ fwdProviderProto = waitThen fwd rev
         Frpd pd -> do
             sendFwd pd
             fwdProviderProto
+        Frcrd _ -> fwdProviderProto
         _ -> return ()
     rev d = do
         sendRev $ Trpd d
