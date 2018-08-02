@@ -238,9 +238,10 @@ defTagDecoders = Dict.fromList
       (\d cds -> StructDef {doc = d, childDescs = cds})
       decodeDocField
       (JD.field "stls" (JD.list decodeChildDesc)))
-  , ("A", JD.map3
-      (\d ctn ctl -> ArrayDef {doc = d, childType = ctn, childEditable = ctl})
+  , ("A", JD.map4
+      (\d ptn ctn ctl -> ArrayDef {doc = d, postType = ptn, childType = ctn, childEditable = ctl})
       decodeDocField
+      (JD.field "ptn" <| JD.nullable decodeTypeName)
       (JD.field "ctn" decodeTypeName)
       (JD.field "ced" decodeEditable))
   ]
