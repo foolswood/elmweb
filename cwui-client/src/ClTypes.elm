@@ -18,10 +18,9 @@ fromFloat ft = let s = floor ft in (s, round ((ft - toFloat s) * 2 ^ 32))
 fromTime : Time -> Float
 fromTime (s, f) = toFloat s + (toFloat f / 2.0 ^ 32)
 
-type Liberty
-  = Cannot
-  | May
-  | Must
+type Editable
+  = ReadOnly
+  | Editable
 
 type InterpolationLimit
   = ILUninterpolated
@@ -56,9 +55,9 @@ type alias TupleDefinition =
   , types : List (Seg, AtomDef)
   , interpLim : InterpolationLimit}
 
-type alias ChildDescription = {name : Seg, typeRef : TypeName, lib : Liberty}
+type alias ChildDescription = {name : Seg, typeRef : TypeName, ed : Editable}
 type alias StructDefinition = {doc : String, childDescs : List ChildDescription}
-type alias ArrayDefinition = {doc : String, childType : TypeName, childLiberty : Liberty}
+type alias ArrayDefinition = {doc : String, childType : TypeName, childEditable : Editable}
 
 type Definition
   = TupleDef TupleDefinition

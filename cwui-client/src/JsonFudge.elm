@@ -5,7 +5,7 @@ import Dict
 
 import ClTypes exposing
   ( Path, Time, Interpolation(..), TpId, Seg, Attributee
-  , TypeName, Liberty(..), Definition(..), PostDefinition, AtomDef
+  , TypeName, Editable(..), Definition(..), PostDefinition, AtomDef
   , InterpolationLimit(..) , ChildDescription, WireValue(..), WireType(..))
 import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
@@ -221,10 +221,10 @@ decodeInterpolationLimit =
   in decodeTagged iltd
 
 decodeChildDesc : JD.Decoder ChildDescription
-decodeChildDesc = JD.map3 (\n t l -> {name = n, typeRef = t, lib = l})
+decodeChildDesc = JD.map3 (\n t e -> {name = n, typeRef = t, ed = e})
     (JD.field "seg" decodeSeg)
     (JD.field "tn" decodeTypeName)
-    (JD.field "lib" decodeLiberty)
+    (JD.field "ed" decodeEditable)
 
 defTagDecoders : Dict.Dict String (JD.Decoder Definition)
 defTagDecoders = Dict.fromList
@@ -239,10 +239,10 @@ defTagDecoders = Dict.fromList
       decodeDocField
       (JD.field "stls" (JD.list decodeChildDesc)))
   , ("A", JD.map3
-      (\d ctn ctl -> ArrayDef {doc = d, childType = ctn, childLiberty = ctl})
+      (\d ctn ctl -> ArrayDef {doc = d, childType = ctn, childEditable = ctl})
       decodeDocField
       (JD.field "ctn" decodeTypeName)
-      (JD.field "clib" decodeLiberty))
+      (JD.field "ced" decodeEditable))
   ]
 
 decodeDef : JD.Decoder Definition
@@ -261,15 +261,14 @@ decodeDefMsg defDec = decodeTagged (Dict.fromList
   , ("u", JD.map MsgUndefine decodeSeg)
   ])
 
-decodeLiberty : JD.Decoder Liberty
-decodeLiberty =
+decodeEditable : JD.Decoder Editable
+decodeEditable =
   let
-    libFromString s = case s of
-        "cannot" -> JD.succeed Cannot
-        "may" -> JD.succeed May
-        "must" -> JD.succeed Must
-        _ -> JD.fail ("Unrecognised liberty string: " ++ s)
-  in JD.andThen libFromString JD.string
+    edFromString s = case s of
+        "ro" -> JD.succeed ReadOnly
+        "rw" -> JD.succeed Editable
+        _ -> JD.fail ("Unrecognised editable string: " ++ s)
+  in JD.andThen edFromString JD.string
 
 decodeWv : JD.Decoder (WireType, WireValue)
 decodeWv =
@@ -334,7 +333,7 @@ decodeTypeMsg : JD.Decoder TypeMsg
 decodeTypeMsg = JD.map3 MsgAssignType
     decodePathField
     (JD.field "typeName" decodeTypeName)
-    (JD.field "lib" decodeLiberty)
+    (JD.field "ed" decodeEditable)
 
 decodeDum : JD.Decoder DataUpdateMsg
 decodeDum =
