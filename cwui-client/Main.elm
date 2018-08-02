@@ -115,8 +115,8 @@ requiredArrayTypes : RemoteState -> Set TypeName
 requiredArrayTypes rs =
   let
     eatn _ d = case d of
-        ArrayDef {childType, childLiberty} -> case childLiberty of
-            Must -> Just childType
+        ArrayDef {childType, childEditable} -> case childEditable of
+            Editable -> Just childType
             _ -> Nothing
         _ -> Nothing
   in Set.fromList <| Dict.values <| dictMapMaybe eatn <| .types rs
@@ -416,8 +416,8 @@ viewPath nodeFs baseState recent pending p =
   let
     viewerFor s = case tyDef p s of
         Err _ -> Nothing
-        Ok (def, lib) -> Just <| \fs mPending recentCops recentDums -> viewNode
-            lib def (Dict.get p <| .nodes s) recentCops recentDums fs mPending
+        Ok (def, ed) -> Just <| \fs mPending recentCops recentDums -> viewNode
+            ed def (Dict.get p <| .nodes s) recentCops recentDums fs mPending
     bordered highlightCol h = div
         [style [("border", "0.2em solid " ++ highlightCol)]] [h]
     viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
@@ -454,11 +454,11 @@ viewCasted c h a = case c a of
     Err m -> text m
 
 viewNode
-   : Liberty -> Definition -> Maybe Node
+   : Editable -> Definition -> Maybe Node
    -> List Cops -> List DataChange
    -> FormState NodeEdit -> Maybe NodeActions
    -> Html (EditEvent NodeEdit NodeActions)
-viewNode lib def maybeNode recentCops recentDums formState maybeNas =
+viewNode ed def maybeNode recentCops recentDums formState maybeNas =
   let
     withCasts recentCast neConv naConv cn recents h = viewCasted
         (\(r, n, s, a) -> Result.map4 (,,,)
@@ -466,7 +466,7 @@ viewNode lib def maybeNode recentCops recentDums formState maybeNas =
             (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
         (\(r, mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h r mn fs mp)
         (recents, maybeNode, formState, maybeNas)
-    editable = lib /= Cannot
+    editable = ed /= ReadOnly -- FIXME: Plumb this type all the way through
   in case def of
     TupleDef d -> case .interpLim d of
         ILUninterpolated -> withCasts

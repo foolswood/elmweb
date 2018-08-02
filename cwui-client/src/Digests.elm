@@ -7,7 +7,7 @@ import Dict exposing (Dict)
 
 import ClTypes exposing
   ( TypeName, Path, Seg, Namespace, TpId, Interpolation, Time, Attributee
-  , WireValue, WireType, Definition, PostDefinition, Liberty)
+  , WireValue, WireType, Definition, PostDefinition, Editable)
 import ClMsgTypes exposing
   ( FromRelayClientBundle(..), FromRelayClientUpdateBundle(..), TypeMsg(..)
   , DefMsg(..) , ToProviderContainerUpdateMsg(..), ToClientContainerUpdateMsg(..)
@@ -154,7 +154,7 @@ applyDefOps dops tm =
   in Dict.foldl applyOp tm dops
 
 type TaOp
-  = OpAssign (TypeName, Liberty)
+  = OpAssign (TypeName, Editable)
   | OpDemote
 
 type alias TaOps = Dict Path TaOp

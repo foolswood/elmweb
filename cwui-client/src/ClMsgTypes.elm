@@ -1,5 +1,5 @@
 module ClMsgTypes exposing (..)
-import ClTypes exposing (Path, Seg, Namespace, TypeName, Attributee, TpId, Time, Interpolation, Definition, PostDefinition, Liberty, WireValue, WireType)
+import ClTypes exposing (Path, Seg, Namespace, TypeName, Attributee, TpId, Time, Interpolation, Definition, PostDefinition, Editable, WireValue, WireType)
 
 type SubMsg
   = MsgSub Path
@@ -96,7 +96,7 @@ type DefMsg a
   = MsgDefine Seg a
   | MsgUndefine Seg
 
-type TypeMsg = MsgAssignType Path TypeName Liberty
+type TypeMsg = MsgAssignType Path TypeName Editable
 
 type FromRelayClientUpdateBundle = FromRelayClientUpdateBundle
     Namespace
