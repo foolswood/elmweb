@@ -58,7 +58,7 @@ import Clapi.Types
   , ToRelayBundle(..)
   , ToRelayClientUpdateBundle(..), ToRelayClientSubBundle(..)
   , ToProviderContainerUpdateMessage(..), ToClientContainerUpdateMessage(..)
-  , TypeMessage(..), TypeName(..), Liberty(..)
+  , TypeMessage(..), TypeName(..), Editable(..)
   , WireValue(..)
   , Wireable, WireType(..), wireValueWireType, Tag, mkTag, unTag, (<|$|>)
   , DefMessage(..), Definition(..)
@@ -243,11 +243,10 @@ instance ToJSON DataErrorIndex where
         PathError p -> toJSON p
         TimePointError p tpid -> object ["path" .= p, "tpid" .= tpid]
 
-instance ToJSON Liberty where
+instance ToJSON Editable where
     toJSON l = toJSON $ case l of
-        Cannot -> ("cannot" :: String)
-        May -> "may"
-        Must -> "must"
+        Editable -> ("rw" :: String)
+        ReadOnly -> "ro"
 
 instance ToJSON DataErrorMessage where
     toJSON (MsgDataError ei m) = object ["eIdx" .= ei, "msg" .= m]
@@ -262,12 +261,12 @@ instance ToJSON SubErrorMessage where
     toJSON (MsgSubError ei m) = object ["eIdx" .= ei, "msg" .= m]
 
 instance ToJSON TypeMessage where
-    toJSON (MsgAssignType p tn l) = object ["path" .= p, "typeName" .= tn, "lib" .= l]
+    toJSON (MsgAssignType p tn l) = object ["path" .= p, "typeName" .= tn, "ed" .= l]
 
 instance ToJSON StructDefinition where
     toJSON (StructDefinition doc al) = object ["doc" .= doc, "stls" .= (asStl <$> unAssocList al)]
       where
-        asStl (s, (tn, l)) = object ["seg" .= s, "tn" .= tn, "lib" .= l]
+        asStl (s, (tn, l)) = object ["seg" .= s, "tn" .= tn, "ed" .= l]
 
 instance ToJSON InterpolationLimit where
     toJSON = buildTaggedJson ilTaggedData $ const $ toJSON (Nothing :: Maybe Text)
