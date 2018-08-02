@@ -5,8 +5,8 @@ import Dict
 
 import ClTypes exposing
   ( Path, Time, Interpolation(..), TpId, Seg, Attributee
-  , TypeName, Liberty(..), Definition(..), AtomDef, InterpolationLimit(..)
-  , ChildDescription, WireValue(..), WireType(..))
+  , TypeName, Liberty(..), Definition(..), PostDefinition, AtomDef
+  , InterpolationLimit(..) , ChildDescription, WireValue(..), WireType(..))
 import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
 
@@ -29,11 +29,13 @@ encodeTypeName (ns, seg) = JE.object
   , ("seg", encodeSeg seg)]
 
 encodeSubMsg : SubMsg -> JE.Value
-encodeSubMsg sm = JE.list (case sm of
+encodeSubMsg sm = JE.list <| case sm of
     MsgSub p -> [JE.string "s", encodePath p]
     MsgTypeSub tn -> [JE.string "S", encodeTypeName tn]
+    MsgPostTypeSub tn -> [JE.string "pS", encodeTypeName tn]
     MsgUnsub p -> [JE.string "u", encodePath p]
-    MsgTypeUnsub tn -> [JE.string "U", encodeTypeName tn])
+    MsgTypeUnsub tn -> [JE.string "U", encodeTypeName tn]
+    MsgPostTypeUnsub tn -> [JE.string "pU", encodeTypeName tn]
 
 encodeTime : Time -> JE.Value
 encodeTime (s, f) = JE.list [JE.int s, JE.int f]
@@ -108,15 +110,18 @@ dumToJsonValue dum =
         MsgSet m -> tagged 's' (encodeSet m)
         MsgRemove m -> tagged 'r' (encodeRemove m)
 
-contToJsonValue : ContainerUpdateMsg -> JE.Value
-contToJsonValue m =
-  let
-    encodeTgtField tgt = ("tgt", encodeSeg tgt)
-  in case m of
+encodeTgtField : Seg -> (String, JE.Value)
+encodeTgtField tgt = ("tgt", encodeSeg tgt)
+
+encodeRefField : Maybe Seg -> (String, JE.Value)
+encodeRefField ref = ("ref", encodeNullable encodeSeg ref)
+
+clientContToJsonValue : ToClientContainerUpdateMsg -> JE.Value
+clientContToJsonValue m = case m of
     MsgPresentAfter {msgPath, msgTgt, msgRef, msgAttributee} -> tagged '>' <| JE.object
       [ encodePathField msgPath
       , encodeTgtField msgTgt
-      , ("ref", encodeNullable encodeSeg msgRef)
+      , encodeRefField msgRef
       , encodeAttributeeField msgAttributee
       ]
     MsgAbsent {msgPath, msgTgt, msgAttributee} -> tagged '-' <| JE.object
@@ -125,26 +130,63 @@ contToJsonValue m =
       , encodeAttributeeField msgAttributee
       ]
 
-serialiseBundle : ToRelayClientBundle -> Time -> String
-serialiseBundle (ToRelayClientBundle subs dums conts) t = JE.encode 2 (JE.object
-  [ ("subs", JE.list (List.map encodeSubMsg subs))
+providerContToJsonValue : ToProviderContainerUpdateMsg -> JE.Value
+providerContToJsonValue m = case m of
+    MsgCreateAfter {msgPath, msgPostArgs, msgTgt, msgRef, msgAttributee} -> tagged '+' <| JE.object
+      [ encodePathField msgPath
+      , ("args", JE.list <| List.map (uncurry encodeWv) msgPostArgs)
+      , encodeTgtField msgTgt
+      , encodeRefField msgRef
+      , encodeAttributeeField msgAttributee
+      ]
+    MsgMoveAfter {msgPath, msgTgt, msgRef, msgAttributee} -> tagged '>' <| JE.object
+      [ encodePathField msgPath
+      , encodeTgtField msgTgt
+      , encodeRefField msgRef
+      , encodeAttributeeField msgAttributee
+      ]
+    MsgDelete {msgPath, msgTgt, msgAttributee} -> tagged '-' <| JE.object
+      [ encodePathField msgPath
+      , encodeTgtField msgTgt
+      , encodeAttributeeField msgAttributee
+      ]
+
+serialiseUpdateBundle : ToRelayUpdateBundle -> Time -> String
+serialiseUpdateBundle (ToRelayUpdateBundle ns dums conts) t = JE.encode 2 (JE.object
+  [ ("ns", JE.string ns)
   , ("data", JE.list (List.map dumToJsonValue dums))
-  , ("cont", JE.list (List.map contToJsonValue conts))
+  , ("cont", JE.list (List.map providerContToJsonValue conts))
   , ("time", encodeTime t)])
+
+serialiseSubBundle : ToRelaySubBundle -> Time -> String
+serialiseSubBundle (ToRelaySubBundle subs) t = JE.encode 2 (JE.object
+  [ ("subMsgs", JE.list (List.map encodeSubMsg subs))
+  , ("time", encodeTime t)])
+
+serialiseBundle : ToRelayClientBundle -> Time -> String
+serialiseBundle b = case b of
+    Trcub ub -> serialiseUpdateBundle ub
+    Trcsb sb -> serialiseSubBundle sb
 
 decodePath : JD.Decoder String
 decodePath = JD.string
 
-decodeErrIdx : JD.Decoder ErrorIndex
-decodeErrIdx = decodeTagged (Dict.fromList
-    [ ("g", JD.succeed GlobalError)
-    , ("p", JD.map PathError decodePath)
-    , ("t", JD.map2 TimePointError decodePath decodeTpId)
-    , ("n", JD.map TypeError decodeTypeName)
+decodeDataErrIdx : JD.Decoder DataErrorIndex
+decodeDataErrIdx = decodeTagged (Dict.fromList
+    [ ("g", JD.succeed DGlobalError)
+    , ("p", JD.map DPathError decodePath)
+    , ("t", JD.map2 DTimePointError decodePath decodeTpId)
     ])
 
-decodeErrMsg : JD.Decoder MsgError
-decodeErrMsg = JD.map2 MsgError (JD.field "eIdx" decodeErrIdx) (JD.field "msg" JD.string)
+decodeSubErrIdx : JD.Decoder SubErrorIndex
+decodeSubErrIdx = decodeTagged (Dict.fromList
+    [ ("p", JD.map SPathError decodePath)
+    , ("t", JD.map STypeError decodeTypeName)
+    , ("c", JD.map SPostTypeError decodeTypeName)
+    ])
+
+decodeErrMsg : JD.Decoder idx -> JD.Decoder (MsgError idx)
+decodeErrMsg idxDec = JD.map2 MsgError (JD.field "eIdx" idxDec) (JD.field "msg" JD.string)
 
 decodeTime : JD.Decoder Time
 decodeTime = JD.map2 (\a b -> (a, b)) (JD.index 0 JD.int) (JD.index 1 JD.int)
@@ -206,10 +248,17 @@ defTagDecoders = Dict.fromList
 decodeDef : JD.Decoder Definition
 decodeDef = decodeTagged defTagDecoders
 
-decodeDefMsg : JD.Decoder DefMsg
-decodeDefMsg = decodeTagged (Dict.fromList
-  [ ("d", JD.map2 MsgDefine (JD.field "id" decodeTypeName) (JD.field "def" decodeDef))
-  , ("u", JD.map MsgUndefine decodeTypeName)
+decodePostDef : JD.Decoder PostDefinition
+decodePostDef = JD.map2 PostDefinition
+    (JD.field "doc" JD.string)
+    (JD.field "fields" <| JD.list <| JD.map2 (,)
+        (JD.field "name" JD.string)
+        (JD.field "type" decodeTypeName))
+
+decodeDefMsg : JD.Decoder a -> JD.Decoder (DefMsg a)
+decodeDefMsg defDec = decodeTagged (Dict.fromList
+  [ ("d", JD.map2 MsgDefine (JD.field "id" decodeSeg) (JD.field "def" defDec))
+  , ("u", JD.map MsgUndefine decodeSeg)
   ])
 
 decodeLiberty : JD.Decoder Liberty
@@ -321,8 +370,8 @@ decodeDum =
         decodeAttributeeField)
     ]
 
-decodeCm : JD.Decoder ContainerUpdateMsg
-decodeCm =
+decodeCCm : JD.Decoder ToClientContainerUpdateMsg
+decodeCCm =
   let
     decodeTgtField = JD.field "tgt" decodeSeg
   in decodeTagged <| Dict.fromList
@@ -341,12 +390,29 @@ decodeCm =
           decodeAttributeeField)
     ]
 
-parseBundle : String -> Result String FromRelayClientBundle
-parseBundle = JD.decodeString (JD.map7 FromRelayClientBundle
-    (JD.field "tu" (JD.list decodeTypeName))
-    (JD.field "du" (JD.list decodePath))
-    (JD.field "errs" (JD.list decodeErrMsg))
-    (JD.field "defs" (JD.list decodeDefMsg))
+parseRootBundle : JD.Decoder FromRelayRootBundle
+parseRootBundle = JD.map FromRelayRootBundle <| JD.list decodeCCm
+
+parseSubBundle : JD.Decoder FromRelaySubErrorBundle
+parseSubBundle = JD.map4 FromRelaySubErrorBundle
+    (JD.field "errs" (JD.list <| decodeErrMsg decodeSubErrIdx))
+    (JD.field "ptuns" (JD.list decodeTypeName))
+    (JD.field "tuns" (JD.list decodeTypeName))
+    (JD.field "duns" (JD.list decodePath))
+
+parseUpdateBundle : JD.Decoder FromRelayClientUpdateBundle
+parseUpdateBundle = JD.map7 FromRelayClientUpdateBundle
+    (JD.field "ns" JD.string)
+    (JD.field "errs" (JD.list <| decodeErrMsg decodeDataErrIdx))
+    (JD.field "pdefs" (JD.list <| decodeDefMsg decodePostDef))
+    (JD.field "defs" (JD.list <| decodeDefMsg decodeDef))
     (JD.field "tas" (JD.list decodeTypeMsg))
     (JD.field "dd" (JD.list decodeDum))
-    (JD.field "co" (JD.list decodeCm)))
+    (JD.field "co" (JD.list decodeCCm))
+
+parseBundle : String -> Result String FromRelayClientBundle
+parseBundle = JD.decodeString <| decodeTagged <| Dict.fromList
+  [ ("R", JD.map Frrub parseRootBundle)
+  , ("S", JD.map Frseb parseSubBundle)
+  , ("U", JD.map Frcub parseUpdateBundle)
+  ]

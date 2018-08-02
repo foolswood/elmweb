@@ -47,9 +47,10 @@ executable example-provider
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , clapi-hs
+                     , clock
                      , containers
+                     , mtl
                      , network
                      , network-simple
+                     , tagged
                      , unagi-chan
-                     , clock
-                     , mtl

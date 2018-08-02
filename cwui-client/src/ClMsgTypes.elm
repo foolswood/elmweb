@@ -1,20 +1,25 @@
 module ClMsgTypes exposing (..)
-import ClTypes exposing (Path, Seg, TypeName, Attributee, TpId, Time, Interpolation, Definition, Liberty, WireValue, WireType)
+import ClTypes exposing (Path, Seg, Namespace, TypeName, Attributee, TpId, Time, Interpolation, Definition, PostDefinition, Liberty, WireValue, WireType)
 
 type SubMsg
   = MsgSub Path
   | MsgTypeSub TypeName
+  | MsgPostTypeSub TypeName
   | MsgUnsub Path
   | MsgTypeUnsub TypeName
+  | MsgPostTypeUnsub TypeName
 
--- Note: unlike the haskell one this is always TypeName
-type ErrorIndex
-  = GlobalError
-  | PathError Path
-  | TimePointError Path TpId
-  | TypeError TypeName
+type SubErrorIndex
+  = SPathError Path
+  | STypeError TypeName
+  | SPostTypeError TypeName
 
-type MsgError = MsgError ErrorIndex String
+type DataErrorIndex
+  = DGlobalError
+  | DPathError Path
+  | DTimePointError Path TpId
+
+type MsgError a = MsgError a String
 
 type DataUpdateMsg
   = MsgConstSet
@@ -44,7 +49,7 @@ dumPath dum = case dum of
     MsgSet {msgPath} -> msgPath
     MsgRemove {msgPath} -> msgPath
 
-type ContainerUpdateMsg
+type ToClientContainerUpdateMsg
   = MsgPresentAfter
       { msgPath : Path
       , msgTgt : Seg
@@ -57,16 +62,60 @@ type ContainerUpdateMsg
       , msgAttributee : (Maybe Attributee)
       }
 
-type ToRelayClientBundle = ToRelayClientBundle
-    (List SubMsg) (List DataUpdateMsg) (List ContainerUpdateMsg)
+type alias PostArgs = List (WireType, WireValue)
 
--- Note: equivalent to haskell side `DefMessage TypeName`
-type DefMsg
-  = MsgDefine TypeName Definition
-  | MsgUndefine TypeName
+type ToProviderContainerUpdateMsg
+  = MsgCreateAfter
+      { msgPath : Path
+      , msgPostArgs : PostArgs
+      , msgTgt : Seg
+      , msgRef : (Maybe Seg)
+      , msgAttributee : (Maybe Attributee)
+      }
+  | MsgMoveAfter
+      { msgPath : Path
+      , msgTgt : Seg
+      , msgRef : (Maybe Seg)
+      , msgAttributee : (Maybe Attributee)
+      }
+  | MsgDelete
+      { msgPath : Path
+      , msgTgt : Seg
+      , msgAttributee : (Maybe Attributee)
+      }
+
+type ToRelaySubBundle = ToRelaySubBundle (List SubMsg)
+type ToRelayUpdateBundle = ToRelayUpdateBundle
+    Namespace
+    (List DataUpdateMsg)
+    (List ToProviderContainerUpdateMsg)
+
+type ToRelayClientBundle = Trcub ToRelayUpdateBundle | Trcsb ToRelaySubBundle
+
+type DefMsg a
+  = MsgDefine Seg a
+  | MsgUndefine Seg
 
 type TypeMsg = MsgAssignType Path TypeName Liberty
 
-type FromRelayClientBundle = FromRelayClientBundle
-    (List TypeName) (List Path) (List MsgError) (List DefMsg) (List TypeMsg)
-    (List DataUpdateMsg) (List ContainerUpdateMsg)
+type FromRelayClientUpdateBundle = FromRelayClientUpdateBundle
+    Namespace
+    (List (MsgError DataErrorIndex))
+    (List (DefMsg PostDefinition))
+    (List (DefMsg Definition))
+    (List TypeMsg)
+    (List DataUpdateMsg)
+    (List ToClientContainerUpdateMsg)
+
+type FromRelaySubErrorBundle = FromRelaySubErrorBundle
+    (List (MsgError SubErrorIndex))
+    (List TypeName) -- post unsubs
+    (List TypeName) -- def unsubs
+    (List Path)     -- path unsubs
+
+type FromRelayRootBundle = FromRelayRootBundle (List ToClientContainerUpdateMsg)
+
+type FromRelayClientBundle
+  = Frcub FromRelayClientUpdateBundle
+  | Frseb FromRelaySubErrorBundle
+  | Frrub FromRelayRootBundle

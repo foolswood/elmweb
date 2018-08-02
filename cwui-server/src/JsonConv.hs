@@ -1,11 +1,16 @@
 {-# LANGUAGE
-    OverloadedStrings
+    FlexibleInstances
+  , GeneralizedNewtypeDeriving
+  , LambdaCase
+  , OverloadedStrings
   , Rank2Types
   , ScopedTypeVariables
+  , StandaloneDeriving
   , TemplateHaskell
   , TypeApplications
+  , TypeSynonymInstances
 #-}
-module JsonConv (toRelayClientBundleToClapi, fromRelayClientBundleToJson) where
+module JsonConv () where
 
 import Prelude hiding (fail)
 import Control.Monad.Fail (MonadFail(..))
@@ -13,7 +18,7 @@ import Control.Monad.Fail (MonadFail(..))
 import qualified Data.Set as Set
 import Data.Aeson (
     FromJSON(..), ToJSON(..), Value, withArray, Value(..),
-    withObject, (.:), eitherDecode, object, (.=), encode)
+    withObject, (.:), object, (.=))
 import Data.Aeson.Types (Parser)
 import Data.Maybe (fromJust)
 import qualified Data.Vector as Vec
@@ -29,25 +34,37 @@ import Data.Int
 import Blaze.ByteString.Builder (toByteString)
 import Data.Attoparsec.ByteString (parseOnly, endOfInput)
 
-import Clapi.Types.Path (Path, Seg)
+import Clapi.Types.Path (Path, Seg, unSeg, segP, Namespace, Placeholder)
 import qualified Clapi.Types.Path as Path
 import Clapi.Types.WireTH (mkWithWtProxy)
 import Clapi.TaggedData
 import Clapi.Serialisation
   ( subMsgTaggedData, SubMsgType(..), interpolationTaggedData
-  , dumtTaggedData, DataUpdateMsgType(..), cumtTaggedData
-  , ContainerUpdateMsgType(..), errIdxTaggedData
+  , dumtTaggedData, DataUpdateMsgType(..)
+  , tpcumTaggedData, TpcumType(..)
+  , tccumTaggedData, TccumType(..)
+  , dataErrIndexTaggedData, subErrIndexTaggedData
+  , trBundleTaggedData, TrBundleType(..)
   , Encodable(..)
   , defMsgTaggedData, ilTaggedData, defTaggedData)
 import Clapi.Types
   ( Time(..), Interpolation(..), InterpolationType(..), InterpolationLimit(..)
   , DataUpdateMessage(..)
-  , TimeStamped(..), FromRelayClientBundle(..), MsgError(..)
-  , ToRelayClientBundle(..), SubMessage(..), ContainerUpdateMessage(..)
-  , TypeMessage(..), TypeName(..), Liberty(..), ErrorIndex(..), WireValue(..)
+  , TimeStamped(..)
+  , FromRelayClientRootBundle(..), FromRelayClientSubBundle(..)
+  , FromRelayClientUpdateBundle(..)
+  , DataErrorIndex(..), DataErrorMessage(..)
+  , SubMessage(..), SubErrorIndex(..), SubErrorMessage(..)
+  , ToRelayBundle(..)
+  , ToRelayClientUpdateBundle(..), ToRelayClientSubBundle(..)
+  , ToProviderContainerUpdateMessage(..), ToClientContainerUpdateMessage(..)
+  , TypeMessage(..), TypeName(..), Liberty(..)
+  , WireValue(..)
   , Wireable, WireType(..), wireValueWireType, Tag, mkTag, unTag, (<|$|>)
-  , DefMessage(..), Definition(..), ArrayDefinition(..), StructDefinition(..)
-  , TupleDefinition(..), unAssocList, TreeType)
+  , DefMessage(..), Definition(..)
+  , ArrayDefinition(..), StructDefinition(..), TupleDefinition(..)
+  , PostDefinition(..)
+  , unAssocList, TreeType)
 import Clapi.TextSerialisation (ttToText)
 import Clapi.Util (proxyF, proxyF3)
 
@@ -75,16 +92,22 @@ instance ToJSON Tag where
     toJSON = toJSON . decodeUtf8 . BS.singleton . unTag
 
 instance FromJSON Path where
-    parseJSON v = parseJSON v >>= Path.fromText
+    parseJSON v = parseJSON v >>= Path.fromText segP
 
 instance ToJSON Path where
-    toJSON = toJSON . Path.toText
+    toJSON = toJSON . Path.toText unSeg
 
 instance FromJSON Seg where
     parseJSON v = parseJSON v >>= Path.mkSeg
 
 instance ToJSON Seg where
     toJSON = toJSON . Path.unSeg
+
+deriving instance ToJSON Namespace
+deriving instance FromJSON Namespace
+
+deriving instance ToJSON Placeholder
+deriving instance FromJSON Placeholder
 
 instance FromJSON TypeName where
     parseJSON = withObject "TypeName" $ \o -> TypeName <$> o .: "ns" <*> o .: "seg"
@@ -172,33 +195,53 @@ instance ToJSON DataUpdateMessage where
           , "interpolation" .= i, "att" .= ma]
         MsgRemove p tpId ma -> object ["path" .= p, "tpid" .= tpId, "att" .= ma]
 
-instance FromJSON ContainerUpdateMessage where
-    parseJSON = parseTaggedJson cumtTaggedData $ \e -> case e of
-        CUMTPresentAfter -> withObject "MsgPresentAfter" $ \o -> MsgPresentAfter
-            <$> o .: "path" <*> o .: "tgt" <*> o .: "ref" <*> o .: "att"
-        CUMTAbsent -> withObject "MsgAbsent" $ \o -> MsgAbsent
-            <$> o .: "path" <*> o .: "tgt" <*> o .: "att"
+instance FromJSON ToProviderContainerUpdateMessage where
+  parseJSON = parseTaggedJson tpcumTaggedData $ \case
+    TpcumtCreateAfter -> withObject "TpcumCreateAfter" $ \o ->
+      TpcumCreateAfter <$> o .: "args" <*> o .: "ph" <*> o .: "ref"
+        <*> o .: "att"
+    TpcumtMoveAfter -> withObject "TpcumMoveAfter" $ \o ->
+      TpcumMoveAfter <$> o .: "tgt" <*> o .: "ref" <*> o .: "att"
+    TpcumtAbsent -> withObject "TpcumAbsent" $ \o ->
+      TpcumAbsent <$> o .: "tgt" <*> o .: "att"
 
-instance ToJSON ContainerUpdateMessage where
-    toJSON = buildTaggedJson cumtTaggedData $ \v -> case v of
-        MsgPresentAfter p tgt ref att -> object ["path" .= p, "tgt" .= tgt, "ref" .= ref, "att" .= att]
-        MsgAbsent p tgt att -> object ["path" .= p, "tgt" .= tgt, "att" .= att]
+instance ToJSON ToProviderContainerUpdateMessage where
+  toJSON = buildTaggedJson tpcumTaggedData $ \case
+    TpcumCreateAfter args ph ref att -> object
+      ["args" .= args, "ph" .= ph, "ref" .= ref, "att" .= att]
+    TpcumMoveAfter tgt ref att -> object
+      ["tgt" .= tgt, "ref" .= ref, "att" .= att]
+    TpcumAbsent tgt att -> object ["tgt" .= tgt, "att" .= att]
 
-instance FromJSON ToRelayClientBundle where
-    parseJSON = withObject "ToRelayClientBundle" $ \b -> ToRelayClientBundle <$> b .: "subs" <*> b .: "data" <*> b .: "cont"
+instance FromJSON ToClientContainerUpdateMessage where
+  parseJSON = parseTaggedJson tccumTaggedData $ \case
+    TccumtPresentAfter -> withObject "TccumPresentAfter" $ \o ->
+      TccumPresentAfter <$> o .: "tgt" <*> o .: "ref" <*> o .: "att"
+    TccumtAbsent -> withObject "TccumAbsent" $ \o ->
+      TccumAbsent <$> o .: "tgt" <*> o .: "att"
+
+instance ToJSON ToClientContainerUpdateMessage where
+  toJSON = buildTaggedJson tccumTaggedData $ \case
+    TccumPresentAfter tgt ref att -> object
+      ["tgt" .= tgt, "ref" .= ref, "att" .= att]
+    TccumAbsent tgt att -> object ["tgt" .= tgt, "att" .= att]
+
+instance FromJSON ToRelayClientUpdateBundle where
+    parseJSON = withObject "ToRelayClientUpdateBundle" $ \b ->
+      ToRelayClientUpdateBundle <$> b.: "ns" <*> b .: "data" <*> b .: "cont"
+
+instance FromJSON ToRelayClientSubBundle where
+    parseJSON = withObject "ToRelayClientSubBundle" $ \b ->
+      ToRelayClientSubBundle <$> b .: "subMsgs"
 
 instance (FromJSON a) => FromJSON (TimeStamped a) where
     parseJSON o = withObject "TimeStamped" (\ts -> curry TimeStamped <$> ts .: "time" <*> parseJSON o) o
 
-toRelayClientBundleToClapi :: B.ByteString -> Either String (TimeStamped ToRelayClientBundle)
-toRelayClientBundleToClapi s = eitherDecode s
-
-instance ToJSON a => ToJSON (ErrorIndex a) where
-    toJSON = buildTaggedJson errIdxTaggedData $ \v -> case v of
+instance ToJSON DataErrorIndex where
+    toJSON = buildTaggedJson dataErrIndexTaggedData $ \case
         GlobalError -> toJSON (Nothing :: Maybe Int)
         PathError p -> toJSON p
         TimePointError p tpid -> object ["path" .= p, "tpid" .= tpid]
-        TypeError i -> toJSON i
 
 instance ToJSON Liberty where
     toJSON l = toJSON $ case l of
@@ -206,8 +249,17 @@ instance ToJSON Liberty where
         May -> "may"
         Must -> "must"
 
-instance ToJSON a => ToJSON (MsgError a) where
-    toJSON (MsgError ei m) = object ["eIdx" .= ei, "msg" .= m]
+instance ToJSON DataErrorMessage where
+    toJSON (MsgDataError ei m) = object ["eIdx" .= ei, "msg" .= m]
+
+instance ToJSON SubErrorIndex where
+    toJSON = buildTaggedJson subErrIndexTaggedData $ \case
+        PostTypeSubError tn -> toJSON tn
+        TypeSubError tn -> toJSON tn
+        PathSubError p -> toJSON p
+
+instance ToJSON SubErrorMessage where
+    toJSON (MsgSubError ei m) = object ["eIdx" .= ei, "msg" .= m]
 
 instance ToJSON TypeMessage where
     toJSON (MsgAssignType p tn l) = object ["path" .= p, "typeName" .= tn, "lib" .= l]
@@ -224,13 +276,21 @@ instance ToJSON TreeType where
     toJSON = toJSON . ttToText
 
 instance ToJSON TupleDefinition where
-    toJSON (TupleDefinition doc types interpLim) = object ["doc" .= doc, "types" .= typeOs, "il" .= interpLim]
+    toJSON (TupleDefinition doc types interpLim) = object
+        ["doc" .= doc, "types" .= typeOs, "il" .= interpLim]
       where
         typeOs = asTypeO <$> unAssocList types
         asTypeO (s, tt) = object ["seg" .= s, "ty" .= tt]
 
+instance ToJSON PostDefinition where
+    toJSON (PostDefinition doc args) = object ["doc" .= doc, "args" .= typeOs]
+      where
+        typeOs = asTypeO <$> unAssocList args
+        asTypeO (s, tts) = object ["seg" .= s, "tys" .= toJSONList tts]
+
 instance ToJSON ArrayDefinition where
-    toJSON (ArrayDefinition doc cTn cLib) = object ["doc" .= doc, "ctn" .= cTn, "clib" .= cLib]
+    toJSON (ArrayDefinition doc ptn cTn cLib) =
+      object ["doc" .= doc, "ptn" .= ptn, "ctn" .= cTn, "clib" .= cLib]
 
 instance ToJSON Definition where
     toJSON = buildTaggedJson defTaggedData $ \v -> case v of
@@ -238,21 +298,36 @@ instance ToJSON Definition where
         StructDef d -> toJSON d
         ArrayDef d -> toJSON d
 
-instance ToJSON a => ToJSON (DefMessage a) where
+instance (ToJSON ident, ToJSON def) => ToJSON (DefMessage ident def) where
     toJSON = buildTaggedJson defMsgTaggedData $ \v -> case v of
-        MsgDefine a def -> object ["id" .= toJSON a, "def" .= toJSON def]
-        MsgUndefine a -> toJSON a
+        MsgDefine i def -> object ["id" .= toJSON i, "def" .= toJSON def]
+        MsgUndefine i -> toJSON i
 
-instance ToJSON FromRelayClientBundle where
-    toJSON (FromRelayClientBundle tUnsubs dUnsubs errs defs tas dd co) = object
-        [ "tu" .= toJSONList tUnsubs
-        , "du" .= toJSONList dUnsubs
+instance ToJSON FromRelayClientUpdateBundle where
+    toJSON (FromRelayClientUpdateBundle ns errs pdefs defs tas dd co) = object
+        [ "ns" .= toJSON ns
         , "errs" .= toJSONList errs
+        , "pdefs" .= toJSONList pdefs
         , "defs" .= toJSONList defs
         , "tas" .= toJSONList tas
         , "dd" .= toJSONList dd
         , "co" .= toJSONList co
         ]
 
-fromRelayClientBundleToJson :: FromRelayClientBundle -> B.ByteString
-fromRelayClientBundleToJson = encode
+instance ToJSON FromRelayClientRootBundle where
+    toJSON (FromRelayClientRootBundle co) = object ["co" .= toJSONList co]
+
+instance ToJSON FromRelayClientSubBundle where
+    toJSON (FromRelayClientSubBundle errs ptuns tuns duns) = object
+      [ "errs" .= toJSON errs
+      , "ptuns" .= toJSON ptuns
+      , "tuns" .= toJSON tuns
+      , "duns" .= toJSON duns
+      ]
+
+instance FromJSON ToRelayBundle where
+    parseJSON = parseTaggedJson trBundleTaggedData $ \case
+      TrbtClientSub -> fmap Trcsb . parseJSON
+      TrbtClientUpdate -> fmap Trcub . parseJSON
+      -- FIXME: there might be a better way to handle this condition:
+      _ -> error "Web client acted as provider"

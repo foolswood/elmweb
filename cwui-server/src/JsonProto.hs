@@ -1,4 +1,6 @@
 module JsonProto (jsonProto) where
+
+import Data.Aeson (encode, eitherDecode)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LB
 
@@ -16,7 +18,10 @@ jsonProto ::
         m ()
 jsonProto = forever $ waitThen jsonMash jsonUnmash
   where
-    jsonMash (Frcb b) = sendFwd $ LB.toStrict $ fromRelayClientBundleToJson b
-    jsonUnmash bs = case toRelayClientBundleToClapi $ LB.fromStrict bs of
+    jsonMash (Frcrb b) = sendFwd $ LB.toStrict $ encode b
+    jsonMash (Frcsb b) = sendFwd $ LB.toStrict $ encode b
+    jsonMash (Frcub b) = sendFwd $ LB.toStrict $ encode b
+    jsonMash _ = return ()
+    jsonUnmash bs = case eitherDecode $ LB.fromStrict bs of
         Left s -> error $ "Decode failure: " ++ (show bs) ++ " - " ++ s
-        Right (TimeStamped (t, b)) -> sendRev $ TimeStamped (t, Trcb b)
+        Right (TimeStamped (t, b)) -> sendRev $ TimeStamped (t, b)

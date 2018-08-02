@@ -5,8 +5,13 @@ module Digests exposing
 
 import Dict exposing (Dict)
 
-import ClTypes exposing (TypeName, Path, Seg, TpId, Interpolation, Time, Attributee, WireValue, WireType, Definition, Liberty)
-import ClMsgTypes exposing (FromRelayClientBundle(..), TypeMsg(..), DefMsg(..), ContainerUpdateMsg(..), DataUpdateMsg(..), dumPath, ErrorIndex(..), MsgError(..))
+import ClTypes exposing
+  ( TypeName, Path, Seg, Namespace, TpId, Interpolation, Time, Attributee
+  , WireValue, WireType, Definition, PostDefinition, Liberty)
+import ClMsgTypes exposing
+  ( FromRelayClientBundle(..), FromRelayClientUpdateBundle(..), TypeMsg(..)
+  , DefMsg(..) , ToProviderContainerUpdateMsg(..), ToClientContainerUpdateMsg(..)
+  , DataUpdateMsg(..), dumPath, DataErrorIndex(..), MsgError(..))
 import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData)
 import SequenceOps exposing (SeqOp(..))
 import RemoteState exposing (RemoteState, NodeMap, TypeAssignMap, TypeMap)
@@ -107,8 +112,8 @@ cmUnion cmA cmB =
     combine k a b = Dict.insert k <| Dict.union a b
   in Dict.merge Dict.insert combine Dict.insert cmA cmB Dict.empty
 
-digestCms : List ContainerUpdateMsg -> CmDigest
-digestCms =
+digestCCms : List ToClientContainerUpdateMsg -> CmDigest
+digestCCms =
   let
     wedgeIn k v md = Just <| case md of
         Nothing -> Dict.singleton k v
@@ -126,22 +131,21 @@ applyCms cms nm =
     applyOps p ops = failyUpdate (childUpdate ops) p
   in Dict.foldl applyOps ([], nm) cms
 
-type DefOp
-  = OpDefine Definition
+type DefOp a
+  = OpDefine a
   | OpUndefine
 
-type alias DefOps = Dict TypeName DefOp
+type alias DefOps a = Dict TypeName (DefOp a)
 
-digestDefOps : List TypeName -> List DefMsg -> DefOps
-digestDefOps unsubbedTns defs =
+digestDefOps : Namespace -> List (DefMsg a) -> DefOps a
+digestDefOps ns defs =
   let
     applyDefOp o = case o of
-        MsgDefine tn def -> Dict.insert tn <| OpDefine def
-        MsgUndefine tn -> Dict.insert tn OpUndefine
-    unsubsAsUndefs = Dict.fromList <| List.map (\tn -> (tn, OpUndefine)) unsubbedTns
-  in List.foldl applyDefOp unsubsAsUndefs defs
+        MsgDefine s def -> Dict.insert (ns, s) <| OpDefine def
+        MsgUndefine s -> Dict.insert (ns, s) OpUndefine
+  in List.foldl applyDefOp Dict.empty defs
 
-applyDefOps : DefOps -> TypeMap -> TypeMap
+applyDefOps : DefOps a -> TypeMap a -> TypeMap a
 applyDefOps dops tm =
   let
     applyOp tn op = case op of
@@ -155,12 +159,11 @@ type TaOp
 
 type alias TaOps = Dict Path TaOp
 
-digestTypeMsgs : List Path -> List TypeMsg -> TaOps
-digestTypeMsgs dataUnsubs tms =
+digestTypeMsgs : List TypeMsg -> TaOps
+digestTypeMsgs tms =
   let
-    tds = List.map (\p -> (p, OpDemote)) dataUnsubs
     tas = List.map (\(MsgAssignType p tn l) -> (p, OpAssign (tn, l))) tms
-  in Dict.fromList <| tds ++ tas
+  in Dict.fromList tas
 
 dropDemotes : TaOps -> Dict Path a -> Dict Path a
 dropDemotes tao d =
@@ -179,37 +182,60 @@ applyTypeMsgs tao tam =
   in Dict.foldl applyOp tam tao
 
 type alias Digest =
-  { defs : DefOps
+  { postDefs : DefOps PostDefinition
+  , defs : DefOps Definition
   , taOps : TaOps
   , cops : CmDigest
   , dops : DataDigest
-  , errs : List (ErrorIndex, String)
+  , errs : List (DataErrorIndex, String)
   }
 
-digestEmpty = Digest Dict.empty Dict.empty Dict.empty Dict.empty []
+-- You can't write mapKeys because comparable
+nsPathDict : Namespace -> Dict Path a -> Dict Path a
+nsPathDict ns = Dict.fromList << List.map (\(k, v) -> ("/" ++ ns ++ "/" ++ k, v)) << Dict.toList
+
+digestFrcub : FromRelayClientUpdateBundle -> Digest
+digestFrcub (FromRelayClientUpdateBundle ns errs pDefs defs tas dums cms) =
+  { defs = digestDefOps ns defs
+  , postDefs = digestDefOps ns pDefs
+  , taOps = nsPathDict ns <| digestTypeMsgs tas
+  , cops = nsPathDict ns <| digestCCms cms
+  , dops = nsPathDict ns <| digestDums dums
+  -- These are not namespaced:
+  , errs = List.map (\(MsgError idx s) -> (idx, s)) errs
+  }
+
+-- Obviously, this wants to die
+doNothingDigest : a -> Digest
+doNothingDigest _ =
+  { postDefs = Dict.empty
+  , defs = Dict.empty
+  , taOps = Dict.empty
+  , cops = Dict.empty
+  , dops = Dict.empty
+  , errs = []
+  }
 
 digest : FromRelayClientBundle -> Digest
-digest (FromRelayClientBundle typeUnsubs dataUnsubs errMsgs dms tms dums cms) =
-  { defs = digestDefOps typeUnsubs dms
-  , taOps = digestTypeMsgs dataUnsubs tms
-  , cops = digestCms cms
-  , dops = digestDums dums
-  , errs = List.map (\(MsgError idx s) -> (idx, s)) errMsgs
-  }
+digest b = case b of
+    Frcub ub -> digestFrcub ub
+    Frseb eb -> doNothingDigest eb
+    Frrub rb -> doNothingDigest rb
 
-applyDigest : Digest -> RemoteState -> (RemoteState, List (ErrorIndex, String))
+applyDigest : Digest -> RemoteState -> (RemoteState, List (DataErrorIndex, String))
 applyDigest d rs =
   let
     newTm = applyDefOps (.defs d) <| .types rs
+    newPtm = applyDefOps (.postDefs d) <| .postTypes rs
     newTam = applyTypeMsgs (.taOps d) <| .tyAssns rs
     reducedNodes = dropDemotes (.taOps d) <| .nodes rs
     (dataErrs, dataAppliedNm) = ddApply (.dops d) reducedNodes
     (contErrs, newNm) = applyCms (.cops d) dataAppliedNm
     indexDumErr (p, (mTpId, s)) = case mTpId of
-        Nothing -> (PathError p, s)
-        Just tpId -> (TimePointError p tpId, s)
+        Nothing -> (DPathError p, s)
+        Just tpId -> (DTimePointError p tpId, s)
     indexedErrs
        = .errs d
       ++ List.map indexDumErr dataErrs
-      ++ List.map (\(p, s) -> (PathError p, s)) contErrs
-  in ({types = newTm, tyAssns = newTam, nodes = newNm}, indexedErrs)
+      ++ List.map (\(p, s) -> (DPathError p, s)) contErrs
+  in ({types = newTm, postTypes = newPtm, tyAssns = newTam, nodes = newNm}, indexedErrs)
