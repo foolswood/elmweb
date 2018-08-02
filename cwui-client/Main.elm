@@ -66,7 +66,7 @@ type alias Model =
   -- Data:
   , recent : List (Digest, RemoteState)
   , pathSubs : Set Path
-  , typeSubs : Set TypeName
+  , postTypeSubs : Set TypeName
   , state : RemoteState
   , nodeFs : NodeFs
   , pending : Pending
@@ -111,13 +111,11 @@ requiredPaths rs fs = layoutRequires
     (\pa pb -> PathManipulation.canonicalise <| pa ++ pb) (dynamicLayout rs)
     (requiredChildren rs fs) (specialRequire rs)
 
-requiredArrayTypes : RemoteState -> Set TypeName
-requiredArrayTypes rs =
+requiredArrayPostTypes : RemoteState -> Set TypeName
+requiredArrayPostTypes rs =
   let
     eatn _ d = case d of
-        ArrayDef {childType, childEditable} -> case childEditable of
-            Editable -> Just childType
-            _ -> Nothing
+        ArrayDef {postType} -> postType
         _ -> Nothing
   in Set.fromList <| Dict.values <| dictMapMaybe eatn <| .types rs
 
@@ -147,7 +145,7 @@ init =
       , timelines = Dict.empty
       , recent = []
       , pathSubs = initialSubs
-      , typeSubs = Set.empty
+      , postTypeSubs = Set.empty
       , state = initialState
       , nodeFs = initialNodeFs
       , pending = Dict.empty
@@ -167,10 +165,10 @@ subDiffOps sub unsub old new =
   in List.map sub added ++ List.map unsub removed
 
 subDiffToCmd : Set Path -> Set TypeName -> Set Path -> Set TypeName -> Cmd Msg
-subDiffToCmd oldP oldT newP newT =
+subDiffToCmd oldP oldPt newP newPt =
   let
     pOps = subDiffOps MsgSub MsgUnsub oldP newP
-    tOps = subDiffOps MsgTypeSub MsgTypeUnsub oldT newT
+    tOps = subDiffOps MsgPostTypeSub MsgPostTypeUnsub oldPt newPt
   in case pOps ++ tOps of
     [] -> Cmd.none
     subOps -> sendBundle <| Trcsb <| ToRelaySubBundle subOps
@@ -241,18 +239,18 @@ update msg model = case msg of
         d = digest b
         (newState, errs) = applyDigest d <| latestState model
         pathSubs = requiredPaths newState (.nodeFs model) (.layout model)
-        typeSubs = requiredArrayTypes newState
+        postTypeSubs = requiredArrayPostTypes newState
         newM =
           { model
           | errs = errs ++ .errs model
           , pathSubs = pathSubs
-          , typeSubs = typeSubs
+          , postTypeSubs = postTypeSubs
           , recent = .recent model ++ [(d, newState)]
           , bundleCount = .bundleCount model + 1
           , pending = clearPending d <| .pending model
           , nodeFs = rectifyEdits newState d <| .nodeFs model
           }
-        subCmd = subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs typeSubs
+        subCmd = subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs postTypeSubs
         queueSquashCmd = Task.perform (always SquashRecent) <| Process.sleep <| .keepRecent model
       in (newM, Cmd.batch [subCmd, queueSquashCmd])
     SquashRecent ->
@@ -270,7 +268,7 @@ update msg model = case msg of
             pathSubs = requiredPaths (latestState model) (.nodeFs model) newLayout
           in
             ( {model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}
-            , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
+            , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
     SpecialUiEvent se -> case se of
         SpeClock seg evt -> case evt of
             EeUpdate tp -> ({model | clockFs = Dict.insert seg (FsEditing tp) <| .clockFs model}, Cmd.none)
@@ -288,7 +286,7 @@ update msg model = case msg of
             pathSubs = requiredPaths (latestState model) newFs (.layout model)
           in
             ( {model | nodeFs = newFs, pathSubs = pathSubs}
-            , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
+            , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
         EeSubmit na -> case na of
             NaConst wvs -> case tyDef p <| latestState model of
                 Err msg -> addDGlobalError ("Error submitting: " ++ msg) model

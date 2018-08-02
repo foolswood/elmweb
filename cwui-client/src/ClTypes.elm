@@ -57,7 +57,7 @@ type alias TupleDefinition =
 
 type alias ChildDescription = {name : Seg, typeRef : TypeName, ed : Editable}
 type alias StructDefinition = {doc : String, childDescs : List ChildDescription}
-type alias ArrayDefinition = {doc : String, childType : TypeName, childEditable : Editable}
+type alias ArrayDefinition = {doc : String, postType : Maybe TypeName, childType : TypeName, childEditable : Editable}
 
 type Definition
   = TupleDef TupleDefinition
