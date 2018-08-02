@@ -12,7 +12,9 @@ import Process
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
-import ClMsgTypes exposing (FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(..), ErrorIndex(..))
+import ClMsgTypes exposing
+  ( FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(..)
+  , DataErrorIndex(..), ToRelayUpdateBundle(..), ToRelaySubBundle(..))
 import Futility exposing (..)
 import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
@@ -50,7 +52,7 @@ type alias Pending = Dict Path NodeActions
 
 type alias Model =
   -- Global:
-  { errs : List (ErrorIndex, String)
+  { errs : List (DataErrorIndex, String)
   , viewMode : UiMode
   , bundleCount : Int
   , keepRecent : Float
@@ -171,10 +173,10 @@ subDiffToCmd oldP oldT newP newT =
     tOps = subDiffOps MsgTypeSub MsgTypeUnsub oldT newT
   in case pOps ++ tOps of
     [] -> Cmd.none
-    subOps -> sendBundle (ToRelayClientBundle subOps [] [])
+    subOps -> sendBundle <| Trcsb <| ToRelaySubBundle subOps
 
 type Msg
-  = AddError ErrorIndex String
+  = AddError DataErrorIndex String
   | SwapViewMode
   | NetworkEvent FromRelayClientBundle
   | SquashRecent
@@ -183,8 +185,8 @@ type Msg
   | SpecialUiEvent SpecialEvent
   | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
 
-addGlobalError : String -> Model -> (Model, Cmd Msg)
-addGlobalError msg m = ({m | errs = (GlobalError, msg) :: .errs m}, Cmd.none)
+addDGlobalError : String -> Model -> (Model, Cmd Msg)
+addDGlobalError msg m = ({m | errs = (DGlobalError, msg) :: .errs m}, Cmd.none)
 
 latestState : Model -> RemoteState
 latestState m =
@@ -256,13 +258,13 @@ update msg model = case msg of
     SquashRecent ->
         case .recent model of
             ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
-            [] -> addGlobalError "Tried to squash but no recent" model
+            [] -> addDGlobalError "Tried to squash but no recent" model
     SecondPassedTick -> ({model | timeNow = MonoTime.rightNow ()} , Cmd.none)
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
     LayoutUiEvent (p, ue) -> case updateLayout p ue (.layoutFs model) (.layout model) of
-        Err msg -> addGlobalError msg model
+        Err msg -> addDGlobalError msg model
         Ok (newFs, newLayout) ->
           let
             pathSubs = requiredPaths (latestState model) (.nodeFs model) newLayout
@@ -273,10 +275,10 @@ update msg model = case msg of
         SpeClock seg evt -> case evt of
             EeUpdate tp -> ({model | clockFs = Dict.insert seg (FsEditing tp) <| .clockFs model}, Cmd.none)
             EeSubmit t ->
-              (model, sendBundle <| ToRelayClientBundle [] [transportCueDum seg t] [])
+              (model, sendBundle <| Trcub <| ToRelayUpdateBundle seg [transportCueDum seg t] [])
         SpeTimeline ns evt -> case processTimeSeriesEvent evt <| getTsModel ns model of
             TsemUpdate tsm -> ({model | timelines = Dict.insert ns tsm <| .timelines model}, Cmd.none)
-            TsemSeek t -> (model, sendBundle <| ToRelayClientBundle [] [transportCueDum ns t] [])
+            TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum ns t] [])
             -- FIXME: time point changes go nowhere:
             TsemPointChange _ _ _ -> (model, Cmd.none)
     NodeUiEvent (p, ue) -> case ue of
@@ -289,7 +291,7 @@ update msg model = case msg of
             , subDiffToCmd (.pathSubs model) (.typeSubs model) pathSubs (.typeSubs model))
         EeSubmit na -> case na of
             NaConst wvs -> case tyDef p <| latestState model of
-                Err msg -> addGlobalError ("Error submitting: " ++ msg) model
+                Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
                 Ok (def, _) -> case def of
                     TupleDef {types} ->
                       let
@@ -300,17 +302,17 @@ update msg model = case msg of
                           , msgArgs = wvs
                           , msgAttributee = Nothing
                           }
-                        b = ToRelayClientBundle [] [dum] []
+                        b = ToRelayUpdateBundle (dodgyGetNs p) [dum] []
                         newM =
                           { model
                           | pending = Dict.insert p na <| .pending model
                           , nodeFs = formInsert p Nothing <| .nodeFs model
                           }
-                      in (newM, sendBundle b)
-                    _ -> addGlobalError "Def type mismatch" model
-            NaSeries sops -> addGlobalError "Series submit not implemented" model
+                      in (newM, sendBundle <| Trcub b)
+                    _ -> addDGlobalError "Def type mismatch" model
+            NaSeries sops -> addDGlobalError "Series submit not implemented" model
             NaChildren cops -> case tyDef p <| latestState model of
-                Err msg -> addGlobalError ("Error submitting: " ++ msg) model
+                Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
                 Ok (def, _) -> case def of
                     ArrayDef _ ->
                       let
@@ -324,18 +326,16 @@ update msg model = case msg of
                               (Maybe.withDefault [] << remoteChildSegs (latestState model))
                               p cops <| .nodeFs model
                           }
-                        b = ToRelayClientBundle [] [] <| produceCms p cops
-                      in (newM, sendBundle b)
-                    _ -> addGlobalError "Attempted to change children of non-array" model
+                        b = ToRelayUpdateBundle (dodgyGetNs p) [] <| producePCms p cops
+                      in (newM, sendBundle <| Trcub b)
+                    _ -> addDGlobalError "Attempted to change children of non-array" model
 
-produceCms : Path -> NaChildrenT -> List ClMsgTypes.ContainerUpdateMsg
-produceCms p =
+producePCms : Path -> NaChildrenT -> List ClMsgTypes.ToProviderContainerUpdateMsg
+producePCms p =
   let
-    produceCm (seg, op) = case op of
-        SoAbsent -> ClMsgTypes.MsgAbsent
-            {msgPath = p, msgTgt = seg, msgAttributee = Nothing}
-        SoPresentAfter mRef -> ClMsgTypes.MsgPresentAfter
-            {msgPath = p, msgTgt = seg, msgRef = mRef, msgAttributee = Nothing}
+    -- FIXME: This is complete rubbish (the whole array thing needs rework)
+    produceCm (seg, op) = ClMsgTypes.MsgDelete
+      {msgPath = "hi", msgTgt = seg, msgAttributee = Nothing}
   in List.map produceCm << Dict.toList
 
 -- Subscriptions
@@ -349,7 +349,7 @@ subscriptions model = Sub.batch
 eventFromNetwork : String -> Msg
 eventFromNetwork s = case parseBundle s of
     (Ok b) -> NetworkEvent b
-    (Err e) -> AddError GlobalError e
+    (Err e) -> AddError DGlobalError e
 
 -- View
 
@@ -377,7 +377,7 @@ view m = div []
         (.layout m)
   ]
 
-viewErrors : List (ErrorIndex, String) -> Html a
+viewErrors : List (DataErrorIndex, String) -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text <| toString s]) errs)
 
 pathEditView : Maybe Path -> FormState Path -> Html (EditEvent Path Path)
@@ -484,3 +484,8 @@ viewStruct structDef =
   let
     iw {name} = Html.li [] [Html.text name]
   in Html.ol [] <| List.map iw <| .childDescs structDef
+
+dodgyGetNs : Path -> Namespace
+dodgyGetNs p = case String.split "/" p of
+    ns :: _ -> ns
+    _ -> "dodgyNsFindingDied"

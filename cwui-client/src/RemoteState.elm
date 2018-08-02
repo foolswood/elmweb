@@ -2,22 +2,25 @@ module RemoteState exposing (TypeMap, TypeAssignMap, NodeMap, RemoteState, remot
 
 import Dict exposing (Dict)
 
-import ClTypes exposing (TypeName, Definition(..), Liberty, Path, Seg, ChildDescription)
+import ClTypes exposing (TypeName, Definition(..), PostDefinition, Liberty, Path, Seg, ChildDescription)
 import ClNodes exposing (Node)
 import PathManipulation exposing (splitBasename)
 
-type alias TypeMap = Dict TypeName Definition
+type alias TypeMap a = Dict TypeName a
 type alias TypeAssignMap = Dict Path (TypeName, Liberty)
 type alias NodeMap = Dict Path Node
 
 type alias RemoteState =
-  { types : TypeMap
+  { types : TypeMap Definition
+  , postTypes : TypeMap PostDefinition
   , tyAssns : TypeAssignMap
   , nodes : NodeMap
   }
 
 remoteStateEmpty : RemoteState
-remoteStateEmpty = {types = Dict.empty, tyAssns = Dict.empty, nodes = Dict.empty}
+remoteStateEmpty =
+  { types = Dict.empty, postTypes = Dict.empty, tyAssns = Dict.empty
+  , nodes = Dict.empty}
 
 tyAssn : Path -> RemoteState -> Result String (TypeName, Liberty)
 tyAssn p rs = case Dict.get p <| .tyAssns rs of

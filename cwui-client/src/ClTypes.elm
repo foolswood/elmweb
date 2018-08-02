@@ -3,6 +3,7 @@ import Dict exposing (..)
 import Regex exposing (Regex)
 
 type alias Seg = String
+type alias Namespace = Seg
 type alias Path = String
 type alias TypeName = (Seg, Seg)
 
@@ -63,6 +64,8 @@ type Definition
   = TupleDef TupleDefinition
   | StructDef StructDefinition
   | ArrayDef ArrayDefinition
+
+type alias PostDefinition = {doc : String, fieldDescs : List (Seg, TypeName)}
 
 type WireValue
   = WvTime Time
