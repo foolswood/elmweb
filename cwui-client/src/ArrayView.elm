@@ -8,11 +8,11 @@ import Set exposing (Set)
 import Json.Encode as JE
 
 import SequenceOps exposing (SeqOp(..), applySeqOps, banish, inject, unref)
-import ClTypes exposing (Path, Seg, ArrayDefinition)
+import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace)
 import ClNodes exposing (Node(ContainerNode), ContainerNodeT)
 import Form exposing (FormState(..))
 import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), NaChildrenT, NeChildrenT)
-import RemoteState exposing (RemoteState)
+import RemoteState exposing (Valuespace)
 import Digests exposing (Cops)
 import DragAndDrop exposing (dragStartAttr, dragOverAttr, onDragStart, onDragEnter, onDrop, EffectAllowed(EaMove))
 
@@ -26,8 +26,8 @@ chosenChildSegs nfs = case nfs of
     FsEditing (NeChildren v) -> Just <| .chosen v
     _ -> Nothing
 
-remoteChildSegs : RemoteState -> Path -> Maybe (List Seg)
-remoteChildSegs rs p = case Dict.get p <| .nodes rs of
+remoteChildSegs : Valuespace -> Path -> Maybe (List Seg)
+remoteChildSegs vs p = case Dict.get p <| .nodes vs of
     Just (ContainerNode segs) -> Just <| List.map .seg segs
     _ -> Nothing
 

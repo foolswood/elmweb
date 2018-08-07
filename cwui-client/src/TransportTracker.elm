@@ -3,11 +3,11 @@ module TransportTracker exposing (transport, transportSubs, Transport, Transport
 import Dict
 import Set exposing (Set)
 
-import ClTypes exposing (Time, Seg, WireValue(..), fromTime, fromFloat, Attributee, Path, WireType(WtTime))
+import ClTypes exposing (Time, Namespace, WireValue(..), fromTime, fromFloat, Attributee, Path, WireType(WtTime))
 import ClNodes exposing (Node(ConstDataNode), ConstData)
-import RemoteState exposing (RemoteState)
+import RemoteState exposing (RemoteState, Valuespace)
 import PathManipulation exposing (appendSeg, asPath)
-import ClMsgTypes exposing (DataUpdateMsg(MsgConstSet))
+import ClMsgTypes exposing (DataUpdateMsg(MsgConstSet), SubPath)
 
 type TransportState
   = TransportStopped
@@ -25,30 +25,42 @@ type TransportLoadError
   | BadWvs String
   | BadTransportVal Int
 
-rConstNode : Path -> RemoteState -> Result TransportLoadError ConstData
-rConstNode p rs = case Dict.get p <| .nodes rs of
+rVs : Namespace -> RemoteState -> Result TransportLoadError Valuespace
+rVs ns rs = case Dict.get ns rs of
+    Nothing -> Err NotLoaded
+    Just vs -> Ok vs
+
+rConstNode : Path -> Valuespace -> Result TransportLoadError ConstData
+rConstNode p vs = case Dict.get p <| .nodes vs of
     Just (ConstDataNode {values}) -> Ok values
     Nothing -> Err NotLoaded
     n -> Err <| BadNodeType <| toString n
 
-ownerClockDiffPath : Seg -> RemoteState -> Result TransportLoadError Path
+ownerClockDiffPath : Namespace -> RemoteState -> Result TransportLoadError Path
 ownerClockDiffPath ns rs =
   let
-    nsOwnerRefPath = appendSeg "/relay/owners" ns
+    nsOwnerRefPath = appendSeg "/owners" ns
     asRef vs = case vs of
         (ma, [WvString s]) -> Ok (ma, s)
         _ -> Err <| BadWvs <| toString vs
-  in Result.map (flip appendSeg "clock_diff" << Tuple.second) <| Result.andThen asRef <| rConstNode nsOwnerRefPath rs
+  in
+    Result.map (flip appendSeg "clock_diff" << Tuple.second) <|
+    Result.andThen asRef <|
+    Result.andThen (rConstNode nsOwnerRefPath) <|
+    rVs "relay" rs
 
 -- FIXME: Doesn't check any types so potential for rubbish errors if anything
 -- changes. Also attribution handling is pants.
-transport : Seg -> RemoteState -> Float -> Result TransportLoadError Transport
+transport : Namespace -> RemoteState -> Float -> Result TransportLoadError Transport
 transport ns rs now =
   let
-    structPath = asPath [ns, "transport"]
-    rSubNode s = rConstNode (appendSeg structPath s) rs
-    rTimeDiff = Result.andThen asFloat <| Result.andThen (flip rConstNode rs) <|
-        ownerClockDiffPath ns rs
+    structPath = "/transport"
+    rSubNode s = Result.andThen (rConstNode (appendSeg structPath s)) <| rVs ns rs
+    rTimeDiff =
+        Result.andThen asFloat <|
+        Result.andThen (uncurry rConstNode) <| Result.map2 (,)
+            (ownerClockDiffPath ns rs)
+            (rVs ns rs)
     rTranspState = Result.andThen asTranspState <| rSubNode "state"
     rChangedTime = Result.andThen asTime <| rSubNode "changed"
     rCueTime = Result.andThen asTime <| rSubNode "cue"
@@ -76,22 +88,24 @@ transport ns rs now =
       }
   in Result.map4 toTransport rTimeDiff rChangedTime rCueTime rTranspState
 
-transportSubs : Seg -> RemoteState -> Set Path
+transportSubs : Namespace -> RemoteState -> Set SubPath
 transportSubs ns rs =
   let
-    structPath = asPath [ns, "transport"]
-    ownerRefPath = appendSeg "/relay/owners" ns
+    ownerRefPath = ("relay", appendSeg "/owners" ns)
     oipl = case ownerClockDiffPath ns rs of
         Err _ -> []
         Ok p -> [p]
-  in Set.fromList <|
-    [ appendSeg structPath "state"
-    , appendSeg structPath "changed"
-    , appendSeg structPath "cue"
-    , appendSeg "/relay/owners" ns
-    ] ++ oipl
+    structPath = "/transport"
+    nsTransp = List.map (\p -> (ns, p)) <|
+        [ structPath
+        , appendSeg structPath "state"
+        , appendSeg structPath "changed"
+        , appendSeg structPath "cue"
+        , appendSeg "/relay/owners" ns
+        ]
+  in Set.fromList <| ("relay", "/owners") :: ownerRefPath :: nsTransp
 
-transportCueDum : Seg -> Time -> DataUpdateMsg
+transportCueDum : Namespace -> Time -> DataUpdateMsg
 transportCueDum ns t = MsgConstSet
   { msgPath = asPath [ns, "transport", "cue"]
   , msgTypes = [WtTime]

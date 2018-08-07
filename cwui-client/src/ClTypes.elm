@@ -55,16 +55,16 @@ type alias TupleDefinition =
   , types : List (Seg, AtomDef)
   , interpLim : InterpolationLimit}
 
-type alias ChildDescription = {name : Seg, typeRef : TypeName, ed : Editable}
+type alias ChildDescription = {name : Seg, typeRef : Seg, ed : Editable}
 type alias StructDefinition = {doc : String, childDescs : List ChildDescription}
-type alias ArrayDefinition = {doc : String, postType : Maybe TypeName, childType : TypeName, childEditable : Editable}
+type alias ArrayDefinition = {doc : String, postType : Maybe Seg, childType : Seg, childEditable : Editable}
 
 type Definition
   = TupleDef TupleDefinition
   | StructDef StructDefinition
   | ArrayDef ArrayDefinition
 
-type alias PostDefinition = {doc : String, fieldDescs : List (Seg, TypeName)}
+type alias PostDefinition = {doc : String, fieldDescs : List (Seg, AtomDef)}
 
 type WireValue
   = WvTime Time

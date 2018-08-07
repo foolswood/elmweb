@@ -84,6 +84,7 @@ layoutRequires joinPath dyn cg specialRequires =
         LayoutSpecial s -> specialRequires s
   in go
 
+-- FIXME: This should allow layouts using relative paths
 expandChildChoice : (p -> p -> p) -> Layout p s -> Array p -> Layout p s
 expandChildChoice joinPath kidLayout basePaths =
     LayoutContainer <| Array.map (rebaseLayout joinPath kidLayout) basePaths
