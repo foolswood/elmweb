@@ -3,6 +3,7 @@ import Json.Encode as JE
 import Json.Decode as JD
 import Dict
 
+import Tagged.Tagged exposing (Tagged(..))
 import ClTypes exposing
   ( Path, Time, Interpolation(..), TpId, Seg, Attributee
   , TypeName, Editable(..), Definition(..), PostDefinition, AtomDef
@@ -41,10 +42,10 @@ encodeSubMsg : SubMsg -> JE.Value
 encodeSubMsg sm = JE.list <| case sm of
     MsgSub p -> [JE.string "s", encodeSubPath p]
     MsgTypeSub tn -> [JE.string "S", encodeTypeName tn]
-    MsgPostTypeSub tn -> [JE.string "pS", encodeTypeName tn]
+    MsgPostTypeSub (Tagged tn) -> [JE.string "pS", encodeTypeName tn]
     MsgUnsub p -> [JE.string "u", encodeSubPath p]
     MsgTypeUnsub tn -> [JE.string "U", encodeTypeName tn]
-    MsgPostTypeUnsub tn -> [JE.string "pU", encodeTypeName tn]
+    MsgPostTypeUnsub (Tagged tn) -> [JE.string "pU", encodeTypeName tn]
 
 encodeTime : Time -> JE.Value
 encodeTime (s, f) = JE.list [JE.int s, JE.int f]
@@ -251,7 +252,7 @@ defTagDecoders = Dict.fromList
   , ("A", JD.map4
       (\d ptn ctn ctl -> ArrayDef {doc = d, postType = ptn, childType = ctn, childEditable = ctl})
       decodeDocField
-      (JD.field "ptn" <| JD.nullable decodeSeg)
+      (JD.field "ptn" <| JD.nullable <| JD.map Tagged decodeSeg)
       (JD.field "ctn" decodeSeg)
       (JD.field "ced" decodeEditable))
   ]
@@ -268,8 +269,8 @@ decodePostDef = JD.map2 PostDefinition
 
 decodeDefMsg : JD.Decoder a -> JD.Decoder (DefMsg a)
 decodeDefMsg defDec = decodeTagged (Dict.fromList
-  [ ("d", JD.map2 MsgDefine (JD.field "id" decodeSeg) (JD.field "def" defDec))
-  , ("u", JD.map MsgUndefine decodeSeg)
+  [ ("d", JD.map2 MsgDefine (JD.field "id" <| JD.map Tagged decodeSeg) (JD.field "def" defDec))
+  , ("u", JD.map MsgUndefine <| JD.map Tagged decodeSeg)
   ])
 
 decodeEditable : JD.Decoder Editable
@@ -343,7 +344,7 @@ decodeTypeName = JD.map2 (,)
 decodeTypeMsg : JD.Decoder TypeMsg
 decodeTypeMsg = JD.map3 MsgAssignType
     decodePathField
-    (JD.field "typeName" decodeSeg)
+    (JD.field "typeName" <| JD.map Tagged decodeSeg)
     (JD.field "ed" decodeEditable)
 
 decodeDum : JD.Decoder DataUpdateMsg
@@ -404,8 +405,8 @@ parseRootBundle = JD.map FromRelayRootBundle <| JD.list decodeCCm
 parseSubBundle : JD.Decoder FromRelaySubErrorBundle
 parseSubBundle = JD.map4 FromRelaySubErrorBundle
     (JD.field "errs" (JD.list <| decodeErrMsg decodeSubErrIdx))
-    (JD.field "ptuns" (JD.list decodeTypeName))
-    (JD.field "tuns" (JD.list decodeTypeName))
+    (JD.field "ptuns" (JD.list <| JD.map Tagged <| decodeTypeName))
+    (JD.field "tuns" (JD.list <| JD.map Tagged <| decodeTypeName))
     (JD.field "duns" (JD.list <| decodePair decodeSeg decodePath))
 
 parseUpdateBundle : JD.Decoder FromRelayClientUpdateBundle

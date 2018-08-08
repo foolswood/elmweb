@@ -1,4 +1,6 @@
 module ClMsgTypes exposing (..)
+
+import Tagged.Tagged exposing (Tagged)
 import ClTypes exposing (Path, Seg, Namespace, TypeName, Attributee, TpId, Time, Interpolation, Definition, PostDefinition, Editable, WireValue, WireType)
 
 type alias SubPath = (Namespace, Path)
@@ -6,10 +8,10 @@ type alias SubPath = (Namespace, Path)
 type SubMsg
   = MsgSub SubPath
   | MsgTypeSub TypeName
-  | MsgPostTypeSub TypeName
+  | MsgPostTypeSub (Tagged PostDefinition TypeName)
   | MsgUnsub SubPath
   | MsgTypeUnsub TypeName
-  | MsgPostTypeUnsub TypeName
+  | MsgPostTypeUnsub (Tagged PostDefinition TypeName)
 
 type SubErrorIndex
   = SPathError SubPath
@@ -90,10 +92,10 @@ type ToRelayUpdateBundle = ToRelayUpdateBundle
 type ToRelayClientBundle = Trcub ToRelayUpdateBundle | Trcsb ToRelaySubBundle
 
 type DefMsg a
-  = MsgDefine Seg a
-  | MsgUndefine Seg
+  = MsgDefine (Tagged a Seg) a
+  | MsgUndefine (Tagged a Seg)
 
-type TypeMsg = MsgAssignType Path Seg Editable
+type TypeMsg = MsgAssignType Path (Tagged Definition Seg) Editable
 
 type FromRelayClientUpdateBundle = FromRelayClientUpdateBundle
     Namespace
@@ -106,8 +108,8 @@ type FromRelayClientUpdateBundle = FromRelayClientUpdateBundle
 
 type FromRelaySubErrorBundle = FromRelaySubErrorBundle
     (List (MsgError SubErrorIndex))
-    (List TypeName) -- post unsubs
-    (List TypeName) -- def unsubs
+    (List (Tagged PostDefinition TypeName)) -- post unsubs
+    (List (Tagged Definition TypeName)) -- def unsubs
     (List SubPath)     -- path unsubs
 
 type FromRelayRootBundle = FromRelayRootBundle (List ToClientContainerUpdateMsg)

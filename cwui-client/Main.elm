@@ -9,6 +9,7 @@ import Task
 import WebSocket
 import Process
 
+import Tagged.Set as TS exposing (TaggedSet)
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
@@ -69,7 +70,7 @@ type alias Model =
   -- Data:
   , recent : List (Digest, RemoteState)
   , pathSubs : Set SubPath
-  , postTypeSubs : Set TypeName
+  , postTypeSubs : TaggedSet PostDefinition TypeName
   , state : RemoteState
   , nodeFs : NodesFs
   , pending : Pendings
@@ -148,30 +149,34 @@ init =
       , timelines = Dict.empty
       , recent = []
       , pathSubs = initialSubs
-      , postTypeSubs = Set.empty
+      , postTypeSubs = TS.empty
       , state = initialState
       , nodeFs = initialNodeFs
       , pending = Dict.empty
       }
-  in (initialModel, subDiffToCmd Set.empty Set.empty initialSubs Set.empty)
+  in (initialModel, subDiffToCmd Set.empty TS.empty initialSubs TS.empty)
 
 -- Update
 
 sendBundle : ToRelayClientBundle -> Cmd Msg
 sendBundle b = WebSocket.send wsTarget <| serialiseBundle b <| fromFloat <| MonoTime.rightNow ()
 
-subDiffOps : (comparable -> SubMsg) -> (comparable -> SubMsg) -> Set comparable -> Set comparable -> List SubMsg
-subDiffOps sub unsub old new =
+subDiffOps
+   : (a -> List b) -> (a -> a -> a) -> (b -> SubMsg)
+  -> (b -> SubMsg) -> a -> a -> List SubMsg
+subDiffOps toList diff sub unsub old new =
   let
-    added = Set.toList <| Set.diff new old
-    removed = Set.toList <| Set.diff old new
+    added = toList <| diff new old
+    removed = toList <| diff old new
   in List.map sub added ++ List.map unsub removed
 
-subDiffToCmd : Set SubPath -> Set TypeName -> Set SubPath -> Set TypeName -> Cmd Msg
+subDiffToCmd
+   : Set SubPath -> TaggedSet PostDefinition TypeName -> Set SubPath
+  -> TaggedSet PostDefinition TypeName -> Cmd Msg
 subDiffToCmd oldP oldPt newP newPt =
   let
-    pOps = subDiffOps MsgSub MsgUnsub oldP newP
-    tOps = subDiffOps MsgPostTypeSub MsgPostTypeUnsub oldPt newPt
+    pOps = subDiffOps Set.toList Set.diff MsgSub MsgUnsub oldP newP
+    tOps = subDiffOps TS.toList TS.diff MsgPostTypeSub MsgPostTypeUnsub oldPt newPt
   in case pOps ++ tOps of
     [] -> Cmd.none
     subOps -> sendBundle <| Trcsb <| ToRelaySubBundle subOps

@@ -6,9 +6,11 @@ module Digests exposing
 import Dict exposing (Dict)
 import Set exposing (Set)
 
+import Tagged.Tagged as T exposing (Tagged(..))
+import Tagged.Dict as TD exposing (TaggedDict)
 import ClTypes exposing
   ( Path, Seg, Namespace, TpId, Interpolation, Time, Attributee
-  , WireValue, WireType, Definition, PostDefinition, Editable)
+  , WireValue, WireType, Definition, PostDefinition, Editable, TypeName)
 import ClMsgTypes exposing
   ( FromRelayClientBundle(..), FromRelayClientUpdateBundle(..)
   , FromRelaySubErrorBundle(..), FromRelayRootBundle(..), TypeMsg(..)
@@ -143,26 +145,26 @@ type DefOp a
   = OpDefine a
   | OpUndefine
 
-type alias DefOps a = Dict Seg (DefOp a)
+type alias DefOps a = TaggedDict a Seg (DefOp a)
 
 digestDefOps : List (DefMsg a) -> DefOps a
 digestDefOps defs =
   let
     applyDefOp o = case o of
-        MsgDefine s def -> Dict.insert s <| OpDefine def
-        MsgUndefine s -> Dict.insert s OpUndefine
-  in List.foldl applyDefOp Dict.empty defs
+        MsgDefine s def -> TD.insert s <| OpDefine def
+        MsgUndefine s -> TD.insert s OpUndefine
+  in List.foldl applyDefOp TD.empty defs
 
 applyDefOps : DefOps a -> TypeMap a -> TypeMap a
 applyDefOps dops tm =
   let
     applyOp tn op = case op of
-        OpDefine def -> Dict.insert tn def
-        OpUndefine -> Dict.remove tn
-  in Dict.foldl applyOp tm dops
+        OpDefine def -> TD.insert tn def
+        OpUndefine -> TD.remove tn
+  in TD.foldl applyOp tm dops
 
 type TaOp
-  = OpAssign (Seg, Editable)
+  = OpAssign (Tagged Definition Seg, Editable)
   | OpDemote
 
 type alias TaOps = Dict Path TaOp
@@ -200,8 +202,8 @@ type alias NsDigest =
 
 emptyNsDigest : NsDigest
 emptyNsDigest =
-  { postDefs = Dict.empty
-  , defs = Dict.empty
+  { postDefs = TD.empty
+  , defs = TD.empty
   , taOps = Dict.empty
   , cops = Dict.empty
   , dops = Dict.empty
@@ -231,25 +233,35 @@ digestFrcub (FromRelayClientUpdateBundle ns errs pDefs defs tas dums cms) =
   , subErrs = []
   }
 
+tnGetNs : Tagged a TypeName -> Namespace
+tnGetNs (Tagged (ns, _)) = ns
+
+tnGetSeg : Tagged a TypeName -> Tagged a Seg
+tnGetSeg = T.map Tuple.second
+
 digestFrseb : FromRelaySubErrorBundle -> Digest
 digestFrseb (FromRelaySubErrorBundle errs pUnsubs tUnsubs dUnsubs) =
   let
-    insertUndef ts = Dict.insert ts OpUndefine
+    insertUndef ts = TD.insert ts OpUndefine
     insertUnsub p = Dict.insert p DeletedChange
     nsOrient = List.foldl
-        (\(ns, k) -> Dict.update ns (Just << (\a -> k :: a) << Maybe.withDefault []))
+        (\tn -> Dict.update (tnGetNs tn) (Just << (\a -> tnGetSeg tn :: a) << Maybe.withDefault []))
         Dict.empty
     nsoPuns = nsOrient pUnsubs
     nsoTuns = nsOrient tUnsubs
-    nsoDuns = nsOrient dUnsubs
-    mentionedNss = Set.fromList <| List.concatMap Dict.keys [nsoPuns, nsoTuns, nsoDuns]
+    nsoDuns = List.foldl
+        (\(tn, p) -> Dict.update tn (Just << (\a -> p :: a) << Maybe.withDefault []))
+        Dict.empty dUnsubs
+    mentionedNss = Set.fromList <| Dict.keys nsoPuns ++ Dict.keys nsoTuns ++ Dict.keys nsoDuns
     forNs ns conv nsoUnsubs = case Dict.get ns nsoUnsubs of
-        Nothing -> Dict.empty
-        Just unsubs -> List.foldl conv Dict.empty unsubs
+        Nothing -> TD.empty
+        Just unsubs -> List.foldl conv TD.empty unsubs
     genNsd ns = Dict.insert ns
       { postDefs = forNs ns insertUndef nsoPuns
       , defs = forNs ns insertUndef nsoTuns
-      , dops = forNs ns insertUnsub nsoDuns
+      , dops = case Dict.get ns nsoDuns of
+            Nothing -> Dict.empty
+            Just unsubs -> List.foldl insertUnsub Dict.empty unsubs
       , taOps = Dict.empty
       , cops = Dict.empty
       , errs = []

@@ -2,6 +2,8 @@ module ClTypes exposing (..)
 import Dict exposing (..)
 import Regex exposing (Regex)
 
+import Tagged.Tagged exposing (Tagged)
+
 type alias Seg = String
 type alias Namespace = Seg
 type alias Path = String
@@ -57,7 +59,11 @@ type alias TupleDefinition =
 
 type alias ChildDescription = {name : Seg, typeRef : Seg, ed : Editable}
 type alias StructDefinition = {doc : String, childDescs : List ChildDescription}
-type alias ArrayDefinition = {doc : String, postType : Maybe Seg, childType : Seg, childEditable : Editable}
+type alias ArrayDefinition =
+  { doc : String
+  , postType : Maybe (Tagged PostDefinition Seg)
+  , childType : Seg
+  , childEditable : Editable}
 
 type Definition
   = TupleDef TupleDefinition

@@ -5,11 +5,16 @@ module RemoteState exposing
 import Dict exposing (Dict)
 import Set exposing (Set)
 
-import ClTypes exposing (Definition(..), TupleDefinition, PostDefinition, Editable, Path, Namespace, Seg, TypeName)
+import ClTypes exposing
+  ( Definition(..), TupleDefinition, PostDefinition, Editable, Path, Namespace
+  , Seg, TypeName)
 import ClNodes exposing (Node)
+import Tagged.Tagged as T exposing (Tagged)
+import Tagged.Dict as TD exposing (TaggedDict)
+import Tagged.Set as TS exposing (TaggedSet)
 
-type alias TypeMap a = Dict Seg a
-type alias TypeAssignMap = Dict Path (Seg, Editable)
+type alias TypeMap a = TaggedDict a Seg a
+type alias TypeAssignMap = Dict Path (Tagged Definition Seg, Editable)
 type alias NodeMap = Dict Path Node
 
 type alias Valuespace =
@@ -21,7 +26,7 @@ type alias Valuespace =
 
 vsEmpty : Valuespace
 vsEmpty =
-  { types = Dict.empty, postTypes = Dict.empty, tyAssns = Dict.empty
+  { types = TD.empty, postTypes = TD.empty, tyAssns = Dict.empty
   , nodes = Dict.empty}
 
 vsNode : Path -> Valuespace -> Result String Node
@@ -29,7 +34,7 @@ vsNode p vs = case Dict.get p <| .nodes vs of
     Nothing -> Err <| "Node not found for path: " ++ p
     Just n -> Ok n
 
-vsTyAssn : Path -> Valuespace -> Result String (Seg, Editable)
+vsTyAssn : Path -> Valuespace -> Result String (Tagged Definition Seg, Editable)
 vsTyAssn p vs = case Dict.get p <| .tyAssns vs of
     Nothing -> Err <| "Type assignment not found for path: " ++ p
     Just tsl -> Ok tsl
@@ -37,20 +42,20 @@ vsTyAssn p vs = case Dict.get p <| .tyAssns vs of
 vsTyDef : Path -> Valuespace -> Result String (Definition, Editable)
 vsTyDef p vs = case vsTyAssn p vs of
     Err _ -> Err <| "Unable to determine TypeSeg for " ++ p
-    Ok (ts, ed) -> case Dict.get ts <| .types vs of
+    Ok (ts, ed) -> case TD.get ts <| .types vs of
         Nothing -> Err <| "No def for " ++ toString ts
         Just def -> Ok (def, ed)
 
 type Postability
   = PostableLoaded PostDefinition
-  | PostableUnloaded Seg
+  | PostableUnloaded (Tagged PostDefinition Seg)
   | Unpostable
 
 vsPostability : Definition -> Valuespace -> Postability
 vsPostability d vs = case d of
     ArrayDef {postType} -> case postType of
         Nothing -> Unpostable
-        Just postSeg -> case Dict.get postSeg <| .postTypes vs of
+        Just postSeg -> case TD.get postSeg <| .postTypes vs of
             Just postDef -> PostableLoaded postDef
             Nothing -> PostableUnloaded postSeg
     _ -> Unpostable
@@ -69,11 +74,11 @@ remoteStateLookup ns p rs = case Dict.get ns rs of
     Just vs -> Result.map2 (\n (d, e) -> (n, d, e, vsPostability d vs))
         (vsNode p vs) (vsTyDef p vs)
 
-unloadedPostTypes : RemoteState -> Set TypeName
+unloadedPostTypes : RemoteState -> TaggedSet PostDefinition TypeName
 unloadedPostTypes =
   let
     appendUnloaded ns vs def acc = case vsPostability def vs of
-        (PostableUnloaded s) -> (ns, s) :: acc
+        (PostableUnloaded s) -> T.map ((,) ns) s :: acc
         _ -> acc
-    ulpt ns vs acc = List.foldl (appendUnloaded ns vs) acc <| Dict.values <| .types vs
-  in Set.fromList << Dict.foldl ulpt []
+    ulpt ns vs acc = List.foldl (appendUnloaded ns vs) acc <| TD.values <| .types vs
+  in TS.fromList << Dict.foldl ulpt []
