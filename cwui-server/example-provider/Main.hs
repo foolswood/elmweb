@@ -19,7 +19,7 @@ import Network.Socket.ByteString (send, recv)
 import Clapi.TH (segq, pathq)
 import Clapi.Types
   ( Path, Seg, Namespace(..), Placeholder(..), isChildOf
-  , TypeName(..), Time(..), InterpolationLimit(..), Interpolation(..), Editable(..), TimeStamped(..)
+  , Time(..), InterpolationLimit(..), Interpolation(..), Editable(..), TimeStamped(..)
   , FrDigest(..), TrDigest(..), TrpDigest(..), trpdEmpty, FrpDigest(..)
   , Definition, structDef, arrayDef, tupleDef
   , unbounded, TreeType(..)
@@ -35,9 +35,6 @@ import Clapi.Serialisation.Messages ()
 ns :: Seg
 ns = [segq|example|]
 
-ttn :: Seg -> Tagged a TypeName
-ttn = Tagged . TypeName (Namespace ns)
-
 initialDefs :: Map (Tagged Definition Seg) Definition
 initialDefs = Map.fromList $ fmap (first Tagged) $
   [ ( [segq|delay|]
@@ -45,12 +42,12 @@ initialDefs = Map.fromList $ fmap (first Tagged) $
   , ( [segq|tsi|]
     , tupleDef "Timeseries of ints" (alFromList [([segq|i|], TtInt32 unbounded)]) ILLinear)
   , ( [segq|arr|]
-    , arrayDef "Editable array of times" Nothing (ttn [segq|delay|]) Editable)
+    , arrayDef "Editable array of times" Nothing (Tagged [segq|delay|]) Editable)
   , ( ns
     , structDef "Example API for client testing" $ alFromList
-      [ ([segq|delay|], (ttn [segq|delay|], Editable))
-      , ([segq|tsi|], (ttn [segq|tsi|], Editable))
-      , ([segq|arr|], (ttn [segq|arr|], Editable))
+      [ ([segq|delay|], (Tagged [segq|delay|], Editable))
+      , ([segq|tsi|], (Tagged [segq|tsi|], Editable))
+      , ([segq|arr|], (Tagged [segq|arr|], Editable))
       ]
     )
   ]
