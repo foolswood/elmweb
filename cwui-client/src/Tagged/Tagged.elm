@@ -1,6 +1,6 @@
 module Tagged.Tagged exposing (Tagged(..), map, tagCmp)
 
-import Tagged.Cmp exposing (Cmp)
+import Cmp.Cmp exposing (Cmp)
 
 type Tagged phantom a = Tagged a
 

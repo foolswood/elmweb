@@ -3,7 +3,7 @@ module TransportTracker exposing (transport, transportSubs, Transport, Transport
 import Dict
 import Set exposing (Set)
 
-import Tagged.Cmp as Cmp exposing (CmpSet)
+import Cmp.Set as CSet exposing (CmpSet)
 import Tagged.Tagged exposing (Tagged(..), tagCmp)
 import Tagged.Dict as TD
 import ClTypes exposing (Time, Namespace, WireValue(..), fromTime, fromFloat, Attributee, Path, WireType(WtTime), SubPath, NsTag, Seg)
@@ -105,7 +105,7 @@ transportSubs (Tagged ns) rs =
         , appendSeg structPath "changed"
         , appendSeg structPath "cue"
         ]
-  in Cmp.fromList tagCmp <| List.map Tagged <| ("relay", "/owners") :: ownerRefPath :: nsTransp
+  in CSet.fromList tagCmp <| List.map Tagged <| ("relay", "/owners") :: ownerRefPath :: nsTransp
 
 transportCueDum : Time -> DataUpdateMsg
 transportCueDum t = MsgConstSet

@@ -5,7 +5,8 @@ import Set exposing (Set)
 import Html as H exposing (Html)
 import Html.Events as Hevt
 
-import Tagged.Cmp as Cmp exposing (Cmp, CmpSet)
+import Cmp.Cmp exposing (Cmp)
+import Cmp.Set as CSet exposing (CmpSet)
 import Futility exposing (updateIdx)
 import Form exposing (FormState(..), formState, FormStore, formInsert)
 import EditTypes exposing (EditEvent(..), mapEe)
@@ -80,11 +81,11 @@ layoutRequires cmp joinPath dyn cg specialRequires =
   let
     go l = case l of
         LayoutContainer kids -> Array.foldl
-            (\k acc -> Cmp.union acc <| go k) (Cmp.empty cmp) kids
+            (\k acc -> CSet.union acc <| go k) (CSet.empty cmp) kids
         LayoutChildChoice p k ->
-            Cmp.insert p <| go <| expandChildChoice joinPath k <| cg p
+            CSet.insert p <| go <| expandChildChoice joinPath k <| cg p
         LayoutDynamic p -> go <| dyn p
-        LayoutLeaf p -> Cmp.singleton cmp p
+        LayoutLeaf p -> CSet.singleton cmp p
         LayoutSpecial s -> specialRequires s
   in go
 

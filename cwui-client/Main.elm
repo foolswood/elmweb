@@ -9,7 +9,7 @@ import Task
 import WebSocket
 import Process
 
-import Tagged.Cmp as Cmp exposing (CmpSet)
+import Cmp.Set as CSet exposing (CmpSet)
 import Tagged.Tagged exposing (Tagged(..), tagCmp)
 import Tagged.Set as TS exposing (TaggedSet)
 import Tagged.Dict as TD exposing (TaggedDict)
@@ -162,7 +162,7 @@ init =
       , nodeFs = initialNodeFs
       , pending = TD.empty
       }
-  in (initialModel, subDiffToCmd (Cmp.empty tagCmp) TS.empty initialSubs TS.empty)
+  in (initialModel, subDiffToCmd (CSet.empty tagCmp) TS.empty initialSubs TS.empty)
 
 -- Update
 
@@ -183,7 +183,7 @@ subDiffToCmd
   -> TaggedSet PostDefinition TypeName -> Cmd Msg
 subDiffToCmd oldP oldPt newP newPt =
   let
-    pOps = subDiffOps Cmp.toList Cmp.diff MsgSub MsgUnsub oldP newP
+    pOps = subDiffOps CSet.toList CSet.diff MsgSub MsgUnsub oldP newP
     tOps = subDiffOps TS.toList TS.diff MsgPostTypeSub MsgPostTypeUnsub oldPt newPt
   in case pOps ++ tOps of
     [] -> Cmd.none
