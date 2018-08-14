@@ -39,14 +39,15 @@ packages:
 - .
 - location:
     git: git@github.com:concert/clapi.git
-    commit: 463d23cf711cfeb82a6f7c7563b73b9c210dc372
+    commit: 82c4510dfa272e78d39bf546bb35d168c053ab26
   extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - attoparsec-binary-0.2
+- attoparsec-varword-0.1.0.0
+- bytestring-builder-varword-0.1.0.0
 - containers-0.5.8.1
-- pipes-network-0.6.4.1
 - unagi-chan-0.4.0.0
 
 # Override default flag values for local packages and extra-deps

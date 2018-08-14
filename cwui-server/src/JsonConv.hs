@@ -58,7 +58,7 @@ import Clapi.Types
   , ToRelayBundle(..)
   , ToRelayClientUpdateBundle(..), ToRelayClientSubBundle(..)
   , ToProviderContainerUpdateMessage(..), ToClientContainerUpdateMessage(..)
-  , TypeMessage(..), TypeName(..), Editable(..)
+  , TypeMessage(..), Editable(..)
   , WireValue(..)
   , Wireable, WireType(..), wireValueWireType, Tag, mkTag, unTag, (<|$|>)
   , DefMessage(..), Definition(..)
@@ -108,12 +108,6 @@ deriving instance FromJSON Namespace
 
 deriving instance ToJSON Placeholder
 deriving instance FromJSON Placeholder
-
-instance FromJSON TypeName where
-    parseJSON = withObject "TypeName" $ \o -> TypeName <$> o .: "ns" <*> o .: "seg"
-
-instance ToJSON TypeName where
-    toJSON (TypeName ns seg) = object ["ns" .= ns, "seg" .= seg]
 
 mkWithWtProxy "withJsonWtProxy" [''Wireable, ''ToJSON, ''FromJSON]
 
@@ -253,9 +247,10 @@ instance ToJSON DataErrorMessage where
 
 instance ToJSON SubErrorIndex where
     toJSON = buildTaggedJson subErrIndexTaggedData $ \case
-        PostTypeSubError tn -> toJSON tn
-        TypeSubError tn -> toJSON tn
-        PathSubError p -> toJSON p
+        NamespaceSubError ns -> toJSON ns
+        PostTypeSubError ns tn -> object ["ns" .= ns, "tn" .= tn]
+        TypeSubError ns tn -> object ["ns" .= ns, "tn" .= tn]
+        PathSubError ns p -> object ["ns" .= ns, "path" .= p]
 
 instance ToJSON SubErrorMessage where
     toJSON (MsgSubError ei m) = object ["eIdx" .= ei, "msg" .= m]
