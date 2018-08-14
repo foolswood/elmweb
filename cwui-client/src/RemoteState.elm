@@ -1,50 +1,85 @@
-module RemoteState exposing (TypeMap, TypeAssignMap, NodeMap, RemoteState, remoteStateEmpty, tyDef, tyAssn)
+module RemoteState exposing
+  ( TypeMap, TypeAssignMap, NodeMap, RemoteState, remoteStateEmpty
+  , remoteStateLookup, Valuespace, vsEmpty, unloadedPostTypes, ByNs)
 
 import Dict exposing (Dict)
+import Set exposing (Set)
 
-import ClTypes exposing (TypeName, Definition(..), PostDefinition, Editable, Path, Seg, ChildDescription)
+import ClTypes exposing
+  ( Definition(..), TupleDefinition, PostDefinition, Editable, Path, Namespace
+  , Seg, TypeName, typeName, NsTag)
 import ClNodes exposing (Node)
-import PathManipulation exposing (splitBasename)
+import Cmp.Dict as CDict
+import Tagged.Tagged as T exposing (Tagged)
+import Tagged.Dict as TD exposing (TaggedDict)
+import Tagged.Set as TS exposing (TaggedSet)
 
-type alias TypeMap a = Dict TypeName a
-type alias TypeAssignMap = Dict Path (TypeName, Editable)
+type alias TypeMap a = TaggedDict a Seg a
+type alias TypeAssignMap = Dict Path (Tagged Definition Seg, Editable)
 type alias NodeMap = Dict Path Node
 
-type alias RemoteState =
+type alias Valuespace =
   { types : TypeMap Definition
   , postTypes : TypeMap PostDefinition
   , tyAssns : TypeAssignMap
   , nodes : NodeMap
   }
 
-remoteStateEmpty : RemoteState
-remoteStateEmpty =
-  { types = Dict.empty, postTypes = Dict.empty, tyAssns = Dict.empty
+vsEmpty : Valuespace
+vsEmpty =
+  { types = TD.empty, postTypes = TD.empty, tyAssns = Dict.empty
   , nodes = Dict.empty}
 
-tyAssn : Path -> RemoteState -> Result String (TypeName, Editable)
-tyAssn p rs = case Dict.get p <| .tyAssns rs of
-    Nothing -> case splitBasename p of
-        Nothing -> Err "Root not type assigned"
-        Just (pp, cSeg) -> Result.andThen (childTypeName cSeg << Tuple.first) <| tyDef pp rs
-    Just tnl -> Ok tnl
+vsNode : Path -> Valuespace -> Result String Node
+vsNode p vs = case Dict.get p <| .nodes vs of
+    Nothing -> Err <| "Node not found for path: " ++ p
+    Just n -> Ok n
 
-tyDef : Path -> RemoteState -> Result String (Definition, Editable)
-tyDef p rs = case tyAssn p rs of
-    Err _ -> Err <| "Unable to determine TypeName for " ++ p
-    Ok (tn, ed) -> case Dict.get tn <| .types rs of
-        Nothing -> Err <| "No def for " ++ toString tn
+vsTyAssn : Path -> Valuespace -> Result String (Tagged Definition Seg, Editable)
+vsTyAssn p vs = case Dict.get p <| .tyAssns vs of
+    Nothing -> Err <| "Type assignment not found for path: " ++ p
+    Just tsl -> Ok tsl
+
+vsTyDef : Path -> Valuespace -> Result String (Definition, Editable)
+vsTyDef p vs = case vsTyAssn p vs of
+    Err _ -> Err <| "Unable to determine TypeSeg for " ++ p
+    Ok (ts, ed) -> case CDict.get ts <| .types vs of
+        Nothing -> Err <| "No def for " ++ toString ts
         Just def -> Ok (def, ed)
 
-structChildTypeName : Seg -> List ChildDescription -> Result String (TypeName, Editable)
-structChildTypeName s l = case l of
-    ({name, typeRef, ed} :: xs) -> if name == s
-        then Ok <| (typeRef, ed)
-        else structChildTypeName s xs
-    [] -> Err <| "Struct has no child: " ++ s
+type Postability
+  = PostableLoaded PostDefinition
+  | PostableUnloaded (Tagged PostDefinition Seg)
+  | Unpostable
 
-childTypeName : Seg -> Definition -> Result String (TypeName, Editable)
-childTypeName s d = case d of
-    StructDef {childDescs} -> structChildTypeName s childDescs
-    ArrayDef {childType, childEditable} -> Ok (childType, childEditable)
-    TupleDef _ -> Err "Tuples have no children"
+vsPostability : Definition -> Valuespace -> Postability
+vsPostability d vs = case d of
+    ArrayDef {postType} -> case postType of
+        Nothing -> Unpostable
+        Just postSeg -> case CDict.get postSeg <| .postTypes vs of
+            Just postDef -> PostableLoaded postDef
+            Nothing -> PostableUnloaded postSeg
+    _ -> Unpostable
+
+type alias ByNs a = TaggedDict NsTag Seg a
+type alias RemoteState = ByNs Valuespace
+
+remoteStateEmpty : RemoteState
+remoteStateEmpty = TD.empty
+
+remoteStateLookup
+   : Namespace -> Path -> RemoteState
+  -> Result String (Node, Definition, Editable, Postability)
+remoteStateLookup ns p rs = case CDict.get ns rs of
+    Nothing -> Err <| "No info about: " ++ toString ns
+    Just vs -> Result.map2 (\n (d, e) -> (n, d, e, vsPostability d vs))
+        (vsNode p vs) (vsTyDef p vs)
+
+unloadedPostTypes : RemoteState -> TaggedSet PostDefinition TypeName
+unloadedPostTypes =
+  let
+    appendUnloaded ns vs def acc = case vsPostability def vs of
+        (PostableUnloaded s) -> typeName ns s :: acc
+        _ -> acc
+    ulpt ns vs acc = List.foldl (appendUnloaded ns vs) acc <| CDict.values <| .types vs
+  in TS.fromList << CDict.foldl ulpt []

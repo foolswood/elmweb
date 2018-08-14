@@ -117,3 +117,6 @@ setFst (_, b) a = (a, b)
 
 setSnd : (a, b) -> b -> (a, b)
 setSnd (a, _) b = (a, b)
+
+getWithDefault : a -> comparable -> Dict comparable a -> a
+getWithDefault df k d = Maybe.withDefault df <| Dict.get k d

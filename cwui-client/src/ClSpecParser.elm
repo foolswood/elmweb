@@ -1,5 +1,6 @@
 module ClSpecParser exposing (parseAtomDef)
 
+import Tagged.Tagged exposing (Tagged(..))
 import ClTypes exposing (AtomDef(..))
 import Regex exposing (regex)
 

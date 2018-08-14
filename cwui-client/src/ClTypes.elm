@@ -2,10 +2,30 @@ module ClTypes exposing (..)
 import Dict exposing (..)
 import Regex exposing (Regex)
 
+import Tagged.Tagged exposing (Tagged(..))
+
+type NsTag = NsTag
+
 type alias Seg = String
-type alias Namespace = Seg
+type alias Namespace = Tagged NsTag Seg
 type alias Path = String
 type alias TypeName = (Seg, Seg)
+type alias SubPath = Tagged NsTag (Seg, Path)
+
+typeName : Namespace -> Tagged a Seg -> Tagged a TypeName
+typeName (Tagged ns) (Tagged s) = Tagged (ns, s)
+
+typeNameGetNs : Tagged a TypeName -> Namespace
+typeNameGetNs (Tagged (ns, _)) = Tagged ns
+
+typeNameGetSeg : Tagged a TypeName -> Tagged a Seg
+typeNameGetSeg (Tagged (_, s)) = Tagged s
+
+subPath : Namespace -> Path -> SubPath
+subPath (Tagged ns) p = Tagged <| (ns, p)
+
+unSubPath : SubPath -> (Namespace, Path)
+unSubPath (Tagged (ns, p)) = (Tagged ns, p)
 
 type alias Attributee = String
 
@@ -55,16 +75,20 @@ type alias TupleDefinition =
   , types : List (Seg, AtomDef)
   , interpLim : InterpolationLimit}
 
-type alias ChildDescription = {name : Seg, typeRef : TypeName, ed : Editable}
+type alias ChildDescription = {name : Seg, typeRef : Seg, ed : Editable}
 type alias StructDefinition = {doc : String, childDescs : List ChildDescription}
-type alias ArrayDefinition = {doc : String, postType : Maybe TypeName, childType : TypeName, childEditable : Editable}
+type alias ArrayDefinition =
+  { doc : String
+  , postType : Maybe (Tagged PostDefinition Seg)
+  , childType : Seg
+  , childEditable : Editable}
 
 type Definition
   = TupleDef TupleDefinition
   | StructDef StructDefinition
   | ArrayDef ArrayDefinition
 
-type alias PostDefinition = {doc : String, fieldDescs : List (Seg, TypeName)}
+type alias PostDefinition = {doc : String, fieldDescs : List (Seg, AtomDef)}
 
 type WireValue
   = WvTime Time

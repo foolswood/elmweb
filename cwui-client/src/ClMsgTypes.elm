@@ -1,18 +1,20 @@
 module ClMsgTypes exposing (..)
-import ClTypes exposing (Path, Seg, Namespace, TypeName, Attributee, TpId, Time, Interpolation, Definition, PostDefinition, Editable, WireValue, WireType)
+
+import Tagged.Tagged exposing (Tagged)
+import ClTypes exposing (Path, Seg, Namespace, TypeName, SubPath, Attributee, TpId, Time, Interpolation, Definition, PostDefinition, Editable, WireValue, WireType)
 
 type SubMsg
-  = MsgSub Path
-  | MsgTypeSub TypeName
-  | MsgPostTypeSub TypeName
-  | MsgUnsub Path
-  | MsgTypeUnsub TypeName
-  | MsgPostTypeUnsub TypeName
+  = MsgSub SubPath
+  | MsgTypeSub (Tagged Definition TypeName)
+  | MsgPostTypeSub (Tagged PostDefinition TypeName)
+  | MsgUnsub SubPath
+  | MsgTypeUnsub (Tagged Definition TypeName)
+  | MsgPostTypeUnsub (Tagged PostDefinition TypeName)
 
 type SubErrorIndex
-  = SPathError Path
-  | STypeError TypeName
-  | SPostTypeError TypeName
+  = SPathError SubPath
+  | STypeError (Tagged Definition TypeName)
+  | SPostTypeError (Tagged PostDefinition TypeName)
 
 type DataErrorIndex
   = DGlobalError
@@ -51,14 +53,12 @@ dumPath dum = case dum of
 
 type ToClientContainerUpdateMsg
   = MsgPresentAfter
-      { msgPath : Path
-      , msgTgt : Seg
+      { msgTgt : Seg
       , msgRef : (Maybe Seg)
       , msgAttributee : (Maybe Attributee)
       }
   | MsgAbsent
-      { msgPath : Path
-      , msgTgt : Seg
+      { msgTgt : Seg
       , msgAttributee : (Maybe Attributee)
       }
 
@@ -66,21 +66,18 @@ type alias PostArgs = List (WireType, WireValue)
 
 type ToProviderContainerUpdateMsg
   = MsgCreateAfter
-      { msgPath : Path
-      , msgPostArgs : PostArgs
+      { msgPostArgs : PostArgs
       , msgTgt : Seg
       , msgRef : (Maybe Seg)
       , msgAttributee : (Maybe Attributee)
       }
   | MsgMoveAfter
-      { msgPath : Path
-      , msgTgt : Seg
+      { msgTgt : Seg
       , msgRef : (Maybe Seg)
       , msgAttributee : (Maybe Attributee)
       }
   | MsgDelete
-      { msgPath : Path
-      , msgTgt : Seg
+      { msgTgt : Seg
       , msgAttributee : (Maybe Attributee)
       }
 
@@ -88,15 +85,15 @@ type ToRelaySubBundle = ToRelaySubBundle (List SubMsg)
 type ToRelayUpdateBundle = ToRelayUpdateBundle
     Namespace
     (List DataUpdateMsg)
-    (List ToProviderContainerUpdateMsg)
+    (List (Path, ToProviderContainerUpdateMsg))
 
 type ToRelayClientBundle = Trcub ToRelayUpdateBundle | Trcsb ToRelaySubBundle
 
 type DefMsg a
-  = MsgDefine Seg a
-  | MsgUndefine Seg
+  = MsgDefine (Tagged a Seg) a
+  | MsgUndefine (Tagged a Seg)
 
-type TypeMsg = MsgAssignType Path TypeName Editable
+type TypeMsg = MsgAssignType Path (Tagged Definition Seg) Editable
 
 type FromRelayClientUpdateBundle = FromRelayClientUpdateBundle
     Namespace
@@ -105,13 +102,13 @@ type FromRelayClientUpdateBundle = FromRelayClientUpdateBundle
     (List (DefMsg Definition))
     (List TypeMsg)
     (List DataUpdateMsg)
-    (List ToClientContainerUpdateMsg)
+    (List (Path, ToClientContainerUpdateMsg))
 
 type FromRelaySubErrorBundle = FromRelaySubErrorBundle
     (List (MsgError SubErrorIndex))
-    (List TypeName) -- post unsubs
-    (List TypeName) -- def unsubs
-    (List Path)     -- path unsubs
+    (List (Tagged PostDefinition TypeName)) -- post unsubs
+    (List (Tagged Definition TypeName)) -- def unsubs
+    (List SubPath)     -- path unsubs
 
 type FromRelayRootBundle = FromRelayRootBundle (List ToClientContainerUpdateMsg)
 

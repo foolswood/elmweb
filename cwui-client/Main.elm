@@ -9,6 +9,11 @@ import Task
 import WebSocket
 import Process
 
+import Cmp.Set as CSet exposing (CmpSet)
+import Cmp.Dict as CDict
+import Tagged.Tagged exposing (Tagged(..), tagCmp)
+import Tagged.Set as TS exposing (TaggedSet)
+import Tagged.Dict as TD exposing (TaggedDict)
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
@@ -18,7 +23,7 @@ import ClMsgTypes exposing
 import Futility exposing (..)
 import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
-import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, tyDef)
+import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace)
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState)
@@ -47,57 +52,59 @@ type UiMode
   | UmView
 
 type alias NodeFs = FormStore Path NodeEdit
+type alias NodesFs = ByNs NodeFs
 
 type alias Pending = Dict Path NodeActions
+type alias Pendings = ByNs Pending
 
 type alias Model =
   -- Global:
-  { errs : List (DataErrorIndex, String)
+  { errs : List (Namespace, DataErrorIndex, String)
   , viewMode : UiMode
   , bundleCount : Int
   , keepRecent : Float
   , timeNow : Float
   -- Layout:
-  , layout : Layout Path Special
-  , layoutFs : FormStore LayoutPath Path
+  , layout : Layout SubPath Special
+  , layoutFs : FormStore LayoutPath SubPath
   -- Special:
-  , clockFs : Dict Seg (FormState EditTypes.PartialTime)
-  , timelines : Dict Seg TsModel
+  , clockFs : TaggedDict NsTag String (FormState EditTypes.PartialTime)
+  , timelines : TaggedDict NsTag Seg TsModel
   -- Data:
   , recent : List (Digest, RemoteState)
-  , pathSubs : Set Path
-  , postTypeSubs : Set TypeName
+  , pathSubs : CmpSet SubPath (Seg, Path)
+  , postTypeSubs : TaggedSet PostDefinition TypeName
   , state : RemoteState
-  , nodeFs : NodeFs
-  , pending : Pending
+  , nodeFs : NodesFs
+  , pending : Pendings
   }
 
 type Special
-  = SpClock Seg
-  | SpTimeline Seg
+  = SpClock Namespace
+  | SpTimeline Namespace
 
 type SpecialEvent
-  = SpeClock Seg (EditEvent EditTypes.PartialTime Time)
-  | SpeTimeline Seg TsMsg
+  = SpeClock Namespace (EditEvent EditTypes.PartialTime Time)
+  | SpeTimeline Namespace TsMsg
 
-specialRequire : RemoteState -> Special -> Set Path
+specialRequire : RemoteState -> Special -> CmpSet SubPath (Seg, Path)
 specialRequire rs sp = case sp of
-    SpClock seg -> transportSubs seg rs
-    SpTimeline seg -> transportSubs seg rs
+    SpClock ns -> transportSubs ns rs
+    SpTimeline ns -> transportSubs ns rs
 
-getTsModel : Seg -> Model -> TsModel
-getTsModel ns = Maybe.withDefault tsModelEmpty << Dict.get ns << .timelines
+getTsModel : Namespace -> Model -> TsModel
+getTsModel ns = Maybe.withDefault tsModelEmpty << CDict.get ns << .timelines
 
 qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
 
-visibleChildren : RemoteState -> NodeFs -> Path -> Array Path
-visibleChildren rs fs p = qualifySegs p <| case chosenChildSegs (formState p fs) of
+visibleChildren : Valuespace -> NodeFs -> Path -> Array Path
+visibleChildren vs fs p = qualifySegs p <| case chosenChildSegs (formState p fs) of
     Just chosen -> chosen
-    Nothing -> defaultChildChoice (remoteChildSegs rs p)
+    Nothing -> defaultChildChoice (remoteChildSegs vs p)
 
-requiredChildren : RemoteState -> NodeFs -> Path -> Array Path
-requiredChildren rs fs p = case remoteChildSegs rs p of
+requiredChildrenVs : Valuespace -> NodeFs -> Path -> Array Path
+requiredChildrenVs vs fs p = case remoteChildSegs vs p of
     Nothing -> Array.empty
     Just segs ->
       let
@@ -106,30 +113,36 @@ requiredChildren rs fs p = case remoteChildSegs rs p of
             Nothing -> defaultChildChoice <| Just segs
       in qualifySegs p chosen
 
-requiredPaths : RemoteState -> NodeFs -> Layout Path Special -> Set Path
-requiredPaths rs fs = layoutRequires
-    (\pa pb -> PathManipulation.canonicalise <| pa ++ pb) (dynamicLayout rs)
-    (requiredChildren rs fs) (specialRequire rs)
-
-requiredArrayPostTypes : RemoteState -> Set TypeName
-requiredArrayPostTypes rs =
+requiredChildren : RemoteState -> NodesFs -> SubPath -> Array SubPath
+requiredChildren rs fss sp =
   let
-    eatn _ d = case d of
-        ArrayDef {postType} -> postType
-        _ -> Nothing
-  in Set.fromList <| Dict.values <| dictMapMaybe eatn <| .types rs
+    (ns, p) = unSubPath sp
+  in case (CDict.get ns rs, CDict.get ns fss) of
+    (Just vs, Just fs) -> Array.map (subPath ns) <| requiredChildrenVs vs fs p
+    _ -> Array.empty
+
+requiredPaths : RemoteState -> NodesFs -> Layout SubPath Special -> CmpSet SubPath (Seg, Path)
+requiredPaths rs fs = layoutRequires
+    tagCmp
+    (\(Tagged (ns, pa)) (Tagged (_, pb)) -> Tagged (ns, PathManipulation.canonicalise <| pa ++ pb))
+    (dynamicLayout rs)
+    (requiredChildren rs fs)
+    (specialRequire rs)
 
 init : (Model, Cmd Msg)
 init =
   let
-    initialNodeFs = formStoreEmpty
+    engineNs = Tagged "engine"
+    relayNs = Tagged "relay"
+    initialNodeFs = TD.empty
     initialLayout = LayoutContainer <| Array.fromList
-      [ LayoutSpecial <| SpClock "engine"
-      , LayoutSpecial <| SpTimeline "engine"
-      , LayoutLeaf "/engine/transport/state"
-      , LayoutLeaf "/relay/self"
-      , LayoutLeaf "/relay/clients"
-      , LayoutChildChoice "/relay/clients" <| LayoutLeaf "/clock_diff"
+      [ LayoutSpecial <| SpClock engineNs
+      , LayoutSpecial <| SpTimeline engineNs
+      , LayoutLeaf <| subPath engineNs "/transport/state"
+      , LayoutLeaf <| subPath relayNs "/self"
+      , LayoutLeaf <| subPath relayNs "/clients"
+      -- FIXME: The leaf of this should be a Path not SubPath:
+      , LayoutChildChoice (subPath relayNs "/clients") <| LayoutLeaf <| subPath relayNs "/clock_diff"
       ]
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialNodeFs initialLayout
@@ -141,30 +154,34 @@ init =
       , timeNow = 0.0
       , layout = initialLayout
       , layoutFs = formStoreEmpty
-      , clockFs = Dict.empty
-      , timelines = Dict.empty
+      , clockFs = TD.empty
+      , timelines = TD.empty
       , recent = []
       , pathSubs = initialSubs
-      , postTypeSubs = Set.empty
+      , postTypeSubs = TS.empty
       , state = initialState
       , nodeFs = initialNodeFs
-      , pending = Dict.empty
+      , pending = TD.empty
       }
-  in (initialModel, subDiffToCmd Set.empty Set.empty initialSubs Set.empty)
+  in (initialModel, subDiffToCmd (CSet.empty tagCmp) TS.empty initialSubs TS.empty)
 
 -- Update
 
 sendBundle : ToRelayClientBundle -> Cmd Msg
 sendBundle b = WebSocket.send wsTarget <| serialiseBundle b <| fromFloat <| MonoTime.rightNow ()
 
-subDiffOps : (comparable -> SubMsg) -> (comparable -> SubMsg) -> Set comparable -> Set comparable -> List SubMsg
+subDiffOps
+   : (a -> SubMsg) -> (a -> SubMsg) -> CmpSet a comparable
+  -> CmpSet a comparable -> List SubMsg
 subDiffOps sub unsub old new =
   let
-    added = Set.toList <| Set.diff new old
-    removed = Set.toList <| Set.diff old new
+    added = CSet.toList <| CSet.diff new old
+    removed = CSet.toList <| CSet.diff old new
   in List.map sub added ++ List.map unsub removed
 
-subDiffToCmd : Set Path -> Set TypeName -> Set Path -> Set TypeName -> Cmd Msg
+subDiffToCmd
+   : CmpSet SubPath (Seg, Path) -> TaggedSet PostDefinition TypeName -> CmpSet SubPath (Seg, Path)
+  -> TaggedSet PostDefinition TypeName -> Cmd Msg
 subDiffToCmd oldP oldPt newP newPt =
   let
     pOps = subDiffOps MsgSub MsgUnsub oldP newP
@@ -179,12 +196,12 @@ type Msg
   | NetworkEvent FromRelayClientBundle
   | SquashRecent
   | SecondPassedTick
-  | LayoutUiEvent (LayoutPath, EditEvent Path (LayoutEvent Path Special))
+  | LayoutUiEvent (LayoutPath, EditEvent SubPath (LayoutEvent SubPath Special))
   | SpecialUiEvent SpecialEvent
-  | NodeUiEvent (Path, EditEvent NodeEdit NodeActions)
+  | NodeUiEvent (SubPath, EditEvent NodeEdit NodeActions)
 
 addDGlobalError : String -> Model -> (Model, Cmd Msg)
-addDGlobalError msg m = ({m | errs = (DGlobalError, msg) :: .errs m}, Cmd.none)
+addDGlobalError msg m = ({m | errs = (Tagged "UI_INTERNAL", DGlobalError, msg) :: .errs m}, Cmd.none)
 
 latestState : Model -> RemoteState
 latestState m =
@@ -195,11 +212,16 @@ latestState m =
         (_ :: remainder) -> go remainder
   in go <| .recent m
 
-clearPending : Digest -> Pending -> Pending
+clearPending : Digest -> Pendings -> Pendings
 -- FIXME: Ignores type changes and errors!
-clearPending {dops, cops} =
+clearPending d =
   let
-    clearPath path pending = case pending of
+    clearPath ns path pending =
+      let
+        mNsd = CDict.get ns <| .nsds d
+        dops = Maybe.withDefault Dict.empty <| Maybe.map .dops mNsd
+        cops = Maybe.withDefault Dict.empty <| Maybe.map .cops mNsd
+      in case pending of
         NaChildren pendingCops -> Maybe.map NaChildren <| case Dict.get path cops of
             Nothing -> Just pendingCops
             Just changed -> nonEmptyDict <| removeKeys (Dict.keys changed) pendingCops
@@ -212,7 +234,7 @@ clearPending {dops, cops} =
                 TimeChange changedPoints -> Maybe.map NaSeries <| TimeSeries.nonEmpty <|
                     List.foldl TimeSeries.remove pendingSeries <| Dict.keys changedPoints
                 _ -> Nothing
-  in dictMapMaybe clearPath
+  in CDict.map (\ns -> dictMapMaybe <| clearPath ns)
 
 rectifyCop : (Path -> List Seg) -> Path -> Dict Seg (SeqOp Seg) -> NodeFs -> NodeFs
 rectifyCop initialState path pathCops fs = formInsert
@@ -224,25 +246,34 @@ rectifyCop initialState path pathCops fs = formInsert
     )
     fs
 
-rectifyEdits : RemoteState -> Digest -> NodeFs -> NodeFs
+rectifyEdits : RemoteState -> Digest -> NodesFs -> NodesFs
 -- FIXME: Ignores most of the digest
-rectifyEdits rs {cops} editFormState = Dict.foldl
-    (rectifyCop <| \path -> Maybe.withDefault [] <| remoteChildSegs rs path)
-    editFormState
-    <| Dict.map (always <| Dict.map <| always Tuple.second) cops
+rectifyEdits rs d editFormState =
+  let
+    rectifyNsEdits ns {cops} fs =
+      let
+        go nsfs = Dict.foldl
+            (rectifyCop (\path
+              -> Maybe.withDefault []
+              <| Maybe.andThen ((flip remoteChildSegs) path)
+              <| CDict.get ns rs))
+            nsfs
+            <| Dict.map (always <| Dict.map <| always Tuple.second) cops
+      in CDict.update ns (Maybe.map go) fs
+  in CDict.foldl rectifyNsEdits editFormState <| .nsds d
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
-    AddError idx msg -> ({model | errs = (idx, msg) :: .errs model}, Cmd.none)
+    AddError idx msg -> ({model | errs = (Tagged "UI_INTERNAL", idx, msg) :: .errs model}, Cmd.none)
     NetworkEvent b ->
       let
         d = digest b
         (newState, errs) = applyDigest d <| latestState model
         pathSubs = requiredPaths newState (.nodeFs model) (.layout model)
-        postTypeSubs = requiredArrayPostTypes newState
+        postTypeSubs = unloadedPostTypes newState
         newM =
           { model
-          | errs = errs ++ .errs model
+          | errs = (.errs model) ++ (CDict.foldl (\ns es acc -> (List.map (\(idx, msg) -> (ns, idx, msg)) es) ++ acc) [] errs)
           , pathSubs = pathSubs
           , postTypeSubs = postTypeSubs
           , recent = .recent model ++ [(d, newState)]
@@ -261,7 +292,7 @@ update msg model = case msg of
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
-    LayoutUiEvent (p, ue) -> case updateLayout p ue (.layoutFs model) (.layout model) of
+    LayoutUiEvent (sp, ue) -> case updateLayout sp ue (.layoutFs model) (.layout model) of
         Err msg -> addDGlobalError msg model
         Ok (newFs, newLayout) ->
           let
@@ -270,27 +301,30 @@ update msg model = case msg of
             ( {model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
     SpecialUiEvent se -> case se of
-        SpeClock seg evt -> case evt of
-            EeUpdate tp -> ({model | clockFs = Dict.insert seg (FsEditing tp) <| .clockFs model}, Cmd.none)
+        SpeClock ns evt -> case evt of
+            EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
             EeSubmit t ->
-              (model, sendBundle <| Trcub <| ToRelayUpdateBundle seg [transportCueDum seg t] [])
+              (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
         SpeTimeline ns evt -> case processTimeSeriesEvent evt <| getTsModel ns model of
-            TsemUpdate tsm -> ({model | timelines = Dict.insert ns tsm <| .timelines model}, Cmd.none)
-            TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum ns t] [])
+            TsemUpdate tsm -> ({model | timelines = CDict.insert ns tsm <| .timelines model}, Cmd.none)
+            TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
             -- FIXME: time point changes go nowhere:
             TsemPointChange _ _ _ -> (model, Cmd.none)
-    NodeUiEvent (p, ue) -> case ue of
+    NodeUiEvent (sp, ue) ->
+      let
+        (ns, p) = unSubPath sp
+      in case ue of
         EeUpdate v ->
           let
-            newFs = formInsert p (Just v) <| .nodeFs model
+            newFs = CDict.update ns (Maybe.map <| formInsert p (Just v)) <| .nodeFs model
             pathSubs = requiredPaths (latestState model) newFs (.layout model)
           in
             ( {model | nodeFs = newFs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
         EeSubmit na -> case na of
-            NaConst wvs -> case tyDef p <| latestState model of
+            NaConst wvs -> case remoteStateLookup ns p <| latestState model of
                 Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
-                Ok (def, _) -> case def of
+                Ok (_, def, _, _) -> case def of
                     TupleDef {types} ->
                       let
                         -- FIXME: Doesn't check anything lines up
@@ -300,18 +334,18 @@ update msg model = case msg of
                           , msgArgs = wvs
                           , msgAttributee = Nothing
                           }
-                        b = ToRelayUpdateBundle (dodgyGetNs p) [dum] []
+                        b = ToRelayUpdateBundle ns [dum] []
                         newM =
                           { model
-                          | pending = Dict.insert p na <| .pending model
-                          , nodeFs = formInsert p Nothing <| .nodeFs model
+                          | pending = CDict.update ns (Maybe.map <| Dict.insert p na) <| .pending model
+                          , nodeFs = CDict.update ns (Maybe.map <| formInsert p Nothing) <| .nodeFs model
                           }
                       in (newM, sendBundle <| Trcub b)
                     _ -> addDGlobalError "Def type mismatch" model
             NaSeries sops -> addDGlobalError "Series submit not implemented" model
-            NaChildren cops -> case tyDef p <| latestState model of
+            NaChildren cops -> case remoteStateLookup ns p <| latestState model of
                 Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
-                Ok (def, _) -> case def of
+                Ok (_, def, _, _) -> case def of
                     ArrayDef _ ->
                       let
                         mergePending mExisting = Just <| NaChildren <| case mExisting of
@@ -319,22 +353,17 @@ update msg model = case msg of
                             _ -> cops
                         newM =
                           { model
-                          | pending = Dict.update p mergePending <| .pending model
-                          , nodeFs = rectifyCop
-                              (Maybe.withDefault [] << remoteChildSegs (latestState model))
-                              p cops <| .nodeFs model
+                          | pending = CDict.update ns (Maybe.map <| Dict.update p mergePending) <| .pending model
+                          , nodeFs = CDict.update ns (Maybe.map <| rectifyCop
+                              (Maybe.withDefault [] << remoteChildSegs (CDict.getWithDefault RemoteState.vsEmpty ns <| latestState model))
+                              p cops) <| .nodeFs model
                           }
-                        b = ToRelayUpdateBundle (dodgyGetNs p) [] <| producePCms p cops
+                        b = ToRelayUpdateBundle ns [] <| producePCms p cops
                       in (newM, sendBundle <| Trcub b)
                     _ -> addDGlobalError "Attempted to change children of non-array" model
 
-producePCms : Path -> NaChildrenT -> List ClMsgTypes.ToProviderContainerUpdateMsg
-producePCms p =
-  let
-    -- FIXME: This is complete rubbish (the whole array thing needs rework)
-    produceCm (seg, op) = ClMsgTypes.MsgDelete
-      {msgPath = "hi", msgTgt = seg, msgAttributee = Nothing}
-  in List.map produceCm << Dict.toList
+producePCms : Path -> NaChildrenT -> List (Path, ClMsgTypes.ToProviderContainerUpdateMsg)
+producePCms p _ = [] -- FIXME: complete non functional junk
 
 -- Subscriptions
 
@@ -351,12 +380,15 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
-dynamicLayout : RemoteState -> Path -> Layout Path a
-dynamicLayout rs p = case Dict.get p <| .nodes rs of
-    Nothing -> LayoutLeaf p
-    Just n -> case n of
-        ContainerNode segs -> LayoutContainer <| Array.map (\seg -> dynamicLayout rs (p ++ "/" ++ seg)) <| Array.fromList <| List.map .seg segs
-        _ -> LayoutLeaf p
+dynamicLayout : RemoteState -> SubPath -> Layout SubPath a
+dynamicLayout rs sp =
+  let
+    (ns, p) = unSubPath sp
+  in case remoteStateLookup ns p rs of
+    Err _ -> LayoutLeaf sp
+    Ok (n, _, _, _) -> case n of
+        ContainerNode segs -> LayoutContainer <| Array.map (\seg -> dynamicLayout rs (subPath ns <| p ++ "/" ++ seg)) <| Array.fromList <| List.map .seg segs
+        _ -> LayoutLeaf sp
 
 view : Model -> Html Msg
 view m = div []
@@ -365,32 +397,44 @@ view m = div []
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
   , div [] [text <| toString <| .nodeFs m]
   , case .viewMode m of
-    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout "" pathEditView specialEditView (.layoutFs m) (.layout m)
+    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout (subPath (Tagged "") "") pathEditView specialEditView (.layoutFs m) (.layout m)
     UmView -> viewLayout
-        (++)
+        -- FIXME: SubPath join shouldn't really be a thing
+        (\spa spb ->
+          let
+            (ns, pa) = unSubPath spa
+            (_, pb) = unSubPath spb
+          in subPath ns <| pa ++ pb)
         (dynamicLayout <| .state m)
-        (visibleChildren (.state m) (.nodeFs m))
+        -- FIXME: This is an utterly minging mess:
+        (\sp ->
+          let
+            (ns, p) = unSubPath sp
+          in Array.map (subPath ns) <| Maybe.withDefault Array.empty <| Maybe.map3  visibleChildren (CDict.get ns <| .state m) (CDict.get ns <| .nodeFs m) <| Just p)
         (Html.map NodeUiEvent << viewPath (.nodeFs m) (.state m) (.recent m) (.pending m))
         (Html.map SpecialUiEvent << viewSpecial m)
         (.layout m)
   ]
 
-viewErrors : List (DataErrorIndex, String) -> Html a
+viewErrors : List (Namespace, DataErrorIndex, String) -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text <| toString s]) errs)
 
-pathEditView : Maybe Path -> FormState Path -> Html (EditEvent Path Path)
+pathEditView : Maybe SubPath -> FormState SubPath -> Html (EditEvent SubPath SubPath)
 pathEditView mp fs = case fs of
     FsViewing -> case mp of
         Nothing -> text "Attempting to view unfilled path"
-        Just p -> span [onClick <| EeUpdate p] [text p]
-    FsEditing partial ->
+        Just p -> span [onClick <| EeUpdate p] [text <| toString p]
+    FsEditing sp ->
       let
+        (partialNs, partialPath) = unSubPath sp
+        (Tagged nsSeg) = partialNs
         buttonText = case mp of
             Nothing -> "Set"
-            Just p -> "Replace " ++ p
+            Just p -> "Replace " ++ (toString p)
       in Html.span []
-        [ button [onClick <| EeSubmit partial] [text buttonText]
-        , input [value partial, type_ "text", onInput EeUpdate] []
+        [ button [onClick <| EeSubmit sp] [text buttonText]
+        , input [value nsSeg, type_ "text", onInput <| \pns -> EeUpdate (Tagged (pns, partialPath))] []
+        , input [value partialPath, type_ "text", onInput <| EeUpdate << subPath partialNs] []
         ]
 
 specialEditView : Special -> Html Special
@@ -398,36 +442,41 @@ specialEditView sp = text <| toString sp
 
 viewSpecial : Model -> Special -> Html SpecialEvent
 viewSpecial m sp = case sp of
-    SpClock seg ->
+    SpClock ns ->
       let
-        transp = transport seg (latestState m) (.timeNow m)
-      in Html.map (SpeClock seg) <| transportClockView transp <| formState seg <| .clockFs m
-    SpTimeline seg -> case transport seg (latestState m) (.timeNow m) of
+        transp = transport ns (latestState m) (.timeNow m)
+      in Html.map (SpeClock ns) <| transportClockView transp <| CDict.getWithDefault FsViewing ns <| .clockFs m
+    SpTimeline ns -> case transport ns (latestState m) (.timeNow m) of
         Err e -> Html.text <| toString e
-        Ok transp -> Html.map (SpeTimeline seg) <| viewTimeSeries (getTsModel seg m) transp
+        Ok transp -> Html.map (SpeTimeline ns) <| viewTimeSeries (getTsModel ns m) transp
 
 viewLoading : Html a
 viewLoading = text "Loading..."
 
-viewPath : NodeFs -> RemoteState -> List (Digest, RemoteState) -> Pending -> Path -> Html (Path, EditEvent NodeEdit NodeActions)
-viewPath nodeFs baseState recent pending p =
+viewPath
+   : NodesFs -> RemoteState -> List (Digest, RemoteState) -> Pendings -> SubPath
+  -> Html (SubPath, EditEvent NodeEdit NodeActions)
+viewPath nodeFs baseState recent pending sp =
   let
-    viewerFor s = case tyDef p s of
+    (ns, p) = unSubPath sp
+    viewerFor s = case remoteStateLookup ns p s of
         Err _ -> Nothing
-        Ok (def, ed) -> Just <| \fs mPending recentCops recentDums -> viewNode
-            ed def (Dict.get p <| .nodes s) recentCops recentDums fs mPending
+        Ok (n, def, ed, post) ->
+            Just <| \fs mPending recentCops recentDums -> viewNode
+                ed def (Just n) recentCops recentDums fs mPending
     bordered highlightCol h = div
         [style [("border", "0.2em solid " ++ highlightCol)]] [h]
     viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
       let
-        newRecentCops = appendMaybe (Dict.get p <| .cops d) recentCops
-        newRecentDums = appendMaybe (Dict.get p <| .dops d) recentDums
+        rsGet nsdSub = Maybe.andThen (Dict.get p << nsdSub) <| CDict.get ns <| .nsds d
+        newRecentCops = appendMaybe (rsGet .cops) recentCops
+        newRecentDums = appendMaybe (rsGet .dops) recentDums
         -- FIXME: Highlight colour thing fairly rubbish, doesn't deactivate controls etc.
         newCompleteView highlightCol partialViewer = bordered highlightCol <|
             partialViewer FsViewing Nothing recentCops recentDums
         newCompleteViews ls = appendMaybe
             (Maybe.map (newCompleteView ls) mPartialViewer) completeViews
-      in case Dict.get p <| .taOps d of
+      in case rsGet .taOps of
             Nothing -> (mPartialViewer, newRecentCops, newRecentDums, completeViews, typeChanged)
             Just OpDemote -> (Nothing, [], [], newCompleteViews "red", True)
             Just (OpAssign tn) -> (viewerFor s, [], [], newCompleteViews "red", True)
@@ -441,16 +490,19 @@ viewPath nodeFs baseState recent pending p =
                 then Just <| viewLoading
                 else Nothing
             Just partialViewer -> Just <| highlight <| partialViewer
-                (formState p nodeFs) (Dict.get p pending) recentCops recentDums
+                (formState p <| CDict.getWithDefault formStoreEmpty ns nodeFs)
+                (Maybe.andThen (Dict.get p) <| CDict.get ns pending)
+                recentCops recentDums
       in appendMaybe finalView completeViews
     contents = finalise <| List.foldl viewDigestAfter (viewerFor baseState, [], [], [], False) recent
-  in Html.map (\e -> (p, e)) <| div [] contents
+  in Html.map (\e -> (subPath ns p, e)) <| div [] contents
 
 viewCasted : (a -> Result String b) -> (b -> Html r) -> a -> Html r
 viewCasted c h a = case c a of
     Ok b -> h b
     Err m -> text m
 
+-- FIXME: Shouldn't be Node not Maybe Node
 viewNode
    : Editable -> Definition -> Maybe Node
    -> List Cops -> List DataChange
@@ -482,8 +534,3 @@ viewStruct structDef =
   let
     iw {name} = Html.li [] [Html.text name]
   in Html.ol [] <| List.map iw <| .childDescs structDef
-
-dodgyGetNs : Path -> Namespace
-dodgyGetNs p = case String.split "/" p of
-    ns :: _ -> ns
-    _ -> "dodgyNsFindingDied"
