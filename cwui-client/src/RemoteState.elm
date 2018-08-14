@@ -9,6 +9,7 @@ import ClTypes exposing
   ( Definition(..), TupleDefinition, PostDefinition, Editable, Path, Namespace
   , Seg, TypeName, typeName, NsTag)
 import ClNodes exposing (Node)
+import Cmp.Dict as CDict
 import Tagged.Tagged as T exposing (Tagged)
 import Tagged.Dict as TD exposing (TaggedDict)
 import Tagged.Set as TS exposing (TaggedSet)
@@ -42,7 +43,7 @@ vsTyAssn p vs = case Dict.get p <| .tyAssns vs of
 vsTyDef : Path -> Valuespace -> Result String (Definition, Editable)
 vsTyDef p vs = case vsTyAssn p vs of
     Err _ -> Err <| "Unable to determine TypeSeg for " ++ p
-    Ok (ts, ed) -> case TD.get ts <| .types vs of
+    Ok (ts, ed) -> case CDict.get ts <| .types vs of
         Nothing -> Err <| "No def for " ++ toString ts
         Just def -> Ok (def, ed)
 
@@ -55,7 +56,7 @@ vsPostability : Definition -> Valuespace -> Postability
 vsPostability d vs = case d of
     ArrayDef {postType} -> case postType of
         Nothing -> Unpostable
-        Just postSeg -> case TD.get postSeg <| .postTypes vs of
+        Just postSeg -> case CDict.get postSeg <| .postTypes vs of
             Just postDef -> PostableLoaded postDef
             Nothing -> PostableUnloaded postSeg
     _ -> Unpostable
@@ -69,7 +70,7 @@ remoteStateEmpty = TD.empty
 remoteStateLookup
    : Namespace -> Path -> RemoteState
   -> Result String (Node, Definition, Editable, Postability)
-remoteStateLookup ns p rs = case TD.get ns rs of
+remoteStateLookup ns p rs = case CDict.get ns rs of
     Nothing -> Err <| "No info about: " ++ toString ns
     Just vs -> Result.map2 (\n (d, e) -> (n, d, e, vsPostability d vs))
         (vsNode p vs) (vsTyDef p vs)
@@ -80,5 +81,5 @@ unloadedPostTypes =
     appendUnloaded ns vs def acc = case vsPostability def vs of
         (PostableUnloaded s) -> typeName ns s :: acc
         _ -> acc
-    ulpt ns vs acc = List.foldl (appendUnloaded ns vs) acc <| TD.values <| .types vs
-  in TS.fromList << TD.foldl ulpt []
+    ulpt ns vs acc = List.foldl (appendUnloaded ns vs) acc <| CDict.values <| .types vs
+  in TS.fromList << CDict.foldl ulpt []

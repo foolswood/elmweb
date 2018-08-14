@@ -4,6 +4,7 @@ import Dict
 import Set exposing (Set)
 
 import Cmp.Set as CSet exposing (CmpSet)
+import Cmp.Dict as CDict
 import Tagged.Tagged exposing (Tagged(..), tagCmp)
 import Tagged.Dict as TD
 import ClTypes exposing (Time, Namespace, WireValue(..), fromTime, fromFloat, Attributee, Path, WireType(WtTime), SubPath, NsTag, Seg)
@@ -29,7 +30,7 @@ type TransportLoadError
   | BadTransportVal Int
 
 rVs : Namespace -> RemoteState -> Result TransportLoadError Valuespace
-rVs ns rs = case TD.get ns rs of
+rVs ns rs = case CDict.get ns rs of
     Nothing -> Err NotLoaded
     Just vs -> Ok vs
 

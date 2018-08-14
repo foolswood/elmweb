@@ -6,6 +6,8 @@ module Digests exposing
 import Dict exposing (Dict)
 import Set exposing (Set)
 
+import Cmp.Set as CSet
+import Cmp.Dict as CDict
 import Tagged.Tagged as T exposing (Tagged(..))
 import Tagged.Dict as TD exposing (TaggedDict)
 import Tagged.Set as TS exposing (TaggedSet)
@@ -153,17 +155,17 @@ digestDefOps : List (DefMsg a) -> DefOps a
 digestDefOps defs =
   let
     applyDefOp o = case o of
-        MsgDefine s def -> TD.insert s <| OpDefine def
-        MsgUndefine s -> TD.insert s OpUndefine
+        MsgDefine s def -> CDict.insert s <| OpDefine def
+        MsgUndefine s -> CDict.insert s OpUndefine
   in List.foldl applyDefOp TD.empty defs
 
 applyDefOps : DefOps a -> TypeMap a -> TypeMap a
 applyDefOps dops tm =
   let
     applyOp tn op = case op of
-        OpDefine def -> TD.insert tn def
-        OpUndefine -> TD.remove tn
-  in TD.foldl applyOp tm dops
+        OpDefine def -> CDict.insert tn def
+        OpUndefine -> CDict.remove tn
+  in CDict.foldl applyOp tm dops
 
 type TaOp
   = OpAssign (Tagged Definition Seg, Editable)
@@ -238,33 +240,33 @@ digestFrcub (FromRelayClientUpdateBundle ns errs pDefs defs tas dums cms) =
 digestFrseb : FromRelaySubErrorBundle -> Digest
 digestFrseb (FromRelaySubErrorBundle errs pUnsubs tUnsubs dUnsubs) =
   let
-    insertUndef ts = TD.insert ts OpUndefine
+    insertUndef ts = CDict.insert ts OpUndefine
     insertUnsub p = Dict.insert p DeletedChange
     nsOrient = List.foldl
-        (\tn -> TD.update
+        (\tn -> CDict.update
             (typeNameGetNs tn)
             (Just << (\a -> typeNameGetSeg tn :: a) << Maybe.withDefault []))
         TD.empty
     nsoPuns = nsOrient pUnsubs
     nsoTuns = nsOrient tUnsubs
     nsoDuns = List.foldl
-        (\(Tagged (ns, p)) -> TD.update (Tagged ns) (Just << (\a -> p :: a) << Maybe.withDefault []))
+        (\(Tagged (ns, p)) -> CDict.update (Tagged ns) (Just << (\a -> p :: a) << Maybe.withDefault []))
         TD.empty dUnsubs
-    mentionedNss = TS.fromList <| TD.keys nsoPuns ++ TD.keys nsoTuns ++ TD.keys nsoDuns
-    forNs ns conv nsoUnsubs = case TD.get ns nsoUnsubs of
+    mentionedNss = TS.fromList <| CDict.keys nsoPuns ++ CDict.keys nsoTuns ++ CDict.keys nsoDuns
+    forNs ns conv nsoUnsubs = case CDict.get ns nsoUnsubs of
         Nothing -> TD.empty
         Just unsubs -> List.foldl conv TD.empty unsubs
-    genNsd ns = TD.insert ns
+    genNsd ns = CDict.insert ns
       { postDefs = forNs ns insertUndef nsoPuns
       , defs = forNs ns insertUndef nsoTuns
-      , dops = case TD.get ns nsoDuns of
+      , dops = case CDict.get ns nsoDuns of
             Nothing -> Dict.empty
             Just unsubs -> List.foldl insertUnsub Dict.empty unsubs
       , taOps = Dict.empty
       , cops = Dict.empty
       , errs = []
       }
-    nsds = TS.foldl genNsd TD.empty mentionedNss
+    nsds = CSet.foldl genNsd TD.empty mentionedNss
   in {rootCops = Dict.empty, nsds = nsds, subErrs = List.map unErrMsg errs}
 
 digestFrrub : FromRelayRootBundle -> Digest
@@ -302,8 +304,8 @@ applyRootChanges : a -> Digest -> ByNs a -> ByNs a
 applyRootChanges empty d bns =
   let
     applyRc s (_, so) = let ns = Tagged s in case so of
-        SoAbsent -> TD.remove ns
-        SoPresentAfter _ -> TD.update ns (Just << Maybe.withDefault empty)
+        SoAbsent -> CDict.remove ns
+        SoPresentAfter _ -> CDict.update ns (Just << Maybe.withDefault empty)
   in Dict.foldl applyRc bns <| .rootCops d
 
 applyDigest
@@ -312,10 +314,10 @@ applyDigest
 applyDigest d rs =
   let
     nsCorrectedVss = applyRootChanges vsEmpty d rs
-    applyNsd ns nsd (ars, aerrs) = case TD.get ns ars of
+    applyNsd ns nsd (ars, aerrs) = case CDict.get ns ars of
         Nothing ->
-            (ars, TD.insert ns [(DGlobalError, "Namespace missing from root")] aerrs)
+            (ars, CDict.insert ns [(DGlobalError, "Namespace missing from root")] aerrs)
         Just vs -> let (newVs, es) = applyNsDigest nsd vs in
-            (TD.insert ns newVs ars, TD.insert ns es aerrs)
-    (appliedVss, errs) = TD.foldl applyNsd (nsCorrectedVss, TD.empty) <| .nsds d
+            (CDict.insert ns newVs ars, CDict.insert ns es aerrs)
+    (appliedVss, errs) = CDict.foldl applyNsd (nsCorrectedVss, TD.empty) <| .nsds d
   in (appliedVss, errs)

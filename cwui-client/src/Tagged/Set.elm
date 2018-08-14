@@ -1,24 +1,14 @@
-module Tagged.Set exposing (TaggedSet, empty, fromList, toList, diff, foldl)
+module Tagged.Set exposing (TaggedSet, empty, fromList)
 
+import Cmp.Set as CmpSet exposing (CmpSet)
 import Set exposing (Set)
 
-import Tagged.Tagged exposing (Tagged(..))
+import Tagged.Tagged exposing (Tagged, tagCmp)
 
-type TaggedSet phantom comparable = TaggedSet (Set comparable)
+type alias TaggedSet phantom comparable = CmpSet (Tagged phantom comparable) comparable
 
 empty : TaggedSet phantom comparable
-empty = TaggedSet Set.empty
+empty = CmpSet.empty tagCmp
 
 fromList : List (Tagged phantom comparable) -> TaggedSet phantom comparable
-fromList = TaggedSet << Set.fromList << List.map (\(Tagged a) -> a)
-
-toList : TaggedSet phantom comparable -> List (Tagged phantom comparable)
-toList (TaggedSet s) = List.map Tagged <| Set.toList s
-
-diff
-   : TaggedSet phantom comparable -> TaggedSet phantom comparable
-  -> TaggedSet phantom comparable
-diff (TaggedSet a) (TaggedSet b) = TaggedSet <| Set.diff a b
-
-foldl : (Tagged phantom comparable -> a -> a) -> a -> TaggedSet phantom comparable -> a
-foldl f initial (TaggedSet s) = Set.foldl (f << Tagged) initial s
+fromList = CmpSet.fromList tagCmp
