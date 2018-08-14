@@ -3,11 +3,14 @@ module TransportTracker exposing (transport, transportSubs, Transport, Transport
 import Dict
 import Set exposing (Set)
 
-import ClTypes exposing (Time, Namespace, WireValue(..), fromTime, fromFloat, Attributee, Path, WireType(WtTime))
+import Tagged.Cmp as Cmp exposing (CmpSet)
+import Tagged.Tagged exposing (Tagged(..), tagCmp)
+import Tagged.Dict as TD
+import ClTypes exposing (Time, Namespace, WireValue(..), fromTime, fromFloat, Attributee, Path, WireType(WtTime), SubPath, NsTag, Seg)
 import ClNodes exposing (Node(ConstDataNode), ConstData)
 import RemoteState exposing (RemoteState, Valuespace)
 import PathManipulation exposing (appendSeg, asPath)
-import ClMsgTypes exposing (DataUpdateMsg(MsgConstSet), SubPath)
+import ClMsgTypes exposing (DataUpdateMsg(MsgConstSet))
 
 type TransportState
   = TransportStopped
@@ -26,7 +29,7 @@ type TransportLoadError
   | BadTransportVal Int
 
 rVs : Namespace -> RemoteState -> Result TransportLoadError Valuespace
-rVs ns rs = case Dict.get ns rs of
+rVs ns rs = case TD.get ns rs of
     Nothing -> Err NotLoaded
     Just vs -> Ok vs
 
@@ -37,7 +40,7 @@ rConstNode p vs = case Dict.get p <| .nodes vs of
     n -> Err <| BadNodeType <| toString n
 
 ownerClockDiffPath : Namespace -> RemoteState -> Result TransportLoadError Path
-ownerClockDiffPath ns rs =
+ownerClockDiffPath (Tagged ns) rs =
   let
     nsOwnerRefPath = appendSeg "/owners" ns
     asRef vs = case vs of
@@ -47,7 +50,7 @@ ownerClockDiffPath ns rs =
     Result.map (flip appendSeg "clock_diff" << Tuple.second) <|
     Result.andThen asRef <|
     Result.andThen (rConstNode nsOwnerRefPath) <|
-    rVs "relay" rs
+    rVs (Tagged "relay") rs
 
 -- FIXME: Doesn't check any types so potential for rubbish errors if anything
 -- changes. Also attribution handling is pants.
@@ -88,11 +91,11 @@ transport ns rs now =
       }
   in Result.map4 toTransport rTimeDiff rChangedTime rCueTime rTranspState
 
-transportSubs : Namespace -> RemoteState -> Set SubPath
-transportSubs ns rs =
+transportSubs : Namespace -> RemoteState -> CmpSet SubPath (Seg, Path)
+transportSubs (Tagged ns) rs =
   let
     ownerRefPath = ("relay", appendSeg "/owners" ns)
-    oipl = case ownerClockDiffPath ns rs of
+    oipl = case ownerClockDiffPath (Tagged ns) rs of
         Err _ -> []
         Ok p -> [p]
     structPath = "/transport"
@@ -101,13 +104,12 @@ transportSubs ns rs =
         , appendSeg structPath "state"
         , appendSeg structPath "changed"
         , appendSeg structPath "cue"
-        , appendSeg "/relay/owners" ns
         ]
-  in Set.fromList <| ("relay", "/owners") :: ownerRefPath :: nsTransp
+  in Cmp.fromList tagCmp <| List.map Tagged <| ("relay", "/owners") :: ownerRefPath :: nsTransp
 
-transportCueDum : Namespace -> Time -> DataUpdateMsg
-transportCueDum ns t = MsgConstSet
-  { msgPath = asPath [ns, "transport", "cue"]
+transportCueDum : Time -> DataUpdateMsg
+transportCueDum t = MsgConstSet
+  { msgPath = "/transport/cue"
   , msgTypes = [WtTime]
   , msgArgs = [WvTime t]
   , msgAttributee = Nothing

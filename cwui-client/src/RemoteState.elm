@@ -7,7 +7,7 @@ import Set exposing (Set)
 
 import ClTypes exposing
   ( Definition(..), TupleDefinition, PostDefinition, Editable, Path, Namespace
-  , Seg, TypeName)
+  , Seg, TypeName, typeName, NsTag)
 import ClNodes exposing (Node)
 import Tagged.Tagged as T exposing (Tagged)
 import Tagged.Dict as TD exposing (TaggedDict)
@@ -60,17 +60,17 @@ vsPostability d vs = case d of
             Nothing -> PostableUnloaded postSeg
     _ -> Unpostable
 
-type alias ByNs a = Dict Namespace a
+type alias ByNs a = TaggedDict NsTag Seg a
 type alias RemoteState = ByNs Valuespace
 
 remoteStateEmpty : RemoteState
-remoteStateEmpty = Dict.empty
+remoteStateEmpty = TD.empty
 
 remoteStateLookup
    : Namespace -> Path -> RemoteState
   -> Result String (Node, Definition, Editable, Postability)
-remoteStateLookup ns p rs = case Dict.get ns rs of
-    Nothing -> Err <| "No info about the namespace: " ++ ns
+remoteStateLookup ns p rs = case TD.get ns rs of
+    Nothing -> Err <| "No info about: " ++ toString ns
     Just vs -> Result.map2 (\n (d, e) -> (n, d, e, vsPostability d vs))
         (vsNode p vs) (vsTyDef p vs)
 
@@ -78,7 +78,7 @@ unloadedPostTypes : RemoteState -> TaggedSet PostDefinition TypeName
 unloadedPostTypes =
   let
     appendUnloaded ns vs def acc = case vsPostability def vs of
-        (PostableUnloaded s) -> T.map ((,) ns) s :: acc
+        (PostableUnloaded s) -> typeName ns s :: acc
         _ -> acc
     ulpt ns vs acc = List.foldl (appendUnloaded ns vs) acc <| TD.values <| .types vs
-  in TS.fromList << Dict.foldl ulpt []
+  in TS.fromList << TD.foldl ulpt []

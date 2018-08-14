@@ -1,22 +1,20 @@
 module ClMsgTypes exposing (..)
 
 import Tagged.Tagged exposing (Tagged)
-import ClTypes exposing (Path, Seg, Namespace, TypeName, Attributee, TpId, Time, Interpolation, Definition, PostDefinition, Editable, WireValue, WireType)
-
-type alias SubPath = (Namespace, Path)
+import ClTypes exposing (Path, Seg, Namespace, TypeName, SubPath, Attributee, TpId, Time, Interpolation, Definition, PostDefinition, Editable, WireValue, WireType)
 
 type SubMsg
   = MsgSub SubPath
-  | MsgTypeSub TypeName
+  | MsgTypeSub (Tagged Definition TypeName)
   | MsgPostTypeSub (Tagged PostDefinition TypeName)
   | MsgUnsub SubPath
-  | MsgTypeUnsub TypeName
+  | MsgTypeUnsub (Tagged Definition TypeName)
   | MsgPostTypeUnsub (Tagged PostDefinition TypeName)
 
 type SubErrorIndex
   = SPathError SubPath
-  | STypeError TypeName
-  | SPostTypeError TypeName
+  | STypeError (Tagged Definition TypeName)
+  | SPostTypeError (Tagged PostDefinition TypeName)
 
 type DataErrorIndex
   = DGlobalError

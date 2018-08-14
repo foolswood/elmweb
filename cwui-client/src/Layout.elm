@@ -5,6 +5,7 @@ import Set exposing (Set)
 import Html as H exposing (Html)
 import Html.Events as Hevt
 
+import Tagged.Cmp as Cmp exposing (Cmp, CmpSet)
 import Futility exposing (updateIdx)
 import Form exposing (FormState(..), formState, FormStore, formInsert)
 import EditTypes exposing (EditEvent(..), mapEe)
@@ -72,15 +73,18 @@ removeSubtree lp layout =
     Nothing -> Err "Attempted to remove layout root"
 
 layoutRequires
-   : (comparable -> comparable -> comparable) -> (comparable -> Layout comparable s)
-  -> (comparable -> Array comparable) -> (s -> Set comparable) -> Layout comparable s -> Set comparable
-layoutRequires joinPath dyn cg specialRequires =
+   : Cmp p comparable -> (p -> p -> p) -> (p -> Layout p s)
+  -> (p -> Array p) -> (s -> CmpSet p comparable) -> Layout p s
+  -> CmpSet p comparable
+layoutRequires cmp joinPath dyn cg specialRequires =
   let
     go l = case l of
-        LayoutContainer kids -> Array.foldl (\k acc -> Set.union acc <| go k) Set.empty kids
-        LayoutChildChoice p k -> Set.insert p <| go <| expandChildChoice joinPath k <| cg p
+        LayoutContainer kids -> Array.foldl
+            (\k acc -> Cmp.union acc <| go k) (Cmp.empty cmp) kids
+        LayoutChildChoice p k ->
+            Cmp.insert p <| go <| expandChildChoice joinPath k <| cg p
         LayoutDynamic p -> go <| dyn p
-        LayoutLeaf p -> Set.singleton p
+        LayoutLeaf p -> Cmp.singleton cmp p
         LayoutSpecial s -> specialRequires s
   in go
 

@@ -5,9 +5,9 @@ import Dict
 
 import Tagged.Tagged exposing (Tagged(..))
 import ClTypes exposing
-  ( Path, Time, Interpolation(..), TpId, Seg, Attributee
-  , TypeName, Editable(..), Definition(..), PostDefinition, AtomDef
-  , InterpolationLimit(..) , ChildDescription, WireValue(..), WireType(..))
+  ( Namespace, Path, Time, Interpolation(..), TpId, Seg, Attributee
+  , TypeName, typeName, Editable(..), Definition(..), PostDefinition, AtomDef
+  , InterpolationLimit(..) , ChildDescription, WireValue(..), WireType(..), SubPath)
 import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
 
@@ -27,25 +27,28 @@ encodeNullable encA ma = case ma of
 encodeSeg : Seg -> JE.Value
 encodeSeg = JE.string
 
+encodeNs : Namespace -> JE.Value
+encodeNs (Tagged ns) = JE.string ns
+
 encodePath : Path -> JE.Value
 encodePath = JE.string
 
-encodeTypeName : TypeName -> JE.Value
-encodeTypeName (ns, seg) = JE.object
+encodeTypeName : Tagged a TypeName -> JE.Value
+encodeTypeName (Tagged (ns, seg)) = JE.object
   [ ("ns", encodeSeg ns)
   , ("seg", encodeSeg seg)]
 
 encodeSubPath : SubPath -> JE.Value
-encodeSubPath = encodePair encodeSeg encodePath
+encodeSubPath (Tagged p) = encodePair encodeSeg encodePath p
 
 encodeSubMsg : SubMsg -> JE.Value
 encodeSubMsg sm = JE.list <| case sm of
     MsgSub p -> [JE.string "s", encodeSubPath p]
     MsgTypeSub tn -> [JE.string "S", encodeTypeName tn]
-    MsgPostTypeSub (Tagged tn) -> [JE.string "pS", encodeTypeName tn]
+    MsgPostTypeSub tn -> [JE.string "pS", encodeTypeName tn]
     MsgUnsub p -> [JE.string "u", encodeSubPath p]
     MsgTypeUnsub tn -> [JE.string "U", encodeTypeName tn]
-    MsgPostTypeUnsub (Tagged tn) -> [JE.string "pU", encodeTypeName tn]
+    MsgPostTypeUnsub tn -> [JE.string "pU", encodeTypeName tn]
 
 encodeTime : Time -> JE.Value
 encodeTime (s, f) = JE.list [JE.int s, JE.int f]
@@ -158,7 +161,7 @@ providerContToJsonValue m = case m of
 
 serialiseUpdateBundle : ToRelayUpdateBundle -> Time -> String
 serialiseUpdateBundle (ToRelayUpdateBundle ns dums conts) t = JE.encode 2 (JE.object
-  [ ("ns", JE.string ns)
+  [ ("ns", encodeNs ns)
   , ("data", JE.list (List.map dumToJsonValue dums))
   , ("cont", JE.list (List.map (encodePair encodePath providerContToJsonValue) conts))
   , ("time", encodeTime t)])
@@ -187,7 +190,7 @@ decodeDataErrIdx = decodeTagged (Dict.fromList
     ])
 
 decodeSubPath : JD.Decoder SubPath
-decodeSubPath = decodePair decodeSeg decodePath
+decodeSubPath = JD.map Tagged <| decodePair decodeSeg decodePath
 
 decodeSubErrIdx : JD.Decoder SubErrorIndex
 decodeSubErrIdx = decodeTagged (Dict.fromList
@@ -337,9 +340,12 @@ decodeAttributeeField = JD.field "att" (JD.nullable decodeAttributee)
 decodeSeg : JD.Decoder Seg
 decodeSeg = JD.string
 
-decodeTypeName : JD.Decoder TypeName
-decodeTypeName = JD.map2 (,)
-    (JD.field "ns" decodeSeg) (JD.field "seg" decodeSeg)
+decodeNs : JD.Decoder Namespace
+decodeNs = JD.map Tagged decodeSeg
+
+decodeTypeName : JD.Decoder (Tagged a TypeName)
+decodeTypeName = JD.map2 typeName
+    (JD.field "ns" decodeNs) (JD.field "seg" <| JD.map Tagged decodeSeg)
 
 decodeTypeMsg : JD.Decoder TypeMsg
 decodeTypeMsg = JD.map3 MsgAssignType
@@ -405,13 +411,13 @@ parseRootBundle = JD.map FromRelayRootBundle <| JD.list decodeCCm
 parseSubBundle : JD.Decoder FromRelaySubErrorBundle
 parseSubBundle = JD.map4 FromRelaySubErrorBundle
     (JD.field "errs" (JD.list <| decodeErrMsg decodeSubErrIdx))
-    (JD.field "ptuns" (JD.list <| JD.map Tagged <| decodeTypeName))
-    (JD.field "tuns" (JD.list <| JD.map Tagged <| decodeTypeName))
-    (JD.field "duns" (JD.list <| decodePair decodeSeg decodePath))
+    (JD.field "ptuns" (JD.list decodeTypeName))
+    (JD.field "tuns" (JD.list decodeTypeName))
+    (JD.field "duns" (JD.list decodeSubPath))
 
 parseUpdateBundle : JD.Decoder FromRelayClientUpdateBundle
 parseUpdateBundle = JD.map7 FromRelayClientUpdateBundle
-    (JD.field "ns" JD.string)
+    (JD.field "ns" <| JD.map Tagged JD.string)
     (JD.field "errs" (JD.list <| decodeErrMsg decodeDataErrIdx))
     (JD.field "pdefs" (JD.list <| decodeDefMsg decodePostDef))
     (JD.field "defs" (JD.list <| decodeDefMsg decodeDef))

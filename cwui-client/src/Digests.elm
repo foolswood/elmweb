@@ -8,9 +8,11 @@ import Set exposing (Set)
 
 import Tagged.Tagged as T exposing (Tagged(..))
 import Tagged.Dict as TD exposing (TaggedDict)
+import Tagged.Set as TS exposing (TaggedSet)
 import ClTypes exposing
   ( Path, Seg, Namespace, TpId, Interpolation, Time, Attributee
-  , WireValue, WireType, Definition, PostDefinition, Editable, TypeName)
+  , WireValue, WireType, Definition, PostDefinition, Editable, TypeName
+  , typeNameGetNs, typeNameGetSeg)
 import ClMsgTypes exposing
   ( FromRelayClientBundle(..), FromRelayClientUpdateBundle(..)
   , FromRelaySubErrorBundle(..), FromRelayRootBundle(..), TypeMsg(..)
@@ -211,7 +213,7 @@ emptyNsDigest =
   }
 
 type alias Digest =
-  { nsds : Dict Namespace NsDigest
+  { nsds : ByNs NsDigest
   , rootCops : Cops
   , subErrs : List (SubErrorIndex, String)
   }
@@ -222,7 +224,7 @@ unErrMsg (MsgError i s) = (i, s)
 digestFrcub : FromRelayClientUpdateBundle -> Digest
 digestFrcub (FromRelayClientUpdateBundle ns errs pDefs defs tas dums cms) =
   { rootCops = Dict.empty
-  , nsds = Dict.singleton ns <|
+  , nsds = TD.singleton ns <|
       { defs = digestDefOps defs
       , postDefs = digestDefOps pDefs
       , taOps = digestTypeMsgs tas
@@ -233,46 +235,42 @@ digestFrcub (FromRelayClientUpdateBundle ns errs pDefs defs tas dums cms) =
   , subErrs = []
   }
 
-tnGetNs : Tagged a TypeName -> Namespace
-tnGetNs (Tagged (ns, _)) = ns
-
-tnGetSeg : Tagged a TypeName -> Tagged a Seg
-tnGetSeg = T.map Tuple.second
-
 digestFrseb : FromRelaySubErrorBundle -> Digest
 digestFrseb (FromRelaySubErrorBundle errs pUnsubs tUnsubs dUnsubs) =
   let
     insertUndef ts = TD.insert ts OpUndefine
     insertUnsub p = Dict.insert p DeletedChange
     nsOrient = List.foldl
-        (\tn -> Dict.update (tnGetNs tn) (Just << (\a -> tnGetSeg tn :: a) << Maybe.withDefault []))
-        Dict.empty
+        (\tn -> TD.update
+            (typeNameGetNs tn)
+            (Just << (\a -> typeNameGetSeg tn :: a) << Maybe.withDefault []))
+        TD.empty
     nsoPuns = nsOrient pUnsubs
     nsoTuns = nsOrient tUnsubs
     nsoDuns = List.foldl
-        (\(tn, p) -> Dict.update tn (Just << (\a -> p :: a) << Maybe.withDefault []))
-        Dict.empty dUnsubs
-    mentionedNss = Set.fromList <| Dict.keys nsoPuns ++ Dict.keys nsoTuns ++ Dict.keys nsoDuns
-    forNs ns conv nsoUnsubs = case Dict.get ns nsoUnsubs of
+        (\(Tagged (ns, p)) -> TD.update (Tagged ns) (Just << (\a -> p :: a) << Maybe.withDefault []))
+        TD.empty dUnsubs
+    mentionedNss = TS.fromList <| TD.keys nsoPuns ++ TD.keys nsoTuns ++ TD.keys nsoDuns
+    forNs ns conv nsoUnsubs = case TD.get ns nsoUnsubs of
         Nothing -> TD.empty
         Just unsubs -> List.foldl conv TD.empty unsubs
-    genNsd ns = Dict.insert ns
+    genNsd ns = TD.insert ns
       { postDefs = forNs ns insertUndef nsoPuns
       , defs = forNs ns insertUndef nsoTuns
-      , dops = case Dict.get ns nsoDuns of
+      , dops = case TD.get ns nsoDuns of
             Nothing -> Dict.empty
             Just unsubs -> List.foldl insertUnsub Dict.empty unsubs
       , taOps = Dict.empty
       , cops = Dict.empty
       , errs = []
       }
-    nsds = Set.foldl genNsd Dict.empty mentionedNss
+    nsds = TS.foldl genNsd TD.empty mentionedNss
   in {rootCops = Dict.empty, nsds = nsds, subErrs = List.map unErrMsg errs}
 
 digestFrrub : FromRelayRootBundle -> Digest
 digestFrrub (FromRelayRootBundle contUps) =
   { rootCops = Dict.fromList <| List.map digestCm contUps
-  , nsds = Dict.empty
+  , nsds = TD.empty
   , subErrs = []
   }
 
@@ -303,22 +301,21 @@ applyNsDigest d rs =
 applyRootChanges : a -> Digest -> ByNs a -> ByNs a
 applyRootChanges empty d bns =
   let
-    applyRc s (_, so) = case so of
-        SoAbsent -> Dict.remove s
-        SoPresentAfter _ -> Dict.update s (Just << Maybe.withDefault empty)
-  in
-    Dict.foldl applyRc bns <| .rootCops d
+    applyRc s (_, so) = let ns = Tagged s in case so of
+        SoAbsent -> TD.remove ns
+        SoPresentAfter _ -> TD.update ns (Just << Maybe.withDefault empty)
+  in Dict.foldl applyRc bns <| .rootCops d
 
 applyDigest
    : Digest -> RemoteState
-  -> (RemoteState, Dict Namespace (List (DataErrorIndex, String)))
+  -> (RemoteState, ByNs (List (DataErrorIndex, String)))
 applyDigest d rs =
   let
     nsCorrectedVss = applyRootChanges vsEmpty d rs
-    applyNsd ns nsd (ars, aerrs) = case Dict.get ns ars of
+    applyNsd ns nsd (ars, aerrs) = case TD.get ns ars of
         Nothing ->
-            (ars, Dict.insert ns [(DGlobalError, "Namespace missing from root")] aerrs)
+            (ars, TD.insert ns [(DGlobalError, "Namespace missing from root")] aerrs)
         Just vs -> let (newVs, es) = applyNsDigest nsd vs in
-            (Dict.insert ns newVs ars, Dict.insert ns es aerrs)
-    (appliedVss, errs) = Dict.foldl applyNsd (nsCorrectedVss, Dict.empty) <| .nsds d
+            (TD.insert ns newVs ars, TD.insert ns es aerrs)
+    (appliedVss, errs) = TD.foldl applyNsd (nsCorrectedVss, TD.empty) <| .nsds d
   in (appliedVss, errs)

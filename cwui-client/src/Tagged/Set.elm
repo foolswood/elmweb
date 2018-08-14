@@ -1,4 +1,4 @@
-module Tagged.Set exposing (TaggedSet, empty, fromList, toList, diff)
+module Tagged.Set exposing (TaggedSet, empty, fromList, toList, diff, foldl)
 
 import Set exposing (Set)
 
@@ -19,3 +19,6 @@ diff
    : TaggedSet phantom comparable -> TaggedSet phantom comparable
   -> TaggedSet phantom comparable
 diff (TaggedSet a) (TaggedSet b) = TaggedSet <| Set.diff a b
+
+foldl : (Tagged phantom comparable -> a -> a) -> a -> TaggedSet phantom comparable -> a
+foldl f initial (TaggedSet s) = Set.foldl (f << Tagged) initial s
