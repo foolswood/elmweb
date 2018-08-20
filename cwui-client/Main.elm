@@ -508,7 +508,7 @@ viewNode
    -> List Cops -> List DataChange
    -> FormState NodeEdit -> Maybe NodeActions
    -> Html (EditEvent NodeEdit NodeActions)
-viewNode ed def maybeNode recentCops recentDums formState maybeNas =
+viewNode editable def maybeNode recentCops recentDums formState maybeNas =
   let
     withCasts recentCast neConv naConv cn recents h = viewCasted
         (\(r, n, s, a) -> Result.map4 (,,,)
@@ -516,7 +516,6 @@ viewNode ed def maybeNode recentCops recentDums formState maybeNas =
             (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
         (\(r, mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h r mn fs mp)
         (recents, maybeNode, formState, maybeNas)
-    editable = ed /= ReadOnly -- FIXME: Plumb this type all the way through
   in case def of
     TupleDef d -> case .interpLim d of
         ILUninterpolated -> withCasts

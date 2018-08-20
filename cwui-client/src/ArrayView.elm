@@ -8,7 +8,7 @@ import Set exposing (Set)
 import Json.Encode as JE
 
 import SequenceOps exposing (SeqOp(..), applySeqOps, banish, inject, unref)
-import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace)
+import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace, Editable(..))
 import ClNodes exposing (Node(ContainerNode), ContainerNodeT)
 import Form exposing (FormState(..))
 import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), NaChildrenT, NeChildrenT)
@@ -74,7 +74,7 @@ acDragOverAttr =
   in dragOverAttr acHandler
 
 viewArray
-   : Bool -> ArrayDefinition -> List Cops
+   : Editable -> ArrayDefinition -> List Cops
   -> Maybe ContainerNodeT -> FormState NeChildrenT -> Maybe NaChildrenT
   -> Html (EditEvent NeChildrenT NaChildrenT)
 viewArray editable arrayDef recentCops mn s mp =
@@ -90,8 +90,8 @@ viewArray editable arrayDef recentCops mn s mp =
         FsViewing -> {chosen = defaultChildChoice <| Just rSegs, ops = Dict.empty, addSeg = "", dragging = Nothing}
         FsEditing v -> v
     chosenChange op = EeUpdate {editState | chosen = op <| .chosen editState}
-    content = if editable
-        then
+    content = case editable of
+        Editable ->
           let
             addSeg = .addSeg editState
             -- FIXME: use the regex from the relay's definition:
@@ -170,7 +170,7 @@ viewArray editable arrayDef recentCops mn s mp =
                     else H.div [] [segWidget, addBtn <| Just seg, delBtn seg]
             segViews = List.map viewSeg allSegs
           in addTextEntry :: addBtn Nothing :: segViews
-        else
+        ReadOnly ->
           let
             viewSeg seg =
               let

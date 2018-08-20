@@ -5,7 +5,7 @@ import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
 
 import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood, lastJust, last)
-import ClTypes exposing (Bounds, Attributee, TypeName, WireValue, asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time)
+import ClTypes exposing (Bounds, Attributee, TypeName, WireValue, asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time, Editable(..))
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial, fullPartial)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
@@ -13,11 +13,11 @@ import Digests exposing (ConstChangeT)
 import Limits exposing (maxWord64, maxWord32)
 
 type EditTarget k v p
-  = Editable k p
-  | ReadOnly v
+  = EditableTarget k p
+  | ReadOnlyTarget v
 
 viewWithRecent
-   : Bool -> TupleDefinition -> List ConstChangeT
+   : Editable -> TupleDefinition -> List ConstChangeT
   -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
   -> Html (EditEvent NeConstT NaConstT)
 viewWithRecent editable def recent mn fs mp =
@@ -52,7 +52,7 @@ upstreamStates mn recent =
     Just n -> .values n :: recentAttrVals
 
 viewWithRecentNoSubmission
-   : Bool -> List AtomDef -> List ConstChangeT
+   : Editable -> List AtomDef -> List ConstChangeT
   -> Maybe ConstDataNodeT -> NeConstT
   -> Html NeConstT
 viewWithRecentNoSubmission editable ads recent mn latestPartial =
@@ -60,22 +60,22 @@ viewWithRecentNoSubmission editable ads recent mn latestPartial =
     attrVals = upstreamStates mn recent
     finalVal = List.length attrVals - 1
     sourceInfo idx ma = text <| toString (idx - finalVal) ++ Maybe.withDefault "" ma
-    latestControls = if editable
-      then text "Staging controls?"
-      else text "Latest"
+    latestControls = case editable of
+      Editable -> text "Staging controls?"
+      ReadOnly -> text "Latest"
     asComp idx (ma, wvs) =
       let
         isLatest = idx == finalVal
         si = if isLatest
           then latestControls
           else sourceInfo idx ma
-        et = if isLatest && editable
-          then Editable () latestPartial
-          else ReadOnly wvs
+        et = if isLatest && editable == Editable
+          then EditableTarget () latestPartial
+          else ReadOnlyTarget wvs
       in (si, et)
     valComps = List.indexedMap asComp attrVals
     comps = case (editable, valComps) of
-        (True, []) -> [(latestControls, Editable () latestPartial)]
+        (Editable, []) -> [(latestControls, EditableTarget () latestPartial)]
         _ -> valComps
     cleanResult r = case r of
         Left a -> never a
@@ -92,8 +92,8 @@ constDataComp ads values =
     viewRow (sourceInfo, et) =
       let
         tupV = case et of
-            ReadOnly wvs -> viewConstTuple ads wvs
-            Editable k p -> Html.map ((,) k) <| viewConstTupleEdit ads p
+            ReadOnlyTarget wvs -> viewConstTuple ads wvs
+            EditableTarget k p -> Html.map ((,) k) <| viewConstTupleEdit ads p
       in [div [] [Html.map Left sourceInfo], div [] [Html.map Right tupV]]
     cells = List.concatMap viewRow values
   in div [style [("display", "grid"), ("grid-template-columns", "auto auto")]] cells

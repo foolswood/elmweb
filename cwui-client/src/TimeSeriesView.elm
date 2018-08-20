@@ -8,7 +8,8 @@ import CSS exposing (emPx, keyFramed, applyKeyFramed)
 
 import ClTypes exposing
   ( TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime
-  , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded, Path)
+  , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded, Path
+  , Editable(Editable))
 import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
@@ -263,7 +264,7 @@ editTimePoint def {recents, base, fs, mp} =
         Nothing -> (False, Nothing, Nothing)
     ads = List.map Tuple.second <| .types def
     (valPartials, valLatest, valSub) = TupleViews.pInfo ads valueBase valueRecents valueFs valueMp
-    valView = TupleViews.viewWithRecentNoSubmission True ads valueRecents valueBase valPartials
+    valView = TupleViews.viewWithRecentNoSubmission Editable ads valueRecents valueBase valPartials
     iLim = .interpLim def
     ptUpstream = mCurrentMeta pointBase pointRecents
     ptPartial = getPartialTimePointMeta iLim ptUpstream pointFs pointMp
