@@ -18,13 +18,13 @@ type EditTarget k v p
 
 viewWithRecent
    : Editable -> TupleDefinition -> List ConstChangeT
-  -> Maybe ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
+  -> ConstDataNodeT -> FormState NeConstT -> Maybe NaConstT
   -> Html (EditEvent NeConstT NaConstT)
-viewWithRecent editable def recent mn fs mp =
+viewWithRecent editable def recent n fs mp =
   let
     ads = List.map Tuple.second <| .types def
-    (latestPartial, mLatest, mSub) = pInfo ads mn recent fs mp
-    v = viewWithRecentNoSubmission editable ads recent mn latestPartial
+    (latestPartial, mLatest, mSub) = pInfo ads n recent fs mp
+    v = viewWithRecentNoSubmission editable ads recent n latestPartial
     vUp = Html.map EeUpdate v
   in case mSub of
     Just sub -> if Just sub == mLatest
@@ -33,31 +33,27 @@ viewWithRecent editable def recent mn fs mp =
     Nothing -> vUp
 
 pInfo
-   : List AtomDef -> Maybe ConstDataNodeT -> List ConstChangeT
+   : List AtomDef -> ConstDataNodeT -> List ConstChangeT
    -> FormState NeConstT -> Maybe NaConstT
    -> (NeConstT, Maybe NaConstT, Maybe NaConstT)
-pInfo ads mn recent fs mp =
+pInfo ads n recent fs mp =
   let
-    attrVals = upstreamStates mn recent
+    attrVals = upstreamStates n recent
     mRemote = Maybe.map Tuple.second <| last attrVals
     partial = getPartials ads mRemote fs mp
   in (partial, lastJust mRemote mp, asSubmittable ads partial)
 
-upstreamStates : Maybe ConstDataNodeT -> List ConstChangeT -> List (Maybe Attributee, List WireValue)
-upstreamStates mn recent =
-  let
-    recentAttrVals = List.map (\(ma, _, wvs) -> (ma, wvs)) recent
-  in case mn of
-    Nothing -> recentAttrVals
-    Just n -> .values n :: recentAttrVals
+upstreamStates : ConstDataNodeT -> List ConstChangeT -> List (Maybe Attributee, List WireValue)
+upstreamStates n recent =
+    .values n :: List.map (\(ma, _, wvs) -> (ma, wvs)) recent
 
 viewWithRecentNoSubmission
    : Editable -> List AtomDef -> List ConstChangeT
-  -> Maybe ConstDataNodeT -> NeConstT
+  -> ConstDataNodeT -> NeConstT
   -> Html NeConstT
-viewWithRecentNoSubmission editable ads recent mn latestPartial =
+viewWithRecentNoSubmission editable ads recent n latestPartial =
   let
-    attrVals = upstreamStates mn recent
+    attrVals = upstreamStates n recent
     finalVal = List.length attrVals - 1
     sourceInfo idx ma = text <| toString (idx - finalVal) ++ Maybe.withDefault "" ma
     latestControls = case editable of

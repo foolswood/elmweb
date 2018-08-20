@@ -46,7 +46,7 @@ type TsMsg
   | TsEdit Path TsEditEvt
 
 type alias PointInfo =
-  { base : Maybe (Time, TimePoint)
+  { base : (Time, TimePoint)
   , recents : List TimeChangeT
   , fs : FormState NeTimePoint
   , mp : Maybe NaTimePoint
@@ -248,12 +248,13 @@ editTimePoint def {recents, base, fs, mp} =
         OpSet t wts wvs i -> (False, recentValAcc ++ [(ma, wts, wvs)], recentPtAcc ++ [(ma, t, i)])
         OpRemove -> (True, recentValAcc, recentPtAcc)
     (removedUpstream, valueRecents, pointRecents) = List.foldl splitRecents (False, [], []) recents
-    (valueBase, pointBase) = case base of
-        -- FIXME: Making up the types here because they're never used (so probably shouldn't flow everywhere)
-        Just (t, {attributee, wvs, interpolation}) ->
-          ( Just {types = [], values = (attributee, wvs)}
+    (valueBase, pointBase) =
+        let
+          (t, {attributee, wvs, interpolation}) = base
+        in
+          -- FIXME: Making up the types here because they're never used (so probably shouldn't flow everywhere)
+          ( {types = [], values = (attributee, wvs)}
           , Just (attributee, t, interpolation))
-        Nothing -> (Nothing, Nothing)
     (valueFs, pointFs) = case fs of
         FsViewing -> (FsViewing, FsViewing)
         FsEditing {wvs, time, interpolation} -> (FsEditing wvs, FsEditing (time, interpolation))

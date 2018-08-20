@@ -75,13 +75,11 @@ acDragOverAttr =
 
 viewArray
    : Editable -> ArrayDefinition -> List Cops
-  -> Maybe ContainerNodeT -> FormState NeChildrenT -> Maybe NaChildrenT
+  -> ContainerNodeT -> FormState NeChildrenT -> Maybe NaChildrenT
   -> Html (EditEvent NeChildrenT NaChildrenT)
-viewArray editable arrayDef recentCops mn s mp =
+viewArray editable arrayDef recentCops n s mp =
   let
-    baseSegs = case mn of
-        Just containees -> List.map .seg containees
-        _ -> []
+    baseSegs = List.map .seg n
     recentAttrib = List.foldl (Dict.union << Dict.map (always Tuple.first)) Dict.empty recentCops
     (recentRemoves, recentMoves) = partitionRemoveOps <|
         List.foldl (Dict.union << Dict.map (always Tuple.second)) Dict.empty recentCops

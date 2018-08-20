@@ -463,7 +463,7 @@ viewPath nodeFs baseState recent pending sp =
         Err _ -> Nothing
         Ok (n, def, ed, post) ->
             Just <| \fs mPending recentCops recentDums -> viewNode
-                ed def (Just n) recentCops recentDums fs mPending
+                ed def n recentCops recentDums fs mPending
     bordered highlightCol h = div
         [style [("border", "0.2em solid " ++ highlightCol)]] [h]
     viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
@@ -502,27 +502,26 @@ viewCasted c h a = case c a of
     Ok b -> h b
     Err m -> text m
 
--- FIXME: Shouldn't be Node not Maybe Node
 viewNode
-   : Editable -> Definition -> Maybe Node
+   : Editable -> Definition -> Node
    -> List Cops -> List DataChange
    -> FormState NodeEdit -> Maybe NodeActions
    -> Html (EditEvent NodeEdit NodeActions)
-viewNode editable def maybeNode recentCops recentDums formState maybeNas =
+viewNode editable def node recentCops recentDums formState maybeNas =
   let
     withCasts recentCast neConv naConv cn recents h = viewCasted
         (\(r, n, s, a) -> Result.map4 (,,,)
-            (castList recentCast r) (castMaybe cn n)
+            (castList recentCast r) (cn n)
             (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
-        (\(r, mn, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h r mn fs mp)
-        (recents, maybeNode, formState, maybeNas)
+        (\(r, n, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h r n fs mp)
+        (recents, node, formState, maybeNas)
   in case def of
     TupleDef d -> case .interpLim d of
         ILUninterpolated -> withCasts
             constChangeCast constNeConv constNaConv (.unwrap constNodeConv)
             recentDums (viewWithRecent editable d)
         _ -> withCasts seriesChangeCast seriesNeConv seriesNaConv (.unwrap seriesNodeConv)
-            recentDums (\rs mn fs mp -> Html.text <| toString (rs, mn, fs, mp))
+            recentDums (\rs n fs mp -> Html.text <| toString (rs, n, fs, mp))
     StructDef d -> viewStruct d
     ArrayDef d -> withCasts
         Ok childrenNeConv childrenNaConv (.unwrap childrenNodeConv) recentCops
