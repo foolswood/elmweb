@@ -5,15 +5,6 @@ import Dict exposing (Dict)
 import Set exposing (Set)
 import Array exposing (Array)
 
--- Equivalent to mapM for Result:
-mapAllFaily : (a -> Result x b) -> List a -> Result x (List b)
-mapAllFaily act vs = List.foldr
-    (\v -> Result.andThen
-        (\acc -> Result.map (\b -> b :: acc) (act v))
-        )
-    (Ok [])
-    vs
-
 -- Equivalent to mapM for Maybe:
 allGood : (a -> Maybe b) -> List a -> Maybe (List b)
 allGood f l = case l of
@@ -94,12 +85,6 @@ dictMapMaybe f =
         Just b -> Dict.insert k b
         Nothing -> identity
   in Dict.foldl insertWhenJust Dict.empty
-
-removeKeys : List comparable -> Dict comparable v -> Dict comparable v
-removeKeys ks d = List.foldl Dict.remove d ks
-
-nonEmptyDict : Dict k v -> Maybe (Dict k v)
-nonEmptyDict d = if Dict.isEmpty d then Nothing else Just d
 
 last : List a -> Maybe a
 last l = case l of

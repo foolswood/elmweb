@@ -42,9 +42,6 @@ setChooser p l = case l of
     LayoutChildChoice _ kid -> Ok <| LayoutChildChoice p kid
     _ -> Err "Not a ChildChoice"
 
-initContainer : LayoutPath -> Layout p s -> Result String (Layout p s)
-initContainer = setLayout <| LayoutContainer Array.empty
-
 addLeaf : p -> LayoutPath -> Layout p s -> Result String (Layout p s)
 addLeaf p = updateLayoutPath <| \l -> case l of
     LayoutContainer kids -> Ok <| LayoutContainer <| Array.push (LayoutLeaf p) kids

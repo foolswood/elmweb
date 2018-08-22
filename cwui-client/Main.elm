@@ -20,7 +20,7 @@ import ClNodes exposing (..)
 import ClMsgTypes exposing
   ( FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(..)
   , DataErrorIndex(..), ToRelayUpdateBundle(..), ToRelaySubBundle(..))
-import Futility exposing (..)
+import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe)
 import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability)

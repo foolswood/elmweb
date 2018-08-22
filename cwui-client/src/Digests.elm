@@ -56,16 +56,6 @@ seriesChangeCast dc = case dc of
 
 type alias DataDigest = Dict Path DataChange
 
--- Left biased union
-ddUnion : DataDigest -> DataDigest -> DataDigest
-ddUnion ddA ddB =
-  let
-    combine k a b = Dict.insert k <| case (a, b) of
-        (TimeChange ad, TimeChange bd) ->
-            TimeChange <| Dict.union ad bd
-        _ -> a
-  in Dict.merge Dict.insert combine Dict.insert ddA ddB Dict.empty
-
 digestDum : DataUpdateMsg -> DataDigest -> DataDigest
 digestDum dum =
   let
@@ -115,12 +105,6 @@ ddApply dd nodeMap =
 
 type alias Cops = Dict Seg (Maybe Attributee, SeqOp Seg)
 type alias CmDigest = Dict Path Cops
-
-cmUnion : CmDigest -> CmDigest -> CmDigest
-cmUnion cmA cmB =
-  let
-    combine k a b = Dict.insert k <| Dict.union a b
-  in Dict.merge Dict.insert combine Dict.insert cmA cmB Dict.empty
 
 digestCm : ToClientContainerUpdateMsg -> (Seg, (Maybe Attributee, SeqOp Seg))
 digestCm cm = case cm of
@@ -202,16 +186,6 @@ type alias NsDigest =
   , cops : CmDigest
   , dops : DataDigest
   , errs : List (DataErrorIndex, String)
-  }
-
-emptyNsDigest : NsDigest
-emptyNsDigest =
-  { postDefs = TD.empty
-  , defs = TD.empty
-  , taOps = Dict.empty
-  , cops = Dict.empty
-  , dops = Dict.empty
-  , errs = []
   }
 
 type alias Digest =

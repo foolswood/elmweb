@@ -82,12 +82,6 @@ acDragOverAttr =
         Just _ -> {preventDefault = True, stopPropagation = False}
   in dragOverAttr acHandler
 
-nacAsSeqOp : NaChildrenT -> Maybe (Seg, SeqOp Seg)
-nacAsSeqOp c = case c of
-    NacCreate _ _ -> Nothing
-    NacMove s ref -> Just (s, SoPresentAfter ref)
-    NacDelete s -> Just (s, SoAbsent)
-
 emptyPostDefPartial : PostDefinition -> NeConstT
 emptyPostDefPartial = emptyPartial << List.map second << .fieldDescs
 

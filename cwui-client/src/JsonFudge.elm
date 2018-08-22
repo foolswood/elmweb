@@ -129,18 +129,6 @@ encodeTgtField tgt = ("tgt", encodeSeg tgt)
 encodeRefField : Maybe Seg -> (String, JE.Value)
 encodeRefField ref = ("ref", encodeNullable encodeSeg ref)
 
-clientContToJsonValue : ToClientContainerUpdateMsg -> JE.Value
-clientContToJsonValue m = case m of
-    MsgPresentAfter {msgTgt, msgRef, msgAttributee} -> tagged '>' <| JE.object
-      [ encodeTgtField msgTgt
-      , encodeRefField msgRef
-      , encodeAttributeeField msgAttributee
-      ]
-    MsgAbsent {msgTgt, msgAttributee} -> tagged '-' <| JE.object
-      [ encodeTgtField msgTgt
-      , encodeAttributeeField msgAttributee
-      ]
-
 providerContToJsonValue : ToProviderContainerUpdateMsg -> JE.Value
 providerContToJsonValue m = case m of
     MsgCreateAfter {msgPostArgs, msgTgt, msgRef, msgAttributee} -> tagged '+' <| JE.object

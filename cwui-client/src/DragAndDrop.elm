@@ -63,13 +63,6 @@ type alias MayHandle = {preventDefault : Bool, stopPropagation : Bool}
 newRef : a -> String
 newRef = Native.DragAndDrop.newRef
 
-ensureEventHandlerString : String -> (DomEvent -> ()) -> String
-ensureEventHandlerString evt handler =
-  let
-    qevt = "\"" ++ evt ++ "\""
-    handlerRef = newRef handler
-  in "Foolswood.setSideEffectHandler(document.currentScript.parentNode, " ++ qevt ++ ", " ++ handlerRef ++ ");"
-
 type DomEvent = DomEvent
 
 applyMayHandle : DomEvent -> MayHandle -> ()
