@@ -1,5 +1,5 @@
 module ClTypes exposing (..)
-import Dict exposing (..)
+import Dict exposing (Dict)
 import Regex exposing (Regex)
 
 import Tagged.Tagged exposing (Tagged(..))

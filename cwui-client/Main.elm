@@ -1,6 +1,6 @@
 import Array exposing (Array)
 import Set exposing (Set)
-import Dict exposing (..)
+import Dict exposing (Dict)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onInput, onClick)
