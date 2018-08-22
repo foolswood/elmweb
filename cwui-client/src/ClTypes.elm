@@ -5,9 +5,11 @@ import Regex exposing (Regex)
 import Tagged.Tagged exposing (Tagged(..))
 
 type NsTag = NsTag
+type PhTag = PhTag
 
 type alias Seg = String
 type alias Namespace = Tagged NsTag Seg
+type alias Placeholder = Tagged PhTag Seg
 type alias Path = String
 type alias TypeName = (Seg, Seg)
 type alias SubPath = Tagged NsTag (Seg, Path)

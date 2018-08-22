@@ -23,17 +23,18 @@ import ClMsgTypes exposing
 import Futility exposing (..)
 import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
-import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace)
+import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability)
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
-import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState)
+import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
 import TupleViews exposing (viewWithRecent)
-import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs)
+import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, arrayActionStateUpdate)
 import EditTypes exposing
-  ( NodeEdit(NeChildren), EditEvent(..), mapEe, NodeActions(..), NaChildrenT
+  ( NodeEdit(NeChildren), EditEvent(..), mapEe, NodeAction(..), NaChildrenT(..)
   , NeConstT, constNeConv, seriesNeConv, childrenNeConv, constNaConv
-  , seriesNaConv, childrenNaConv)
-import SequenceOps exposing (SeqOp(..), applySeqOps, banish)
+  , seriesNaConv, childrenNaConv, constPaConv , seriesPaConv, childrenPaConv
+  , PendingActions(..))
+import SequenceOps exposing (SeqOp(..))
 import TransportTracker exposing (transportSubs, transport, transportCueDum)
 import TransportClockView exposing (transportClockView)
 import TimeSeriesView exposing (TsModel, tsModelEmpty, TsMsg, viewTimeSeries, TsExternalMsg(..), processTimeSeriesEvent)
@@ -54,7 +55,7 @@ type UiMode
 type alias NodeFs = FormStore Path NodeEdit
 type alias NodesFs = ByNs NodeFs
 
-type alias Pending = Dict Path NodeActions
+type alias Pending = Dict Path PendingActions
 type alias Pendings = ByNs Pending
 
 type alias Model =
@@ -198,7 +199,7 @@ type Msg
   | SecondPassedTick
   | LayoutUiEvent (LayoutPath, EditEvent SubPath (LayoutEvent SubPath Special))
   | SpecialUiEvent SpecialEvent
-  | NodeUiEvent (SubPath, EditEvent NodeEdit NodeActions)
+  | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
 
 addDGlobalError : String -> Model -> (Model, Cmd Msg)
 addDGlobalError msg m = ({m | errs = (Tagged "UI_INTERNAL", DGlobalError, msg) :: .errs m}, Cmd.none)
@@ -222,16 +223,17 @@ clearPending d =
         dops = Maybe.withDefault Dict.empty <| Maybe.map .dops mNsd
         cops = Maybe.withDefault Dict.empty <| Maybe.map .cops mNsd
       in case pending of
-        NaChildren pendingCops -> Maybe.map NaChildren <| case Dict.get path cops of
+        PaChildren pendingCops -> Maybe.map PaChildren <| case Dict.get path cops of
             Nothing -> Just pendingCops
-            Just changed -> nonEmptyDict <| removeKeys (Dict.keys changed) pendingCops
-        NaConst wvs -> Maybe.map NaConst <| case Dict.get path dops of
+            -- FIXME: This just clears the entire path rather than being more specific
+            Just changed -> Nothing
+        PaConst wvs -> Maybe.map PaConst <| case Dict.get path dops of
             Nothing -> Just wvs
             Just _ -> Nothing
-        NaSeries pendingSeries -> case Dict.get path dops of
-            Nothing -> Just <| NaSeries pendingSeries
+        PaSeries pendingSeries -> case Dict.get path dops of
+            Nothing -> Just <| PaSeries pendingSeries
             Just changes -> case changes of
-                TimeChange changedPoints -> Maybe.map NaSeries <| TimeSeries.nonEmpty <|
+                TimeChange changedPoints -> Maybe.map PaSeries <| TimeSeries.nonEmpty <|
                     List.foldl TimeSeries.remove pendingSeries <| Dict.keys changedPoints
                 _ -> Nothing
   in CDict.map (\ns -> dictMapMaybe <| clearPath ns)
@@ -337,28 +339,33 @@ update msg model = case msg of
                         b = ToRelayUpdateBundle ns [dum] []
                         newM =
                           { model
-                          | pending = CDict.update ns (Maybe.map <| Dict.insert p na) <| .pending model
+                          | pending = CDict.update ns (Maybe.map <| Dict.insert p <| PaConst wvs) <| .pending model
                           , nodeFs = CDict.update ns (Maybe.map <| formInsert p Nothing) <| .nodeFs model
                           }
                       in (newM, sendBundle <| Trcub b)
                     _ -> addDGlobalError "Def type mismatch" model
             NaSeries sops -> addDGlobalError "Series submit not implemented" model
-            NaChildren cops -> case remoteStateLookup ns p <| latestState model of
+            NaChildren nac -> case remoteStateLookup ns p <| latestState model of
                 Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
                 Ok (_, def, _, _) -> case def of
                     ArrayDef _ ->
                       let
-                        mergePending mExisting = Just <| NaChildren <| case mExisting of
-                            Just (NaChildren existing) -> Dict.union cops existing
-                            _ -> cops
+                        mergePending mExisting =
+                          let
+                            existing = case mExisting of
+                                Just (PaChildren e) -> e
+                                _ -> {childMods = Dict.empty, creates = CDict.empty tagCmp}
+                          in Just <| PaChildren <| case nac of
+                            NacMove tgt ref -> {existing | childMods = Dict.insert tgt (SoPresentAfter ref) <| .childMods existing}
+                            NacDelete tgt -> {existing | childMods = Dict.insert tgt SoAbsent <| .childMods existing}
+                            -- FIXME: This just uses the same placeholder for everything
+                            NacCreate mesp wvs -> {existing | creates = CDict.insert (Tagged "ph") (mesp, wvs) <| .creates existing}
                         newM =
                           { model
                           | pending = CDict.update ns (Maybe.map <| Dict.update p mergePending) <| .pending model
-                          , nodeFs = CDict.update ns (Maybe.map <| rectifyCop
-                              (Maybe.withDefault [] << remoteChildSegs (CDict.getWithDefault RemoteState.vsEmpty ns <| latestState model))
-                              p cops) <| .nodeFs model
+                          , nodeFs = CDict.update ns (Maybe.map <| formUpdateEditing p <| arrayActionStateUpdate nac) <| .nodeFs model
                           }
-                        b = ToRelayUpdateBundle ns [] <| producePCms p cops
+                        b = ToRelayUpdateBundle ns [] <| producePCms p nac
                       in (newM, sendBundle <| Trcub b)
                     _ -> addDGlobalError "Attempted to change children of non-array" model
 
@@ -455,7 +462,7 @@ viewLoading = text "Loading..."
 
 viewPath
    : NodesFs -> RemoteState -> List (Digest, RemoteState) -> Pendings -> SubPath
-  -> Html (SubPath, EditEvent NodeEdit NodeActions)
+  -> Html (SubPath, EditEvent NodeEdit NodeAction)
 viewPath nodeFs baseState recent pending sp =
   let
     (ns, p) = unSubPath sp
@@ -463,7 +470,7 @@ viewPath nodeFs baseState recent pending sp =
         Err _ -> Nothing
         Ok (n, def, ed, post) ->
             Just <| \fs mPending recentCops recentDums -> viewNode
-                ed def n recentCops recentDums fs mPending
+                ed def post n recentCops recentDums fs mPending
     bordered highlightCol h = div
         [style [("border", "0.2em solid " ++ highlightCol)]] [h]
     viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
@@ -503,29 +510,29 @@ viewCasted c h a = case c a of
     Err m -> text m
 
 viewNode
-   : Editable -> Definition -> Node
+   : Editable -> Definition -> Postability -> Node
    -> List Cops -> List DataChange
-   -> FormState NodeEdit -> Maybe NodeActions
-   -> Html (EditEvent NodeEdit NodeActions)
-viewNode editable def node recentCops recentDums formState maybeNas =
+   -> FormState NodeEdit -> Maybe PendingActions
+   -> Html (EditEvent NodeEdit NodeAction)
+viewNode editable def postability node recentCops recentDums formState maybeNas =
   let
-    withCasts recentCast neConv naConv cn recents h = viewCasted
+    withCasts recentCast neConv pConv naConv cn recents h = viewCasted
         (\(r, n, s, a) -> Result.map4 (,,,)
             (castList recentCast r) (cn n)
-            (castFormState (.unwrap neConv) s) (castMaybe (.unwrap naConv) a))
+            (castFormState (.unwrap neConv) s) (castMaybe (.unwrap pConv) a))
         (\(r, n, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h r n fs mp)
         (recents, node, formState, maybeNas)
   in case def of
     TupleDef d -> case .interpLim d of
         ILUninterpolated -> withCasts
-            constChangeCast constNeConv constNaConv (.unwrap constNodeConv)
+            constChangeCast constNeConv constPaConv constNaConv (.unwrap constNodeConv)
             recentDums (viewWithRecent editable d)
-        _ -> withCasts seriesChangeCast seriesNeConv seriesNaConv (.unwrap seriesNodeConv)
+        _ -> withCasts seriesChangeCast seriesNeConv seriesPaConv seriesNaConv (.unwrap seriesNodeConv)
             recentDums (\rs n fs mp -> Html.text <| toString (rs, n, fs, mp))
     StructDef d -> viewStruct d
     ArrayDef d -> withCasts
-        Ok childrenNeConv childrenNaConv (.unwrap childrenNodeConv) recentCops
-        (viewArray editable d)
+        Ok childrenNeConv childrenPaConv childrenNaConv (.unwrap childrenNodeConv) recentCops
+        (viewArray editable d postability)
 
 viewStruct : StructDefinition -> Html a
 viewStruct structDef =

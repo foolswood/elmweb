@@ -1,4 +1,4 @@
-module ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, rectifyEdits)
+module ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, rectifyEdits, arrayActionStateUpdate)
 
 import Html as H exposing (Html)
 import Html.Events as HE
@@ -6,15 +6,18 @@ import Html.Attributes as HA
 import Dict exposing (Dict)
 import Set exposing (Set)
 import Json.Encode as JE
+import Tuple exposing (second)
 
-import SequenceOps exposing (SeqOp(..), applySeqOps, banish, inject, unref)
-import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace, Editable(..))
+import Futility exposing (dictMapMaybe, Either(..))
+import SequenceOps exposing (SeqOp(..), applySeqOps, inject)
+import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace, Editable(..), PostDefinition)
 import ClNodes exposing (Node(ContainerNode), ContainerNodeT)
 import Form exposing (FormState(..))
-import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), NaChildrenT, NeChildrenT)
-import RemoteState exposing (Valuespace)
+import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), NaChildrenT(..), PaChildrenT, NeChildrenT, emptyPartial, NeConstT)
+import RemoteState exposing (Valuespace, Postability(..))
 import Digests exposing (Cops)
 import DragAndDrop exposing (dragStartAttr, dragOverAttr, onDragStart, onDragEnter, onDrop, EffectAllowed(EaMove))
+import TupleViews exposing (viewConstTupleEdit, asSubmittable)
 
 defaultChildChoice : Maybe (List Seg) -> Set Seg
 defaultChildChoice mSegs = case mSegs of
@@ -54,12 +57,18 @@ rectifyEdits initialList cops edits =
       in case op of
         SoAbsent ->
             { es
-            | ops = unref initialList seg <| .ops es
-            , chosen = Set.remove seg <| .chosen es
+            | chosen = Set.remove seg <| .chosen es
             , dragging = newDrag
             }
-        SoPresentAfter _ -> {es | ops = Dict.remove seg <| .ops es, dragging = newDrag}
+        SoPresentAfter _ -> { es | dragging = newDrag}
   in Dict.foldl rectifyEdit edits cops
+
+arrayActionStateUpdate : NaChildrenT -> NodeEdit -> NodeEdit
+arrayActionStateUpdate na ne = case na of
+    NacCreate _ _ -> case ne of
+        NeChildren nec -> NeChildren {nec | create = Nothing}
+        _ -> ne
+    _ -> ne
 
 acMime : String
 acMime = "elmweb/arrayChild"
@@ -73,11 +82,20 @@ acDragOverAttr =
         Just _ -> {preventDefault = True, stopPropagation = False}
   in dragOverAttr acHandler
 
+nacAsSeqOp : NaChildrenT -> Maybe (Seg, SeqOp Seg)
+nacAsSeqOp c = case c of
+    NacCreate _ _ -> Nothing
+    NacMove s ref -> Just (s, SoPresentAfter ref)
+    NacDelete s -> Just (s, SoAbsent)
+
+emptyPostDefPartial : PostDefinition -> NeConstT
+emptyPostDefPartial = emptyPartial << List.map second << .fieldDescs
+
 viewArray
-   : Editable -> ArrayDefinition -> List Cops
-  -> ContainerNodeT -> FormState NeChildrenT -> Maybe NaChildrenT
+   : Editable -> ArrayDefinition -> Postability -> List Cops
+  -> ContainerNodeT -> FormState NeChildrenT -> Maybe PaChildrenT
   -> Html (EditEvent NeChildrenT NaChildrenT)
-viewArray editable arrayDef recentCops n s mp =
+viewArray editable arrayDef postability recentCops n s mp =
   let
     baseSegs = List.map .seg n
     recentAttrib = List.foldl (Dict.union << Dict.map (always Tuple.first)) Dict.empty recentCops
@@ -85,112 +103,107 @@ viewArray editable arrayDef recentCops n s mp =
         List.foldl (Dict.union << Dict.map (always Tuple.second)) Dict.empty recentCops
     rSegs = Maybe.withDefault baseSegs <| Result.toMaybe <| applySeqOps recentMoves baseSegs
     editState = case s of
-        FsViewing -> {chosen = defaultChildChoice <| Just rSegs, ops = Dict.empty, addSeg = "", dragging = Nothing}
+        FsViewing -> {chosen = defaultChildChoice <| Just rSegs, create = Nothing, dragging = Nothing}
         FsEditing v -> v
     chosenChange op = EeUpdate {editState | chosen = op <| .chosen editState}
-    content = case editable of
-        Editable ->
+    content = case .create editState of
+        Just partialCreate ->
           let
-            addSeg = .addSeg editState
-            -- FIXME: use the regex from the relay's definition:
-            addTextEntry = H.input
-              [ HA.type_ "text", HA.value addSeg
-              , HE.onInput <| \s -> EeUpdate {editState | addSeg = s}
-              ] []
-            (pendingRemoves, pendingMoves) = partitionRemoveOps <| Maybe.withDefault Dict.empty mp
-            (editRemoves, editMoves) = partitionRemoveOps <| .ops editState
-            allSegs = Maybe.withDefault rSegs <| Result.toMaybe <| applySeqOps (Dict.union editMoves pendingMoves) rSegs
-            canAdd = not <| List.member addSeg <| "" :: allSegs
-            addBtn mPrevSeg =
+            atomDefs = case postability of
+                PostableLoaded postDef -> List.map Tuple.second <| .fieldDescs postDef
+                _ -> []
+            partialVals = .vals partialCreate
+            editForm = H.map (\pcs -> EeUpdate <| {editState | create = Just {partialCreate | vals = pcs}}) <|
+                viewConstTupleEdit atomDefs partialVals
+          in case asSubmittable atomDefs partialVals of
+            Just wvs -> [editForm, H.button [HE.onClick <| EeSubmit <| NacCreate (Maybe.map Left <| .ref partialCreate) wvs] [H.text "Create"]]
+            Nothing -> [editForm]
+        Nothing -> case editable of
+            Editable ->
               let
-                attrs = if canAdd
-                    then
-                      [ HE.onClick <| EeUpdate
-                        { ops = inject rSegs addSeg mPrevSeg <| .ops editState
-                        , chosen = Set.insert addSeg <| .chosen editState
-                        , addSeg = ""
-                        , dragging = Nothing
-                        }
-                      , HA.style [("background", "green")]
-                      ]
-                    else
-                      [ HA.style [("background", "grey")] ]
-              in H.span attrs [H.text "+"]
-            delBtn seg = H.span
-              [ HE.onClick <| if Dict.member seg <| .ops editState
-                    then EeUpdate
-                      { editState
-                      | ops = banish rSegs seg <| .ops editState
-                      , chosen = Set.remove seg <| .chosen editState
-                      , dragging = Nothing
-                      }
-                    else EeSubmit <| Dict.singleton seg SoAbsent
-              , HA.style [("background", "red")]
-              ]
-              [H.text "-"]
-            (dragAttrsFor, mEndSeg) = case .dragging editState of
-                Nothing ->
-                  ( \seg ->
-                      [ onDragStart <| EeUpdate <| {editState | dragging = Just (seg, Nothing)}
-                      , HA.draggable "true"
-                      , acDragStartAttr
-                      ]
-                  , Nothing
-                  )
-                Just (startSeg, mEndSeg) ->
-                  ( \seg ->
-                      let
-                        dragEntered = onDragEnter <| EeUpdate <| {editState | dragging = Just (startSeg, Just seg)}
-                      in if seg == startSeg
-                        then [acDragOverAttr, dragEntered]
-                        else [acDragOverAttr, dragEntered, onDrop <| EeSubmit <| Dict.singleton startSeg <| SoPresentAfter <| Just seg]
-                  , mEndSeg
-                  )
-            viewSeg seg =
-              let
-                removed = Dict.member seg editRemoves || Dict.member seg pendingRemoves || Dict.member seg recentRemoves
-                edited = Dict.member seg editMoves || Dict.member seg pendingMoves
-                added = not <| List.member seg baseSegs
-                segText = H.text <| case (Dict.get seg recentAttrib, edited) of
-                    (Just (Just att), False) -> seg ++ " (" ++ att ++ ")"
-                    _ -> seg
-                segWidget = if Set.member seg <| .chosen editState
-                    then H.b
-                        ((HE.onClick <| chosenChange <| Set.remove seg) :: dragAttrsFor seg)
-                        [segText]
-                    else H.span
-                        ((HE.onClick <| chosenChange <| Set.insert seg) :: dragAttrsFor seg)
-                        [segText]
-              in if removed
-                then H.div [] [H.del [] [segWidget]]
-                else if added
-                    then H.div [] [H.ins [] [segWidget], addBtn <| Just seg, delBtn seg]
-                    else H.div [] [segWidget, addBtn <| Just seg, delBtn seg]
-            segViews = List.map viewSeg allSegs
-          in addTextEntry :: addBtn Nothing :: segViews
-        ReadOnly ->
-          let
-            viewSeg seg =
-              let
-                {attrs, segStr} =
+                (pendingRemoves, pendingMoves) = partitionRemoveOps <| Maybe.withDefault Dict.empty <| Maybe.map .childMods mp
+                allSegs = Maybe.withDefault rSegs <| Result.toMaybe <| applySeqOps pendingMoves rSegs
+                addBtn mPrevSeg =
                   let
-                    segText = H.text <| case Dict.get seg recentAttrib of
-                        Just (Just att) -> seg ++ " (" ++ att ++ ")"
+                    attrs = case postability of
+                        PostableLoaded postDef ->
+                          [ HE.onClick <| EeUpdate
+                            { editState
+                            | create = Just {ref = mPrevSeg, vals = emptyPostDefPartial postDef}
+                            }
+                          , HA.style [("background", "green")]
+                          ]
+                        _ ->
+                          [ HA.style [("background", "grey")] ]
+                  in H.span attrs [H.text "+"]
+                delBtn seg = H.span
+                  [ HE.onClick <| EeSubmit <| NacDelete seg
+                  , HA.style [("background", "red")]
+                  ]
+                  [H.text "-"]
+                (dragAttrsFor, mEndSeg) = case .dragging editState of
+                    Nothing ->
+                      ( \seg ->
+                          [ onDragStart <| EeUpdate <| {editState | dragging = Just (seg, Nothing)}
+                          , HA.draggable "true"
+                          , acDragStartAttr
+                          ]
+                      , Nothing
+                      )
+                    Just (startSeg, mEndSeg) ->
+                      ( \seg ->
+                          let
+                            dragEntered = onDragEnter <| EeUpdate <| {editState | dragging = Just (startSeg, Just seg)}
+                          in if seg == startSeg
+                            then [acDragOverAttr, dragEntered]
+                            else [acDragOverAttr, dragEntered, onDrop <| EeSubmit <| NacMove startSeg <| Just seg]
+                      , mEndSeg
+                      )
+                viewSeg seg =
+                  let
+                    removed = Dict.member seg pendingRemoves || Dict.member seg recentRemoves
+                    edited = Dict.member seg pendingMoves
+                    added = not <| List.member seg baseSegs
+                    segText = H.text <| case (Dict.get seg recentAttrib, edited) of
+                        (Just (Just att), False) -> seg ++ " (" ++ att ++ ")"
                         _ -> seg
-                  in if Set.member seg <| .chosen editState
-                    then
-                      { segStr = H.b [] [segText]
-                      , attrs = [HE.onClick <| chosenChange <| Set.remove seg]
-                      }
-                    else
-                      { segStr = segText
-                      , attrs = [HE.onClick <| chosenChange <| Set.insert seg]
-                      }
-                segStyled = if Dict.member seg recentRemoves
-                    then H.del [] [segStr]
-                    else if Dict.member seg recentMoves
-                        then H.ins [] [segStr]
-                        else segStr
-              in H.div attrs [segStyled]
-          in List.map viewSeg rSegs
+                    segWidget = if Set.member seg <| .chosen editState
+                        then H.b
+                            ((HE.onClick <| chosenChange <| Set.remove seg) :: dragAttrsFor seg)
+                            [segText]
+                        else H.span
+                            ((HE.onClick <| chosenChange <| Set.insert seg) :: dragAttrsFor seg)
+                            [segText]
+                  in if removed
+                    then H.div [] [H.del [] [segWidget]]
+                    else if added
+                        then H.div [] [H.ins [] [segWidget], addBtn <| Just seg, delBtn seg]
+                        else H.div [] [segWidget, addBtn <| Just seg, delBtn seg]
+                segViews = List.map viewSeg allSegs
+              in addBtn Nothing :: segViews
+            ReadOnly ->
+              let
+                viewSeg seg =
+                  let
+                    {attrs, segStr} =
+                      let
+                        segText = H.text <| case Dict.get seg recentAttrib of
+                            Just (Just att) -> seg ++ " (" ++ att ++ ")"
+                            _ -> seg
+                      in if Set.member seg <| .chosen editState
+                        then
+                          { segStr = H.b [] [segText]
+                          , attrs = [HE.onClick <| chosenChange <| Set.remove seg]
+                          }
+                        else
+                          { segStr = segText
+                          , attrs = [HE.onClick <| chosenChange <| Set.insert seg]
+                          }
+                    segStyled = if Dict.member seg recentRemoves
+                        then H.del [] [segStr]
+                        else if Dict.member seg recentMoves
+                            then H.ins [] [segStr]
+                            else segStr
+                  in H.div attrs [segStyled]
+              in List.map viewSeg rSegs
   in H.div [] content

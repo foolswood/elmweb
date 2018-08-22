@@ -4,9 +4,11 @@ import Dict exposing (Dict)
 import Set exposing (Set)
 import Regex exposing (Regex)
 
-import Futility exposing (Conv)
-import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireValue(..), Bounds)
 import SequenceOps exposing (SeqOp)
+import Cmp.Dict exposing (CmpDict)
+import Futility exposing (Conv, Either)
+import Tagged.Tagged exposing (Tagged)
+import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireValue(..), Bounds, Placeholder)
 import TimeSeries exposing (TimeSeries)
 
 type NaTimePoint
@@ -16,18 +18,20 @@ type NaTimePoint
       , wvs : NaConstT
       }
   | NatpAbsent
-type alias NeChildMod = SeqOp Seg
 
 type alias NaConstT = List WireValue
 type alias NaSeriesT = TimeSeries NaTimePoint
-type alias NaChildrenT = Dict Seg NeChildMod
+type NaChildrenT
+  = NacCreate (Maybe (Either Seg Placeholder)) (List WireValue)
+  | NacMove Seg (Maybe Seg)
+  | NacDelete Seg
 
-type NodeActions
+type NodeAction
   = NaConst NaConstT
   | NaSeries NaSeriesT
   | NaChildren NaChildrenT
 
-constNaConv : Conv NodeActions NaConstT
+constNaConv : Conv NodeAction NaConstT
 constNaConv =
   let
     asNaConst na = case na of
@@ -35,7 +39,7 @@ constNaConv =
         _ -> Err "Not NaConst"
   in {wrap = NaConst, unwrap = asNaConst}
 
-seriesNaConv : Conv NodeActions NaSeriesT
+seriesNaConv : Conv NodeAction NaSeriesT
 seriesNaConv =
   let
     asNaSeries na = case na of
@@ -43,13 +47,47 @@ seriesNaConv =
         _ -> Err "Not NaSeries"
   in {wrap = NaSeries, unwrap = asNaSeries}
 
-childrenNaConv : Conv NodeActions NaChildrenT
+childrenNaConv : Conv NodeAction NaChildrenT
 childrenNaConv =
   let
     asNaChildren na = case na of
         NaChildren nac -> Ok nac
         _ -> Err "Not NaChildren"
   in {wrap = NaChildren, unwrap = asNaChildren}
+
+type alias PaChildrenT =
+  { childMods : Dict Seg (SeqOp Seg)
+  , creates : CmpDict Placeholder Seg (Maybe (Either Seg Placeholder), List WireValue)
+  }
+
+type PendingActions
+  = PaConst NaConstT
+  | PaSeries NaSeriesT
+  | PaChildren PaChildrenT
+
+constPaConv : Conv PendingActions NaConstT
+constPaConv =
+  let
+    asPaConst pa = case pa of
+        PaConst nac -> Ok nac
+        _ -> Err "Not PaConst"
+  in {wrap = PaConst, unwrap = asPaConst}
+
+seriesPaConv : Conv PendingActions NaSeriesT
+seriesPaConv =
+  let
+    asPaSeries pa = case pa of
+        PaSeries nas -> Ok nas
+        _ -> Err "Not PaSeries"
+  in {wrap = PaSeries, unwrap = asPaSeries}
+
+childrenPaConv : Conv PendingActions PaChildrenT
+childrenPaConv =
+  let
+    asPaChildren pa = case pa of
+        PaChildren nac -> Ok nac
+        _ -> Err "Not PaChildren"
+  in {wrap = PaChildren, unwrap = asPaChildren}
 
 type alias PartialTime = (Maybe Int, Maybe Int)
 
@@ -133,11 +171,17 @@ type alias NeTimePoint =
   }
 
 type alias NeConstT = List PartialEdit
+
+type alias NeChildCreate =
+  { ref : Maybe Seg
+  , vals : NeConstT
+  }
+
 type alias NeSeriesT = TimeSeries NeTimePoint
+
 type alias NeChildrenT =
-  { ops : Dict Seg (SeqOp Seg)
+  { create : Maybe NeChildCreate
   , chosen : Set Seg
-  , addSeg : String
   , dragging : Maybe (String, Maybe String)
   }
 

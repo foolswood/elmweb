@@ -1,6 +1,7 @@
 module RemoteState exposing
   ( TypeMap, TypeAssignMap, NodeMap, RemoteState, remoteStateEmpty
-  , remoteStateLookup, Valuespace, vsEmpty, unloadedPostTypes, ByNs)
+  , remoteStateLookup, Valuespace, vsEmpty, unloadedPostTypes, ByNs
+  , Postability(..))
 
 import Dict exposing (Dict)
 import Set exposing (Set)
