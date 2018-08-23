@@ -347,7 +347,7 @@ update msg model = case msg of
             NaSeries sops -> addDGlobalError "Series submit not implemented" model
             NaChildren nac -> case remoteStateLookup ns p <| latestState model of
                 Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
-                Ok (_, def, _, _) -> case def of
+                Ok (_, def, _, postability) -> case def of
                     ArrayDef _ ->
                       let
                         mergePending mExisting =
@@ -358,19 +358,32 @@ update msg model = case msg of
                           in Just <| PaChildren <| case nac of
                             NacMove tgt ref -> {existing | childMods = Dict.insert tgt (SoPresentAfter ref) <| .childMods existing}
                             NacDelete tgt -> {existing | childMods = Dict.insert tgt SoAbsent <| .childMods existing}
-                            -- FIXME: This just uses the same placeholder for everything
-                            NacCreate mesp wvs -> {existing | creates = CDict.insert (Tagged "ph") (mesp, wvs) <| .creates existing}
+                            NacCreate mesp wvs -> {existing | creates = CDict.insert phPh (mesp, wvs) <| .creates existing}
                         newM =
                           { model
                           | pending = CDict.update ns (Maybe.map <| Dict.update p mergePending) <| .pending model
                           , nodeFs = CDict.update ns (Maybe.map <| formUpdateEditing p <| arrayActionStateUpdate nac) <| .nodeFs model
                           }
-                        b = ToRelayUpdateBundle ns [] <| producePCms p nac
+                        b = ToRelayUpdateBundle ns [] <| producePCms postability p nac
                       in (newM, sendBundle <| Trcub b)
                     _ -> addDGlobalError "Attempted to change children of non-array" model
 
-producePCms : Path -> NaChildrenT -> List (Path, ClMsgTypes.ToProviderContainerUpdateMsg)
-producePCms p _ = [] -- FIXME: complete non functional junk
+-- FIXME: Using the same placeholder for everything
+phPh : Placeholder
+phPh = Tagged "ph"
+
+-- FIXME: Shouldn't return a list (or talk about paths)!
+producePCms : Postability -> Path -> NaChildrenT -> List (Path, ClMsgTypes.ToProviderContainerUpdateMsg)
+producePCms postability p nac = case nac of
+    NacCreate mRef wvs -> case postability of
+        RemoteState.PostableLoaded pdef -> [(p, ClMsgTypes.MsgCreateAfter
+            { msgTgt = phPh, msgRef = mRef, msgAttributee = Nothing
+            , msgPostArgs = Futility.zip (List.map (defWireType << Tuple.second) <| .fieldDescs pdef) wvs})]
+        _ -> []
+    NacMove tgt mRef -> [(p, ClMsgTypes.MsgMoveAfter
+        {msgTgt=tgt, msgRef=mRef, msgAttributee=Nothing})]
+    NacDelete tgt -> [(p, ClMsgTypes.MsgDelete
+        {msgTgt=tgt, msgAttributee=Nothing})]
 
 -- Subscriptions
 

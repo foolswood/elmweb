@@ -1,13 +1,16 @@
 module JsonFudge exposing (serialiseBundle, parseBundle)
+
 import Json.Encode as JE
 import Json.Decode as JD
 import Dict
 
+import Futility exposing (Either(..))
 import Tagged.Tagged exposing (Tagged(..))
 import ClTypes exposing
-  ( Namespace, Path, Time, Interpolation(..), TpId, Seg, Attributee
-  , TypeName, typeName, Editable(..), Definition(..), PostDefinition, AtomDef
-  , InterpolationLimit(..) , ChildDescription, WireValue(..), WireType(..), SubPath)
+  ( Namespace, Placeholder, Path, Time, Interpolation(..), TpId, Seg
+  , Attributee , TypeName, typeName, Editable(..), Definition(..)
+  , PostDefinition, AtomDef , InterpolationLimit(..) , ChildDescription
+  , WireValue(..), WireType(..), SubPath)
 import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
 
@@ -19,6 +22,11 @@ encodePair ea eb (a, b) = JE.object
   , ("1", eb b)
   ]
 
+encodeEither : (a -> JE.Value) -> (b -> JE.Value) -> Either a b -> JE.Value
+encodeEither ea eb e = JE.object <| case e of
+    Left a -> [("Left", ea a)]
+    Right b -> [("Right", eb b)]
+
 encodeNullable : (a -> JE.Value) -> Maybe a -> JE.Value
 encodeNullable encA ma = case ma of
     Just a -> encA a
@@ -26,6 +34,9 @@ encodeNullable encA ma = case ma of
 
 encodeSeg : Seg -> JE.Value
 encodeSeg = JE.string
+
+encodePlaceholder : Placeholder -> JE.Value
+encodePlaceholder (Tagged ns) = JE.string ns
 
 encodeNs : Namespace -> JE.Value
 encodeNs (Tagged ns) = JE.string ns
@@ -133,8 +144,8 @@ providerContToJsonValue : ToProviderContainerUpdateMsg -> JE.Value
 providerContToJsonValue m = case m of
     MsgCreateAfter {msgPostArgs, msgTgt, msgRef, msgAttributee} -> tagged '+' <| JE.object
       [ ("args", JE.list <| List.map (uncurry encodeWv) msgPostArgs)
-      , encodeTgtField msgTgt
-      , encodeRefField msgRef
+      , ("tgt", encodePlaceholder msgTgt)
+      , ("ref", encodeNullable (encodeEither encodePlaceholder encodeSeg) msgRef)
       , encodeAttributeeField msgAttributee
       ]
     MsgMoveAfter {msgTgt, msgRef, msgAttributee} -> tagged '>' <| JE.object

@@ -110,7 +110,7 @@ viewArray editable arrayDef postability recentCops n s mp =
             editForm = H.map (\pcs -> EeUpdate <| {editState | create = Just {partialCreate | vals = pcs}}) <|
                 viewConstTupleEdit atomDefs partialVals
           in case asSubmittable atomDefs partialVals of
-            Just wvs -> [editForm, H.button [HE.onClick <| EeSubmit <| NacCreate (Maybe.map Left <| .ref partialCreate) wvs] [H.text "Create"]]
+            Just wvs -> [editForm, H.button [HE.onClick <| EeSubmit <| NacCreate (Maybe.map Right <| .ref partialCreate) wvs] [H.text "Create"]]
             Nothing -> [editForm]
         Nothing -> case editable of
             Editable ->
