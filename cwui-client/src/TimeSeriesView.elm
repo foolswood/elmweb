@@ -9,7 +9,7 @@ import CSS exposing (emPx, keyFramed, applyKeyFramed)
 import ClTypes exposing
   ( TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime
   , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded, Path
-  , Editable(Editable))
+  , Editable(..))
 import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
@@ -54,7 +54,7 @@ type alias PointInfo =
 
 type alias SeriesInfo =
   { path : Path
-  , editable : Bool
+  , editable : Editable
   , def : TupleDefinition
   , label : String
   , transience : Transience
@@ -191,7 +191,7 @@ viewTicks height leftMargin scale scrollOffset maxTime =
       <| List.map viewTick ticks]
 
 viewTsData
-   : Bool -> TupleDefinition -> Float -> TimeSeries PointInfo -> ChangedTimes
+   : Editable -> TupleDefinition -> Float -> TimeSeries PointInfo -> ChangedTimes
    -> Set TpId -> Html (Either TpId TsEditEvt)
 viewTsData editable td scale ts cts selected =
   let
@@ -227,9 +227,9 @@ viewTsData editable td scale ts cts selected =
             [style
               [ ("position", "absolute"), ("top", "0px"), ("left", toEm <| tFloat t)
               , ("z-index", "1"), ("background", "lightblue")]]
-            <| if editable
-                then [H.map (Right << wrapTpEe t tpid) <| editTimePoint td tp]
-                else [text <| toString tp]
+            <| case editable of
+                Editable -> [H.map (Right << wrapTpEe t tpid) <| editTimePoint td tp]
+                ReadOnly -> [text <| toString tp]
     popOvers = List.map asPopOver <| Set.toList selected
   in div [style [("position", "relative")]] <| highlightGrid :: contentGrid :: popOvers
 

@@ -78,6 +78,9 @@ maybeToList m = case m of
 appendMaybe : Maybe a -> List a -> List a
 appendMaybe ma l = Maybe.withDefault l <| Maybe.map (\a -> l ++ [a]) ma
 
+mapMaybe : (a -> Maybe b) -> List a -> List b
+mapMaybe f = List.foldl (\a acc -> appendMaybe (f a) acc) []
+
 dictMapMaybe : (comparable -> a -> Maybe b) -> Dict comparable a -> Dict comparable b
 dictMapMaybe f =
   let

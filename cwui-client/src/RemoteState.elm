@@ -1,15 +1,16 @@
 module RemoteState exposing
   ( TypeMap, TypeAssignMap, NodeMap, RemoteState, remoteStateEmpty
   , remoteStateLookup, Valuespace, vsEmpty, unloadedPostTypes, ByNs
-  , Postability(..))
+  , Postability(..), allTimeSeries)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
 
+import Futility exposing (mapMaybe)
 import ClTypes exposing
   ( Definition(..), TupleDefinition, PostDefinition, Editable, Path, Namespace
   , Seg, TypeName, typeName, NsTag)
-import ClNodes exposing (Node)
+import ClNodes exposing (Node, TimeSeriesNodeT)
 import Cmp.Dict as CDict
 import Tagged.Tagged as T exposing (Tagged)
 import Tagged.Dict as TD exposing (TaggedDict)
@@ -84,3 +85,18 @@ unloadedPostTypes =
         _ -> acc
     ulpt ns vs acc = List.foldl (appendUnloaded ns vs) acc <| CDict.values <| .types vs
   in TS.fromList << CDict.foldl ulpt []
+
+allTimeSeries
+   : Namespace -> RemoteState
+  -> List (Path, TimeSeriesNodeT, TupleDefinition, Editable)
+allTimeSeries ns rs = case CDict.get ns rs of
+    Nothing -> []
+    Just vs ->
+      let
+        gatherInfo (p, n) = case n of
+            ClNodes.TimeSeriesNode tsn -> case vsTyDef p vs of
+              Ok (d, e) -> Just (p, n, d, e)
+              Err _ -> Nothing
+            _ -> Nothing
+        tsns = mapMaybe gatherInfo <| Dict.toList <| .nodes vs
+      in []

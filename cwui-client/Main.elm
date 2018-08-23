@@ -23,7 +23,7 @@ import ClMsgTypes exposing
 import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe)
 import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
-import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability)
+import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
 import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
@@ -35,6 +35,7 @@ import EditTypes exposing
   , seriesNaConv, childrenNaConv, constPaConv , seriesPaConv, childrenPaConv
   , PendingActions(..))
 import SequenceOps exposing (SeqOp(..))
+import Transience
 import TransportTracker exposing (transportSubs, transport, transportCueDum)
 import TransportClockView exposing (transportClockView)
 import TimeSeriesView exposing (TsModel, tsModelEmpty, TsMsg, viewTimeSeries, TsExternalMsg(..), processTimeSeriesEvent)
@@ -94,7 +95,19 @@ specialRequire rs sp = case sp of
     SpTimeline ns -> transportSubs ns rs
 
 getTsModel : Namespace -> Model -> TsModel
-getTsModel ns = Maybe.withDefault tsModelEmpty << CDict.get ns << .timelines
+getTsModel ns m =
+  let
+    tsm = Maybe.withDefault tsModelEmpty <| CDict.get ns <| .timelines m
+    -- FIXME: Ignores recents and just shows the latest (and reuses path as label):
+    asPointInfo ts = {ts | points = Dict.map
+        (\t tp -> {base = (t, tp), recents = [], fs = FsViewing, mp = Nothing})
+        <| .points ts}
+    asSeriesInfo (p, n, d, e) =
+      { path = p, editable = e, def = d, label = p
+      , transience = Transience.TSteady , series = asPointInfo <| .values n
+      , changedTimes = Dict.empty}
+    rts = List.map asSeriesInfo <| allTimeSeries ns <| latestState m
+  in {tsm | series = rts}
 
 qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
