@@ -100,15 +100,6 @@ rebaseLayout joinPath l basePath = case l of
     LayoutLeaf p -> LayoutLeaf <| joinPath basePath p
     LayoutSpecial s -> LayoutSpecial s  -- FIXME: Should this have an option to do something, or error?
 
--- FIXME: May well be pointless
-mapLayout : (a -> c) -> (b -> d) -> Layout a b -> Layout c d
-mapLayout f g l = case l of
-    LayoutContainer kids -> LayoutContainer <| Array.map (mapLayout f g) kids
-    LayoutChildChoice a kid -> LayoutChildChoice (f a) <| mapLayout f g kid
-    LayoutDynamic a -> LayoutDynamic <| f a
-    LayoutLeaf a -> LayoutLeaf <| f a
-    LayoutSpecial s -> LayoutSpecial <| g s
-
 -- Html generating:
 
 containerHtml : Array (Html a) -> Html a
