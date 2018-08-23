@@ -5,14 +5,15 @@ module TimeSeries exposing
 import Dict exposing (Dict)
 
 import ClTypes exposing (TpId, Time)
+import BiMap exposing (BiMap)
 
 type alias TimeSeries a =
   { points : Dict Time a
-  , tpIds : BiMap
+  , tpIds : BiMap TpId Time
   }
 
 empty : TimeSeries a
-empty = {points = Dict.empty, tpIds = emptyBiMap}
+empty = {points = Dict.empty, tpIds = BiMap.empty}
 
 nonEmpty : TimeSeries a -> Maybe (TimeSeries a)
 nonEmpty a = if Dict.isEmpty <| .points a then Nothing else Just a
@@ -21,20 +22,20 @@ get : TpId -> TimeSeries a -> Maybe (Time, a)
 get tpid {points, tpIds} =
   let
     getTap t = Maybe.map (\a -> (t, a)) <| Dict.get t points
-  in Maybe.andThen getTap <| getById tpid tpIds
+  in Maybe.andThen getTap <| BiMap.getSec tpid tpIds
 
 insert : TpId -> Time -> a -> TimeSeries a -> TimeSeries a
 insert tpid t v {points, tpIds} =
   { points = Dict.insert t v points
-  , tpIds = insertById tpid t tpIds
+  , tpIds = BiMap.insert tpid t tpIds
   }
 
 remove : TpId -> TimeSeries a -> TimeSeries a
 remove tpid {points, tpIds} =
-  { points = case getById tpid tpIds of
+  { points = case BiMap.getSec tpid tpIds of
         Nothing -> points
         Just t -> Dict.remove t points
-  , tpIds = removeById tpid tpIds
+  , tpIds = BiMap.remove tpid tpIds
   }
 
 update : TpId -> (a -> a) -> TimeSeries a -> TimeSeries a
@@ -48,7 +49,7 @@ singleton tpid t a = insert tpid t a empty
 fold : (Time -> TpId -> a -> acc -> acc) -> acc -> TimeSeries a -> acc
 fold f acc {points, tpIds} =
   let
-    withTpId t a = case getByTime t tpIds of
+    withTpId t a = case BiMap.getPri t tpIds of
         Just tpid -> f t tpid a
         -- This can't happen (due to the BiMap having a tpid for every time)
         -- but I can't express it in the type system so I have to make
@@ -58,34 +59,3 @@ fold f acc {points, tpIds} =
 
 times : TimeSeries a -> List Time
 times {points} = Dict.keys points
-
--- You'd think this could be generic, but since you can't have 2 different
--- comparables, nope!
-type BiMap = BiMap (Dict TpId Time) (Dict Time TpId)
-
-emptyBiMap : BiMap
-emptyBiMap = BiMap Dict.empty Dict.empty
-
-insertById : TpId -> Time -> BiMap -> BiMap
-insertById tpid t (BiMap byId byTime) =
-  let
-    newById = Dict.insert tpid t byId
-    newByTime = Dict.insert t tpid <| case Dict.get tpid byId of
-        Just oldT -> Dict.remove oldT byTime
-        Nothing -> byTime
-  in BiMap newById newByTime
-
-removeById : TpId -> BiMap -> BiMap
-removeById tpid (BiMap byId byTime) =
-  let
-    newById = Dict.remove tpid byId
-    newByTime = case Dict.get tpid byId of
-        Just oldT -> Dict.remove oldT byTime
-        Nothing -> byTime
-  in BiMap newById newByTime
-
-getById : TpId -> BiMap -> Maybe Time
-getById tpid (BiMap byId _) = Dict.get tpid byId
-
-getByTime : Time -> BiMap -> Maybe TpId
-getByTime t (BiMap _ byTime) = Dict.get t byTime
