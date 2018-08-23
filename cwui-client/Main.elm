@@ -13,7 +13,7 @@ import Cmp.Set as CSet exposing (CmpSet)
 import Cmp.Dict as CDict
 import Tagged.Tagged exposing (Tagged(..), tagCmp)
 import Tagged.Set as TS exposing (TaggedSet)
-import Tagged.Dict as TD exposing (TaggedDict)
+import Tagged.Dict as TD
 import JsonFudge exposing (serialiseBundle, parseBundle)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
@@ -69,15 +69,15 @@ type alias Model =
   , layout : Layout SubPath Special
   , layoutFs : FormStore LayoutPath SubPath
   -- Special:
-  , clockFs : TaggedDict NsTag String (FormState EditTypes.PartialTime)
-  , timelines : TaggedDict NsTag Seg TsModel
+  , clockFs : ByNs (FormState EditTypes.PartialTime)
+  , timelines : ByNs TsModel
   -- Data:
-  , recent : List (Digest, RemoteState)
   , pathSubs : CmpSet SubPath (Seg, Path)
   , postTypeSubs : TaggedSet PostDefinition TypeName
+  , recent : List (Digest, RemoteState)
   , state : RemoteState
-  , nodeFs : NodesFs
   , pending : Pendings
+  , nodeFs : NodesFs
   }
 
 type Special
