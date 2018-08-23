@@ -364,26 +364,31 @@ update msg model = case msg of
                           | pending = CDict.update ns (Maybe.map <| Dict.update p mergePending) <| .pending model
                           , nodeFs = CDict.update ns (Maybe.map <| formUpdateEditing p <| arrayActionStateUpdate nac) <| .nodeFs model
                           }
-                        b = ToRelayUpdateBundle ns [] <| producePCms postability p nac
-                      in (newM, sendBundle <| Trcub b)
+                      in case producePCms postability nac of
+                        Ok tpcm -> (newM, sendBundle <| Trcub <|
+                            ToRelayUpdateBundle ns [] [(p, tpcm)])
+                        Err msg -> addDGlobalError msg model
                     _ -> addDGlobalError "Attempted to change children of non-array" model
 
 -- FIXME: Using the same placeholder for everything
 phPh : Placeholder
 phPh = Tagged "ph"
 
--- FIXME: Shouldn't return a list (or talk about paths)!
-producePCms : Postability -> Path -> NaChildrenT -> List (Path, ClMsgTypes.ToProviderContainerUpdateMsg)
-producePCms postability p nac = case nac of
+producePCms
+   : Postability -> NaChildrenT
+  -> Result String ClMsgTypes.ToProviderContainerUpdateMsg
+producePCms postability nac = case nac of
     NacCreate mRef wvs -> case postability of
-        RemoteState.PostableLoaded pdef -> [(p, ClMsgTypes.MsgCreateAfter
+        RemoteState.PostableLoaded pdef -> Ok <| ClMsgTypes.MsgCreateAfter
             { msgTgt = phPh, msgRef = mRef, msgAttributee = Nothing
-            , msgPostArgs = Futility.zip (List.map (defWireType << Tuple.second) <| .fieldDescs pdef) wvs})]
-        _ -> []
-    NacMove tgt mRef -> [(p, ClMsgTypes.MsgMoveAfter
-        {msgTgt=tgt, msgRef=mRef, msgAttributee=Nothing})]
-    NacDelete tgt -> [(p, ClMsgTypes.MsgDelete
-        {msgTgt=tgt, msgAttributee=Nothing})]
+            , msgPostArgs = Futility.zip
+                (List.map (defWireType << Tuple.second) <| .fieldDescs pdef)
+                wvs}
+        _ -> Err "Create for non-postable"
+    NacMove tgt mRef -> Ok <| ClMsgTypes.MsgMoveAfter
+        {msgTgt=tgt, msgRef=mRef, msgAttributee=Nothing}
+    NacDelete tgt -> Ok <| ClMsgTypes.MsgDelete
+        {msgTgt=tgt, msgAttributee=Nothing}
 
 -- Subscriptions
 
