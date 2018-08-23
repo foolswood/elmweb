@@ -25,12 +25,12 @@ import SequenceOps exposing (SeqOp(..))
 import RemoteState exposing (RemoteState, NodeMap, TypeAssignMap, TypeMap, Valuespace, vsEmpty, ByNs)
 
 failyUpdate
-   : (Maybe a -> Result e a) -> comparable
-   -> (List (comparable, e), Dict comparable a)
-   -> (List (comparable, e), Dict comparable a)
-failyUpdate f k (es, d) = case f <| Dict.get k d of
+   : (Maybe a -> Result e a) -> (e -> e1) -> comparable
+   -> (List (comparable, e1), Dict comparable a)
+   -> (List (comparable, e1), Dict comparable a)
+failyUpdate f errConv k (es, d) = case f <| Dict.get k d of
     Ok v -> (es, Dict.insert k v d)
-    Err e -> ((k, e) :: es, d)
+    Err e -> ((k, errConv e) :: es, d)
 
 type TimeSeriesDataOp
   = OpSet Time (List WireType) (List WireValue) Interpolation
@@ -87,17 +87,12 @@ ddApply dd nodeMap =
       in case r of
             Ok n -> (errs, Just n)
             Err msg -> ((tpId, msg) :: errs, mn)
-    -- FIXME: Cleaner with failyUpdate?
-    dcApply p dc (errs, nm) =
-      let
-        mn = Dict.get p nm
-      in case dc of
-        ConstChange (ma, wts, wvs) -> case setConstData wts (ma, wvs) mn of
-            Ok newN -> (errs, Dict.insert p newN nm)
-            Err msg -> ((p, (Nothing, msg)) :: errs, nm)
+    dcApply p dc (errs, nm) = case dc of
+        ConstChange (ma, wts, wvs) -> failyUpdate
+            (setConstData wts (ma, wvs)) (\e -> (Nothing, e)) p (errs, nm)
         TimeChange d ->
           let
-            (tpErrs, newMn) = Dict.foldl tcApply ([], mn) d
+            (tpErrs, newMn) = Dict.foldl tcApply ([], Dict.get p nm) d
             newErrs = List.map (\(tpId, msg) -> (p, (Just tpId, msg))) tpErrs ++ errs
           in (newErrs, Dict.update p (\_ -> newMn) nm)
         DeletedChange -> (errs, Dict.remove p nm)  -- FIXME: Too idempotent?
@@ -126,7 +121,7 @@ digestCCms =
 applyCms : CmDigest -> NodeMap -> (List (Path, String), NodeMap)
 applyCms cms nm =
   let
-    applyOps p ops = failyUpdate (childUpdate ops) p
+    applyOps p ops = failyUpdate (childUpdate ops) identity p
   in Dict.foldl applyOps ([], nm) cms
 
 type DefOp a
