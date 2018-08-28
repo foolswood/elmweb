@@ -8,12 +8,12 @@ import ClTypes exposing
   , WireType)
 
 type SubMsg
-  = MsgSub SubPath
-  | MsgTypeSub (Tagged Definition TypeName)
-  | MsgPostTypeSub (Tagged PostDefinition TypeName)
-  | MsgUnsub SubPath
-  | MsgTypeUnsub (Tagged Definition TypeName)
-  | MsgPostTypeUnsub (Tagged PostDefinition TypeName)
+  = MsgSub Path
+  | MsgTypeSub (Tagged Definition Seg)
+  | MsgPostTypeSub (Tagged PostDefinition Seg)
+  | MsgUnsub Path
+  | MsgTypeUnsub (Tagged Definition Seg)
+  | MsgPostTypeUnsub (Tagged PostDefinition Seg)
 
 type SubErrorIndex
   = SPathError SubPath
@@ -85,7 +85,7 @@ type ToProviderContainerUpdateMsg
       , msgAttributee : Maybe Attributee
       }
 
-type ToRelaySubBundle = ToRelaySubBundle (List SubMsg)
+type ToRelaySubBundle = ToRelaySubBundle (List (Namespace, SubMsg))
 type ToRelayUpdateBundle = ToRelayUpdateBundle
     Namespace
     (List DataUpdateMsg)

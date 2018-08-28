@@ -17,10 +17,7 @@ import ClMsgTypes exposing (..)
 -- Json serialisation fudging
 
 encodePair : (a -> JE.Value) -> (b -> JE.Value) -> (a, b) -> JE.Value
-encodePair ea eb (a, b) = JE.object
-  [ ("0", ea a)
-  , ("1", eb b)
-  ]
+encodePair ea eb (a, b) = JE.list [ ea a, eb b ]
 
 encodeEither : (a -> JE.Value) -> (b -> JE.Value) -> Either a b -> JE.Value
 encodeEither ea eb e = JE.object <| case e of
@@ -35,11 +32,14 @@ encodeNullable encA ma = case ma of
 encodeSeg : Seg -> JE.Value
 encodeSeg = JE.string
 
+encodeTaggedSeg : Tagged a Seg -> JE.Value
+encodeTaggedSeg (Tagged s) = JE.string s
+
 encodePlaceholder : Placeholder -> JE.Value
-encodePlaceholder (Tagged ns) = JE.string ns
+encodePlaceholder = encodeTaggedSeg
 
 encodeNs : Namespace -> JE.Value
-encodeNs (Tagged ns) = JE.string ns
+encodeNs = encodeTaggedSeg
 
 encodePath : Path -> JE.Value
 encodePath = JE.string
@@ -54,12 +54,12 @@ encodeSubPath (Tagged p) = encodePair encodeSeg encodePath p
 
 encodeSubMsg : SubMsg -> JE.Value
 encodeSubMsg sm = JE.list <| case sm of
-    MsgSub p -> [JE.string "s", encodeSubPath p]
-    MsgTypeSub tn -> [JE.string "S", encodeTypeName tn]
-    MsgPostTypeSub tn -> [JE.string "pS", encodeTypeName tn]
-    MsgUnsub p -> [JE.string "u", encodeSubPath p]
-    MsgTypeUnsub tn -> [JE.string "U", encodeTypeName tn]
-    MsgPostTypeUnsub tn -> [JE.string "pU", encodeTypeName tn]
+    MsgSub p -> [JE.string "s", encodePath p]
+    MsgTypeSub tn -> [JE.string "S", encodeTaggedSeg tn]
+    MsgPostTypeSub tn -> [JE.string "pS", encodeTaggedSeg tn]
+    MsgUnsub p -> [JE.string "u", encodePath p]
+    MsgTypeUnsub tn -> [JE.string "U", encodeTaggedSeg tn]
+    MsgPostTypeUnsub tn -> [JE.string "pU", encodeTaggedSeg tn]
 
 encodeTime : Time -> JE.Value
 encodeTime (s, f) = JE.list [JE.int s, JE.int f]
@@ -158,22 +158,24 @@ providerContToJsonValue m = case m of
       , encodeAttributeeField msgAttributee
       ]
 
-serialiseUpdateBundle : ToRelayUpdateBundle -> Time -> String
-serialiseUpdateBundle (ToRelayUpdateBundle ns dums conts) t = JE.encode 2 (JE.object
+encodeUpdateBundle : ToRelayUpdateBundle -> Time -> JE.Value
+encodeUpdateBundle (ToRelayUpdateBundle ns dums conts) t = JE.object
   [ ("ns", encodeNs ns)
   , ("data", JE.list (List.map dumToJsonValue dums))
   , ("cont", JE.list (List.map (encodePair encodePath providerContToJsonValue) conts))
-  , ("time", encodeTime t)])
+  ]
 
-serialiseSubBundle : ToRelaySubBundle -> Time -> String
-serialiseSubBundle (ToRelaySubBundle subs) t = JE.encode 2 (JE.object
-  [ ("subMsgs", JE.list (List.map encodeSubMsg subs))
-  , ("time", encodeTime t)])
+encodeSubBundle : ToRelaySubBundle -> Time -> JE.Value
+encodeSubBundle (ToRelaySubBundle subs) t = JE.object
+  [ ("subMsgs", JE.list (List.map (encodePair encodeNs encodeSubMsg) subs)) ]
 
 serialiseBundle : ToRelayClientBundle -> Time -> String
-serialiseBundle b = case b of
-    Trcub ub -> serialiseUpdateBundle ub
-    Trcsb sb -> serialiseSubBundle sb
+serialiseBundle b t = JE.encode 2 <| JE.object
+  [ ("time", encodeTime t)
+  , ("val", case b of
+        Trcub ub -> tagged 'U' <| encodeUpdateBundle ub t
+        Trcsb sb -> tagged 'S' <| encodeSubBundle sb t)
+  ]
 
 decodePair : JD.Decoder a -> JD.Decoder b -> JD.Decoder (a, b)
 decodePair da db = JD.map2 (,) (JD.field "0" da) (JD.field "1" db)

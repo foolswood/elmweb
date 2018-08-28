@@ -45,14 +45,14 @@ import Clapi.Serialisation
   , tccumTaggedData, TccumType(..)
   , dataErrIndexTaggedData, subErrIndexTaggedData
   , trBundleTaggedData, TrBundleType(..)
-  , Encodable(..)
+  , frBundleTaggedData , Encodable(..)
   , defMsgTaggedData, ilTaggedData, defTaggedData)
 import Clapi.Types
   ( Time(..), Interpolation(..), InterpolationType(..), InterpolationLimit(..)
   , DataUpdateMessage(..)
   , TimeStamped(..)
   , FromRelayClientRootBundle(..), FromRelayClientSubBundle(..)
-  , FromRelayClientUpdateBundle(..)
+  , FromRelayClientUpdateBundle(..), FromRelayBundle(..)
   , DataErrorIndex(..), DataErrorMessage(..)
   , SubMessage(..), SubErrorIndex(..), SubErrorMessage(..)
   , ToRelayBundle(..)
@@ -222,14 +222,14 @@ instance ToJSON ToClientContainerUpdateMessage where
 
 instance FromJSON ToRelayClientUpdateBundle where
     parseJSON = withObject "ToRelayClientUpdateBundle" $ \b ->
-      ToRelayClientUpdateBundle <$> b.: "ns" <*> b .: "data" <*> b .: "cont"
+      ToRelayClientUpdateBundle <$> b .: "ns" <*> b .: "data" <*> b .: "cont"
 
 instance FromJSON ToRelayClientSubBundle where
     parseJSON = withObject "ToRelayClientSubBundle" $ \b ->
       ToRelayClientSubBundle <$> b .: "subMsgs"
 
 instance (FromJSON a) => FromJSON (TimeStamped a) where
-    parseJSON o = withObject "TimeStamped" (\ts -> curry TimeStamped <$> ts .: "time" <*> parseJSON o) o
+    parseJSON o = withObject "TimeStamped" (\ts -> curry TimeStamped <$> ts .: "time" <*> ts .: "val") o
 
 instance ToJSON DataErrorIndex where
     toJSON = buildTaggedJson dataErrIndexTaggedData $ \case
@@ -309,7 +309,7 @@ instance ToJSON FromRelayClientUpdateBundle where
         ]
 
 instance ToJSON FromRelayClientRootBundle where
-    toJSON (FromRelayClientRootBundle co) = object ["co" .= toJSONList co]
+    toJSON (FromRelayClientRootBundle co) = toJSON co
 
 instance ToJSON FromRelayClientSubBundle where
     toJSON (FromRelayClientSubBundle errs ptuns tuns duns) = object
@@ -318,6 +318,13 @@ instance ToJSON FromRelayClientSubBundle where
       , "tuns" .= toJSON tuns
       , "duns" .= toJSON duns
       ]
+
+instance ToJSON FromRelayBundle where
+    toJSON = buildTaggedJson frBundleTaggedData $ \v -> case v of
+        Frcrb b -> toJSON b
+        Frcsb b -> toJSON b
+        Frcub b -> toJSON b
+        _ -> error "Unexpected provider error bundle"
 
 instance FromJSON ToRelayBundle where
     parseJSON = parseTaggedJson trBundleTaggedData $ \case

@@ -184,23 +184,19 @@ init =
 sendBundle : ToRelayClientBundle -> Cmd Msg
 sendBundle b = WebSocket.send wsTarget <| serialiseBundle b <| fromFloat <| MonoTime.rightNow ()
 
-subDiffOps
-   : (a -> SubMsg) -> (a -> SubMsg) -> CmpSet a comparable
-  -> CmpSet a comparable -> List SubMsg
-subDiffOps sub unsub old new =
-  let
-    added = CSet.toList <| CSet.diff new old
-    removed = CSet.toList <| CSet.diff old new
-  in List.map sub added ++ List.map unsub removed
-
 subDiffToCmd
    : CmpSet SubPath (Seg, Path) -> TaggedSet PostDefinition TypeName -> CmpSet SubPath (Seg, Path)
   -> TaggedSet PostDefinition TypeName -> Cmd Msg
 subDiffToCmd oldP oldPt newP newPt =
   let
-    pOps = subDiffOps MsgSub MsgUnsub oldP newP
-    tOps = subDiffOps MsgPostTypeSub MsgPostTypeUnsub oldPt newPt
-  in case pOps ++ tOps of
+    mapLod a b f = List.map f <| CSet.toList <| CSet.diff a b
+    paOps = mapLod newP oldP <| \(Tagged (ns, p)) -> (Tagged ns, MsgSub p)
+    prOps = mapLod oldP newP <| \(Tagged (ns, p)) -> (Tagged ns, MsgUnsub p)
+    taOps = mapLod newPt oldPt <|
+        \(Tagged (ns, ts)) -> (Tagged ns, MsgPostTypeSub <| Tagged ts)
+    trOps = mapLod oldPt newPt <|
+        \(Tagged (ns, ts)) -> (Tagged ns, MsgPostTypeUnsub <| Tagged ts)
+  in case paOps ++ prOps ++ taOps ++ trOps of
     [] -> Cmd.none
     subOps -> sendBundle <| Trcsb <| ToRelaySubBundle subOps
 
@@ -414,7 +410,7 @@ subscriptions model = Sub.batch
 eventFromNetwork : String -> Msg
 eventFromNetwork s = case parseBundle s of
     (Ok b) -> NetworkEvent b
-    (Err e) -> AddError DGlobalError e
+    (Err e) -> AddError DGlobalError (e ++ "  <-  " ++ s)
 
 -- View
 
