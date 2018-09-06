@@ -25,7 +25,7 @@ import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
-import Layout exposing (Layout(..), LayoutPath, updateLayout, viewEditLayout, viewLayout, layoutRequires, LayoutEvent)
+import Layout exposing (BoundLayout(..), ChildSource(..), ChildSources, DataSourceId, ChildSourceStateId, Pattern(..))
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
 import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, arrayActionStateUpdate)
@@ -67,11 +67,10 @@ type alias Model =
   , keepRecent : Float
   , timeNow : Float
   -- Layout:
-  , layout : Layout SubPath Special
-  , layoutFs : FormStore LayoutPath SubPath
+  , layout : BoundLayout
+  , childSources : ChildSources ChildSourceStateId
   -- Special:
   , clockFs : ByNs (FormState EditTypes.PartialTime)
-  , timelines : ByNs TsModel
   -- Data:
   , pathSubs : CmpSet SubPath (Seg, Path)
   , postTypeSubs : TaggedSet PostDefinition TypeName
@@ -81,33 +80,26 @@ type alias Model =
   , nodeFs : NodesFs
   }
 
-type Special
-  = SpClock Namespace
-  | SpTimeline Namespace
-
+-- FIXME: Delete later
 type SpecialEvent
   = SpeClock Namespace (EditEvent EditTypes.PartialTime Time)
   | SpeTimeline Namespace TsMsg
 
-specialRequire : RemoteState -> Special -> CmpSet SubPath (Seg, Path)
-specialRequire rs sp = case sp of
-    SpClock ns -> transportSubs ns rs
-    SpTimeline ns -> transportSubs ns rs
-
+-- FIXME: Just always returns empty
 getTsModel : Namespace -> Model -> TsModel
-getTsModel ns m =
-  let
-    tsm = Maybe.withDefault tsModelEmpty <| CDict.get ns <| .timelines m
-    -- FIXME: Ignores recents and just shows the latest (and reuses path as label):
-    asPointInfo ts = {ts | points = Dict.map
-        (\t tp -> {base = (t, tp), recents = [], fs = FsViewing, mp = Nothing})
-        <| .points ts}
-    asSeriesInfo (p, n, d, e) =
-      { path = p, editable = e, def = d, label = p
-      , transience = Transience.TSteady , series = asPointInfo <| .values n
-      , changedTimes = Dict.empty}
-    rts = List.map asSeriesInfo <| allTimeSeries ns <| latestState m
-  in {tsm | series = rts}
+getTsModel ns m = tsModelEmpty
+--   let
+--     tsm = Maybe.withDefault tsModelEmpty <| CDict.get ns <| .timelines m
+--     -- FIXME: Ignores recents and just shows the latest (and reuses path as label):
+--     asPointInfo ts = {ts | points = Dict.map
+--         (\t tp -> {base = (t, tp), recents = [], fs = FsViewing, mp = Nothing})
+--         <| .points ts}
+--     asSeriesInfo (p, n, d, e) =
+--       { path = p, editable = e, def = d, label = p
+--       , transience = Transience.TSteady , series = asPointInfo <| .values n
+--       , changedTimes = Dict.empty}
+--     rts = List.map asSeriesInfo <| allTimeSeries ns <| latestState m
+--   in {tsm | series = rts}
 
 qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
@@ -135,13 +127,16 @@ requiredChildren rs fss sp =
     (Just vs, Just fs) -> Array.map (subPath ns) <| requiredChildrenVs vs fs p
     _ -> Array.empty
 
-requiredPaths : RemoteState -> NodesFs -> Layout SubPath Special -> CmpSet SubPath (Seg, Path)
-requiredPaths rs fs = layoutRequires
-    tagCmp
-    (\(Tagged (ns, pa)) (Tagged (_, pb)) -> Tagged (ns, PathManipulation.canonicalise <| pa ++ pb))
-    (dynamicLayout rs)
-    (requiredChildren rs fs)
-    (specialRequire rs)
+requiredPaths : RemoteState -> BoundLayout -> ChildSources ChildSourceStateId -> CmpSet SubPath (Seg, Path)
+requiredPaths rs bl cs =
+    CSet.fromList tagCmp <| List.map dsidToPath <| Set.toList <| Layout.requiredDataSources <| Layout.cement
+        (Layout.resolveChild
+            (always [])
+            (dynamicLayout rs))
+        -- FIXME: This should actually do something
+        (\_ -> [])
+        cs
+        bl
 
 init : (Model, Cmd Msg)
 init =
@@ -149,17 +144,10 @@ init =
     engineNs = Tagged "engine"
     relayNs = Tagged "relay"
     initialNodeFs = TD.empty
-    initialLayout = LayoutContainer <| Array.fromList
-      [ LayoutSpecial <| SpClock engineNs
-      , LayoutSpecial <| SpTimeline engineNs
-      , LayoutLeaf <| subPath engineNs "/transport/state"
-      , LayoutLeaf <| subPath relayNs "/self"
-      , LayoutLeaf <| subPath relayNs "/clients"
-      -- FIXME: The leaf of this should be a Path not SubPath:
-      , LayoutChildChoice (subPath relayNs "/clients") <| LayoutLeaf <| subPath relayNs "/clock_diff"
-      ]
+    initialLayout = BlView ["relay", "version"]
+    childSources = Dict.empty
     initialState = remoteStateEmpty
-    initialSubs = requiredPaths initialState initialNodeFs initialLayout
+    initialSubs = requiredPaths initialState initialLayout childSources
     initialModel =
       { errs = []
       , viewMode = UmEdit
@@ -167,9 +155,8 @@ init =
       , keepRecent = 5000.0
       , timeNow = 0.0
       , layout = initialLayout
-      , layoutFs = formStoreEmpty
+      , childSources = childSources
       , clockFs = TD.empty
-      , timelines = TD.empty
       , recent = []
       , pathSubs = initialSubs
       , postTypeSubs = TS.empty
@@ -206,7 +193,7 @@ type Msg
   | NetworkEvent FromRelayClientBundle
   | SquashRecent
   | SecondPassedTick
-  | LayoutUiEvent (LayoutPath, EditEvent SubPath (LayoutEvent SubPath Special))
+  | LayoutUiEvent BoundLayout (ChildSources ChildSourceStateId)
   | SpecialUiEvent SpecialEvent
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
 
@@ -280,7 +267,7 @@ update msg model = case msg of
       let
         d = digest b
         (newState, errs) = applyDigest d <| latestState model
-        pathSubs = requiredPaths newState (.nodeFs model) (.layout model)
+        pathSubs = requiredPaths newState (.layout model) (.childSources model)
         postTypeSubs = unloadedPostTypes newState
         newM =
           { model
@@ -303,13 +290,11 @@ update msg model = case msg of
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
-    LayoutUiEvent (sp, ue) -> case updateLayout sp ue (.layoutFs model) (.layout model) of
-        Err msg -> addDGlobalError msg model
-        Ok (newFs, newLayout) ->
+    LayoutUiEvent bl cs ->
           let
-            pathSubs = requiredPaths (latestState model) (.nodeFs model) newLayout
+            pathSubs = requiredPaths (latestState model) bl cs
           in
-            ( {model | layout = newLayout, layoutFs = newFs, pathSubs = pathSubs}
+            ( {model | layout = bl, childSources = cs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
     SpecialUiEvent se -> case se of
         SpeClock ns evt -> case evt of
@@ -317,7 +302,8 @@ update msg model = case msg of
             EeSubmit t ->
               (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
         SpeTimeline ns evt -> case processTimeSeriesEvent evt <| getTsModel ns model of
-            TsemUpdate tsm -> ({model | timelines = CDict.insert ns tsm <| .timelines model}, Cmd.none)
+            -- TsemUpdate tsm -> ({model | timelines = CDict.insert ns tsm <| .timelines model}, Cmd.none)
+            TsemUpdate tsm -> (model, Cmd.none)
             TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
             -- FIXME: time point changes go nowhere:
             TsemPointChange _ _ _ -> (model, Cmd.none)
@@ -328,10 +314,7 @@ update msg model = case msg of
         EeUpdate v ->
           let
             newFs = CDict.update ns (Maybe.map <| formInsert p (Just v)) <| .nodeFs model
-            pathSubs = requiredPaths (latestState model) newFs (.layout model)
-          in
-            ( {model | nodeFs = newFs, pathSubs = pathSubs}
-            , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
+          in ({model | nodeFs = newFs}, Cmd.none)
         EeSubmit na -> case na of
             NaConst wvs -> case remoteStateLookup ns p <| latestState model of
                 Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
@@ -414,15 +397,40 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
-dynamicLayout : RemoteState -> SubPath -> Layout SubPath a
-dynamicLayout rs sp =
+-- FIXME: Utter tosh
+dsidToPath : DataSourceId -> SubPath
+dsidToPath dsid = case dsid of
+    ns :: rest -> Tagged (ns, "/" ++ String.join "/" rest)
+    [] -> Tagged ("utter", "/tosh")
+
+patternify : List String -> Pattern a String
+patternify segs = case segs of
+    s :: remainder -> PatternPrefix s <| patternify remainder
+    [] -> PatternSubstitute
+
+dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> (List BoundLayout, ChildSources ChildSourceStateId)
+dynamicLayout rs dsid seriesCssid =
   let
-    (ns, p) = unSubPath sp
+    (ns, p) = unSubPath <| dsidToPath dsid
   in case remoteStateLookup ns p rs of
-    Err _ -> LayoutLeaf sp
+    Err _ -> ([], Dict.empty)
     Ok (n, _, _, _) -> case n of
-        ContainerNode segs -> LayoutContainer <| Array.map (\seg -> dynamicLayout rs (subPath ns <| p ++ "/" ++ seg)) <| Array.fromList <| List.map .seg segs
-        _ -> LayoutLeaf sp
+        ContainerNode attributedSegs ->
+          let
+            csid = Layout.dataDerivedChildSource dsid
+            cssid = Layout.dataDerivedChildSourceState dsid
+            childSource = CsTemplate
+                cssid
+                (patternify dsid)
+                (patternify dsid)
+                (patternify dsid)
+                (BlContainer [])
+            dynChildSources = List.map (\cd -> (cd, CsDynamic cd seriesCssid)) <| List.map (List.singleton << .seg) attributedSegs
+          in
+            ( [BlContainer csid, BlChildControl dsid cssid]
+            , Dict.fromList <| (csid, childSource) :: dynChildSources)
+        ConstDataNode _ -> ([BlView dsid], Dict.empty)
+        TimeSeriesNode _ -> ([BlChildControl dsid seriesCssid], Dict.empty)
 
 view : Model -> Html Msg
 view m = div []
@@ -431,23 +439,24 @@ view m = div []
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
   , div [] [text <| toString <| .nodeFs m]
   , case .viewMode m of
-    UmEdit -> Html.map LayoutUiEvent <| viewEditLayout (subPath (Tagged "") "") pathEditView specialEditView (.layoutFs m) (.layout m)
-    UmView -> viewLayout
-        -- FIXME: SubPath join shouldn't really be a thing
-        (\spa spb ->
-          let
-            (ns, pa) = unSubPath spa
-            (_, pb) = unSubPath spb
-          in subPath ns <| pa ++ pb)
-        (dynamicLayout <| .state m)
-        -- FIXME: This is an utterly minging mess:
-        (\sp ->
-          let
-            (ns, p) = unSubPath sp
-          in Array.map (subPath ns) <| Maybe.withDefault Array.empty <| Maybe.map3  visibleChildren (CDict.get ns <| .state m) (CDict.get ns <| .nodeFs m) <| Just p)
-        (Html.map NodeUiEvent << viewPath (.nodeFs m) (.state m) (.recent m) (.pending m))
-        (Html.map SpecialUiEvent << viewSpecial m)
+    UmEdit -> Html.map (uncurry LayoutUiEvent) <| Layout.edit
+        (text << toString)
+        (.childSources m)
         (.layout m)
+    -- FIXME: Just stringing everything is pointless:
+    UmView -> Layout.view
+        (text << toString)
+        (text << toString)
+        (always <| text << toString)
+        -- FIXME: Repeated from the child finding doodad:
+        (Layout.cement
+            (Layout.resolveChild
+                (always [])
+                (dynamicLayout <| latestState m))
+            -- FIXME: This should actually do something
+            (\_ -> [])
+            (.childSources m)
+            (.layout m))
   ]
 
 viewErrors : List (Namespace, DataErrorIndex, String) -> Html a
@@ -471,18 +480,19 @@ pathEditView mp fs = case fs of
         , input [value partialPath, type_ "text", onInput <| EeUpdate << subPath partialNs] []
         ]
 
-specialEditView : Special -> Html Special
-specialEditView sp = text <| toString sp
+-- FIXME: Delete later:
+-- specialEditView : Special -> Html Special
+-- specialEditView sp = text <| toString sp
 
-viewSpecial : Model -> Special -> Html SpecialEvent
-viewSpecial m sp = case sp of
-    SpClock ns ->
-      let
-        transp = transport ns (latestState m) (.timeNow m)
-      in Html.map (SpeClock ns) <| transportClockView transp <| CDict.getWithDefault FsViewing ns <| .clockFs m
-    SpTimeline ns -> case transport ns (latestState m) (.timeNow m) of
-        Err e -> Html.text <| toString e
-        Ok transp -> Html.map (SpeTimeline ns) <| viewTimeSeries (getTsModel ns m) transp
+-- viewSpecial : Model -> Special -> Html SpecialEvent
+-- viewSpecial m sp = case sp of
+--     SpClock ns ->
+--       let
+--         transp = transport ns (latestState m) (.timeNow m)
+--       in Html.map (SpeClock ns) <| transportClockView transp <| CDict.getWithDefault FsViewing ns <| .clockFs m
+--     SpTimeline ns -> case transport ns (latestState m) (.timeNow m) of
+--         Err e -> Html.text <| toString e
+--         Ok transp -> Html.map (SpeTimeline ns) <| viewTimeSeries (getTsModel ns m) transp
 
 viewLoading : Html a
 viewLoading = text "Loading..."

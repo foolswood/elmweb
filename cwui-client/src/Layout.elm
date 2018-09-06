@@ -13,9 +13,9 @@ import Futility exposing (updateIdx, getWithDefault)
 import Form exposing (FormState(..), formState, FormStore, formInsert)
 import EditTypes exposing (EditEvent(..), mapEe)
 
-type alias ChildSourceSeg = Int
+type alias ChildSourceSeg = String
 type alias ChildSourceStateSeg = String
-type alias DataSourceSeg = Float
+type alias DataSourceSeg = String
 
 type alias ChildSourceId = List ChildSourceSeg
 type alias ChildSourceStateId = List ChildSourceStateSeg
@@ -25,27 +25,40 @@ type BoundLayout
   = BlContainer ChildSourceId
   | BlChildControl DataSourceId ChildSourceStateId
   | BlView DataSourceId
+  | BlSeries ChildSourceStateId
 
 type ConcreteBoundLayout
   = CblContainer (List ConcreteBoundLayout)
   | CblChildControl DataSourceId ChildSourceStateId
   | CblView DataSourceId
+  | CblSeries (List DataSourceId)
 
-cement : (ChildSourceId -> List BoundLayout) -> BoundLayout -> ConcreteBoundLayout
-cement expandContainer l = case l of
-    BlContainer csid -> CblContainer <| List.map (cement expandContainer) <| expandContainer csid
+cement
+   : (ChildSources a -> ChildSourceId -> (List BoundLayout, ChildSources a))
+  -> (ChildSourceStateId -> List DataSourceId)
+  -> ChildSources a -> BoundLayout -> ConcreteBoundLayout
+cement expandContainer stateDataSources cs l = case l of
+    BlContainer csid ->
+      let
+        (subLs, newChildSources) = expandContainer cs csid
+        ncs = Dict.union cs newChildSources
+      in CblContainer <|
+        List.map (cement expandContainer stateDataSources ncs) subLs
     BlChildControl dsid csid -> CblChildControl dsid csid
     BlView dsid -> CblView dsid
+    BlSeries cssid -> CblSeries <| stateDataSources cssid
 
 view
-   : (DataSourceId -> Html a) -> (DataSourceId -> ChildSourceStateId -> Html a)
+   : (DataSourceId -> Html a) -> (List DataSourceId -> Html a)
+  -> (DataSourceId -> ChildSourceStateId -> Html a)
   -> ConcreteBoundLayout -> Html a
-view viewData viewChildCtl =
+view viewData viewSeries viewChildCtl =
   let
     go cl = case cl of
         CblContainer subLs -> H.div [] <| List.map go subLs
         CblChildControl dsid csid -> viewChildCtl dsid csid
         CblView dsid -> viewData dsid
+        CblSeries dsids -> viewSeries dsids
   in go
 
 type Pattern a b
@@ -70,24 +83,24 @@ type ChildSource a
         (Pattern ChildSourceStateId ChildSourceStateSeg)
         (Pattern DataSourceId DataSourceSeg)
         BoundLayout
-  | CsDynamic a
+  | CsDynamic DataSourceId a
 
 type alias ChildSources a = Dict ChildSourceId (ChildSource a)
 
 resolveChild
    : (ChildSourceStateId -> List (ChildSourceSeg, ChildSourceStateSeg, DataSourceSeg))
-  -> (a -> List BoundLayout) -> ChildSources a
-  -> ChildSourceId -> List BoundLayout
+  -> (DataSourceId -> a -> (List BoundLayout, ChildSources a))
+  -> ChildSources a -> ChildSourceId -> (List BoundLayout, ChildSources a)
 resolveChild getSegs resolveDynamic childSources csid =
     case getWithDefault (CsFixed []) csid childSources of
-        CsFixed subLayouts -> subLayouts
-        CsDynamic a -> resolveDynamic a
+        CsFixed subLayouts -> (subLayouts, Dict.empty)
+        CsDynamic dsid a -> resolveDynamic dsid a
         CsTemplate cssid csp cssp dsp subLayout ->
           let
             applyPatterns (css, csss, dss) = rebaseBl
                 (applyPattern lAppend css csp) (applyPattern lAppend csss cssp)
                 (applyPattern lAppend dss dsp) subLayout
-          in List.map applyPatterns <| getSegs cssid
+          in (List.map applyPatterns <| getSegs cssid, Dict.empty)
 
 lAppend : a -> List a -> List a
 lAppend a l = l ++ [a]
@@ -101,6 +114,7 @@ rebaseBl csr cssr dsr bl = case bl of
     BlContainer csid -> BlContainer <| csr csid
     BlChildControl dsid cssid -> BlChildControl (dsr dsid) (cssr cssid)
     BlView dsid -> BlView <| dsr dsid
+    BlSeries cssid -> BlSeries <| cssr cssid
 
 edit : (a -> Html a) -> ChildSources a -> BoundLayout -> Html (BoundLayout, ChildSources a)
 edit dynEdit childSources =
@@ -116,7 +130,10 @@ edit dynEdit childSources =
                     CsFixed subLayouts -> H.map
                         (Tuple.mapFirst CsFixed)
                         <| H.div [] <| listEdit go subLayouts
-                    CsDynamic a -> H.map (\newA -> (CsDynamic a, childSources)) <| dynEdit a
+                    CsDynamic dsid a -> H.div []
+                      [ H.map (\newDsid -> (CsDynamic newDsid a, childSources)) <| editDsid dsid
+                      , H.map (\newA -> (CsDynamic dsid newA, childSources)) <| dynEdit a
+                      ]
                     CsTemplate cssid csPat cssPat dsPat subL -> H.div []
                       [ H.map
                           (\newCssid -> (CsTemplate newCssid csPat cssPat dsPat subL, childSources))
@@ -140,15 +157,17 @@ edit dynEdit childSources =
               , H.map (\newCssid -> (BlChildControl dsid newCssid, childSources)) <| editCssid cssid
               ]
             BlView dsid -> H.map (\newDsid -> (BlView newDsid, childSources)) <| editDsid dsid
+            BlSeries cssid -> H.map (\newCssid -> (BlSeries newCssid, childSources)) <| editCssid cssid
       ]
   in go
 
 emptyBlFromStr : String -> BoundLayout
 emptyBlFromStr s = case s of
-    "container" -> BlContainer [0]
-    "childControl" -> BlChildControl [0] ["hi"]
-    "view" -> BlView [0]
-    _ -> BlContainer [0]
+    "container" -> BlContainer ["root"]
+    "childControl" -> BlChildControl ["root"] ["default"]
+    "view" -> BlView ["api", "version"]
+    "series" -> BlSeries ["series"]
+    _ -> BlContainer ["tosh"]
 
 blStrOpts bl =
   let
@@ -156,9 +175,30 @@ blStrOpts bl =
         BlContainer _ -> "container"
         BlChildControl _ _ -> "childControl"
         BlView _ -> "view"
+        BlSeries _ -> "series"
     asOpt s = H.option [HA.value s, HA.selected <| s == selected] [H.text s]
   in List.map asOpt ["container", "childControl", "view"]
 
+listEdit : (a -> Html (a, b)) -> List a -> List (Html (List a, b))
+listEdit f =
+  let
+    go pre l = case l of
+        a :: rest ->
+            (H.map (\(newA, b) -> (pre ++ (newA :: rest), b)) <| f a) :: go (pre ++ [a]) rest
+        [] -> []
+  in go []
+
+requiredDataSources : ConcreteBoundLayout -> Set DataSourceId
+requiredDataSources =
+  let
+    go cbl acc = case cbl of
+        CblContainer subLs -> List.foldl go acc subLs
+        CblChildControl dsid _ -> Set.insert dsid acc
+        CblView dsid -> Set.insert dsid acc
+        CblSeries dsids -> Set.union acc <| Set.fromList dsids
+  in flip go Set.empty
+
+-- FIXME: Rest of this is abject tat
 editDsid : DataSourceId -> Html DataSourceId
 editDsid _ = H.text "dsideditor"
 
@@ -171,184 +211,8 @@ editCssid _ = H.text "cssideditor"
 editPattern : Pattern a b -> Html (Pattern a b)
 editPattern _ = H.text "not implemented"
 
-listEdit : (a -> Html (a, b)) -> List a -> List (Html (List a, b))
-listEdit f =
-  let
-    go pre l = case l of
-        a :: rest ->
-            (H.map (\(newA, b) -> (pre ++ (newA :: rest), b)) <| f a) :: go (pre ++ [a]) rest
-        [] -> []
-  in go []
+dataDerivedChildSource : DataSourceId -> ChildSourceId
+dataDerivedChildSource dsid = "dataDerived" :: dsid
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-type Layout p q s
-  = LayoutContainer (Array (Layout p q s))
-  | LayoutChildChoice p (Layout q q s)
-  | LayoutDynamic p
-  | LayoutLeaf p
-  | LayoutSpecial s
-
-type ConcreteLayout p s
-  = ClContainer (Array (ConcreteLayout p s))
-  | ClLeaf p
-  | ClSpecial s
-
-cementLayout : (p -> q -> p) -> (p -> Layout q q s) -> (p -> Array q) -> Layout p q s -> ConcreteLayout p s
-cementLayout join dyn getChildPaths =
-  let
-    goPartial p l = case l of
-        LayoutContainer kids -> ClContainer <| Array.map (goPartial p) kids
-        LayoutChildChoice q subL -> let ccp = join p q in
-            goFull <| expandChildChoice join subL <| Array.map (join ccp) <| getChildPaths <| join ccp q
-        LayoutDynamic q -> goPartial (join p q) <| dyn (join p q)
-        LayoutLeaf q -> ClLeaf <| join p q
-        LayoutSpecial s -> ClSpecial s
-    goFull l = case l of
-        LayoutContainer kids -> ClContainer <| Array.map goFull kids
-        LayoutChildChoice p subL -> goFull <| expandChildChoice join subL <| Array.map (join p) <| getChildPaths p
-        LayoutDynamic p -> goPartial p <| dyn p
-        LayoutLeaf p -> ClLeaf p
-        LayoutSpecial s -> ClSpecial s
-  in goFull
-
-expandChildChoice : (p -> q -> p) -> Layout q q s -> Array p -> Layout p q s
-expandChildChoice joinPath kidLayout basePaths =
-    LayoutContainer <| Array.map (rebaseLayout joinPath kidLayout) basePaths
-
-rebaseLayout : (p -> q -> p) -> Layout q q s -> p -> Layout p q s
-rebaseLayout joinPath l basePath = case l of
-    LayoutContainer kids -> LayoutContainer <| Array.map (\l -> rebaseLayout joinPath l basePath) kids
-    -- Leaves the paths in the child template alone:
-    LayoutChildChoice p kid -> LayoutChildChoice (joinPath basePath p) kid
-    LayoutDynamic p -> LayoutDynamic <| joinPath basePath p
-    LayoutLeaf p -> LayoutLeaf <| joinPath basePath p
-    LayoutSpecial s -> LayoutSpecial s  -- FIXME: Should this have an option to do something, or error?
-
--- removeIdx : Int -> Array a -> Array a
--- removeIdx idx a = Array.append
---     (Array.slice 0 idx a) (Array.slice (idx + 1) (Array.length a) a)
--- 
--- layoutRequires
---    : Cmp p comparable -> (p -> p -> p) -> (p -> Layout p s)
---   -> (p -> Array p) -> (s -> CmpSet p comparable) -> Layout p s
---   -> CmpSet p comparable
--- layoutRequires cmp joinPath dyn cg specialRequires =
---   let
---     go l = case l of
---         LayoutContainer kids -> Array.foldl
---             (\k acc -> CSet.union acc <| go k) (CSet.empty cmp) kids
---         LayoutChildChoice p k ->
---             CSet.insert p <| go <| expandChildChoice joinPath k <| cg p
---         LayoutDynamic p -> go <| dyn p
---         LayoutLeaf p -> CSet.singleton cmp p
---         LayoutSpecial s -> specialRequires s
---   in go
--- 
--- -- Html generating:
--- 
--- containerHtml : Array (Html a) -> Html a
--- containerHtml = H.div [] << Array.toList
--- 
--- viewLayout
---    : (p -> p -> p) -> (p -> Layout p s) -> (p -> Array p) -> (p -> Html a)
---    -> (s -> Html a) -> Layout p s -> Html a
--- viewLayout joinPath dyn chosenKids h viewSpecial =
---   let
---     go l = case l of
---         LayoutContainer kids -> containerHtml <| Array.map go kids
---         LayoutChildChoice p kid -> go <| expandChildChoice joinPath kid <| chosenKids p
---         LayoutDynamic p -> go <| dyn p
---         LayoutLeaf p -> h p
---         LayoutSpecial s -> viewSpecial s
---   in go
--- 
--- type LayoutEvent p s
---   = LeeRemove
---   | LeeSubdivide
---   | LeeSetDynamic p
---   | LeeSetChooser p
---   | LeeSetLeaf p
---   | LeeAddLeaf p
---   | LeeSetSpecial s
--- 
--- type alias LayoutTargetEditor p = Maybe p -> FormState p -> Html (EditEvent p p)
--- 
--- updateLayout
---    : LayoutPath -> EditEvent p (LayoutEvent p s)
---   -> FormStore LayoutPath p -> Layout p s
---   -> Result String (FormStore LayoutPath p, Layout p s)
--- updateLayout lp lee fs l =
---   let
---     (newState, rNewLayout) = case lee of
---         EeUpdate p -> (Just p, Ok l)
---         EeSubmit evt -> (,) Nothing <| case evt of
---             LeeRemove -> removeSubtree lp l
---             LeeSubdivide -> updateLayoutPath (Ok << LayoutContainer << Array.repeat 1) lp l
---             LeeSetChooser p -> updateLayoutPath (setChooser p) lp l
---             LeeSetDynamic p -> setLayout (LayoutDynamic p) lp l
---             LeeSetLeaf p -> setLeafBinding lp p l
---             LeeAddLeaf p -> addLeaf p lp l
---             LeeSetSpecial sp -> setLayout (LayoutSpecial sp) lp l
---     newFs = formInsert lp newState fs
---   in Result.map ((,) newFs) rNewLayout
--- 
--- mapSubmitEvt : (c -> d) -> EditEvent a c -> EditEvent a d
--- mapSubmitEvt f e = mapEe identity f e
--- 
--- containerAddControls
---    : p -> LayoutTargetEditor p -> LayoutPath -> FormState p
---   -> Html (LayoutPath, EditEvent p (LayoutEvent p s))
--- containerAddControls editInitial lte lp les =
---   let
---     s = case les of
---         FsViewing -> FsEditing editInitial
---         FsEditing p -> FsEditing p
---   in H.map ((,) lp << mapSubmitEvt LeeAddLeaf) <| lte Nothing s
--- 
--- viewEditLayout
---    : p -> LayoutTargetEditor p -> (s -> Html s) -> FormStore LayoutPath p -> Layout p s
---    -> Html (LayoutPath, EditEvent p (LayoutEvent p s))
--- viewEditLayout editInitial h specialEdit fs =
---   let
---     go contained lp l =
---       let
---         bindEvt f = H.map ((,) lp << mapSubmitEvt f)
---         s = formState lp fs
---         (typeControls, body) = case l of
---             LayoutContainer kids ->
---               let
---                 c = [containerAddControls editInitial h lp s]
---                 b = containerHtml <| Array.indexedMap (\i -> go True (lp ++ [i])) kids
---               in (c, b)
---             LayoutChildChoice p kid ->
---               let
---                 b = H.div []
---                   [ bindEvt LeeSetChooser <| h (Just p) s
---                   , go False (lp ++ [0]) kid
---                   ]
---               in ([], b)
---             LayoutDynamic p -> ([], bindEvt LeeSetDynamic <| h (Just p) s)
---             LayoutLeaf p -> ([], bindEvt LeeSetLeaf <| h (Just p) s)
---             LayoutSpecial sp -> ([], H.map ((,) lp << EeSubmit << LeeSetSpecial) <| specialEdit sp)
---         layoutControls = if contained
---             then H.button [HE.onClick <| (lp, EeSubmit LeeRemove)] [H.text "Remove"] :: typeControls
---             else typeControls
---         alwaysControls = [H.button [HE.onClick <| (lp, EeSubmit LeeSubdivide)] [H.text "Split"]]
---       in H.div [] <| alwaysControls ++ layoutControls ++ [body]
---   in go False []
+dataDerivedChildSourceState : DataSourceId -> ChildSourceStateId
+dataDerivedChildSourceState dsid = "dataDerived" :: dsid
