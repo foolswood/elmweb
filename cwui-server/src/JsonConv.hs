@@ -237,6 +237,7 @@ instance (FromJSON a) => FromJSON (TimeStamped a) where
 instance ToJSON DataErrorIndex where
     toJSON = buildTaggedJson dataErrIndexTaggedData $ \case
         GlobalError -> toJSON (Nothing :: Maybe Int)
+        NamespaceError ns -> toJSON ns
         PathError p -> toJSON p
         TimePointError p tpid -> object ["path" .= p, "tpid" .= tpid]
 
