@@ -145,9 +145,11 @@ instance ToJSON WireValue where
 instance FromJSON SubMessage where
     parseJSON = parseTaggedJson subMsgTaggedData $ \e -> case e of
         SubMsgTSub -> fmap MsgSubscribe . parseJSON
+        SubMsgTPostTypeSub -> fmap MsgPostTypeSubscribe . parseJSON
         SubMsgTTypeSub -> fmap MsgTypeSubscribe . parseJSON
         SubMsgTUnsub -> fmap MsgUnsubscribe . parseJSON
         SubMsgTTypeUnsub -> fmap MsgTypeUnsubscribe . parseJSON
+        SubMsgTPostTypeUnsub -> fmap MsgPostTypeUnsubscribe . parseJSON
 
 instance FromJSON Time where
     parseJSON = withArray "Time" (\v -> case Vec.toList v of
@@ -164,9 +166,10 @@ buildTaggedJson :: TaggedData e a -> (a -> Value) -> a -> Value
 buildTaggedJson td b i = toJSON [toJSON $ tdInstanceToTag td i, b i]
 
 instance FromJSON Interpolation where
-    parseJSON = parseTaggedJson interpolationTaggedData $ \e v -> case e of
+    parseJSON = parseTaggedJson interpolationTaggedData $ \e _v -> case e of
         ItConstant -> return IConstant
         ItLinear -> return ILinear
+        ItBezier -> error "Unsupported right now"
 
 instance ToJSON Interpolation where
     toJSON = buildTaggedJson interpolationTaggedData $ const $ toJSON (Nothing :: Maybe Int)
