@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE
     FlexibleInstances
   , GeneralizedNewtypeDeriving
@@ -22,7 +23,6 @@ import Data.Aeson (
 import Data.Aeson.Types (Parser)
 import Data.Maybe (fromJust)
 import qualified Data.Vector as Vec
-import qualified Data.ByteString.Lazy as B
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
