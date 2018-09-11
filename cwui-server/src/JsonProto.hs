@@ -7,7 +7,7 @@ import qualified Data.ByteString.Lazy as LB
 import Control.Monad (forever)
 import Clapi.Types (FromRelayBundle(..), ToRelayBundle(..), TimeStamped(..))
 import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev)
-import JsonConv
+import JsonConv ()
 
 import Debug.Trace
 

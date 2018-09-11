@@ -12,7 +12,7 @@ import qualified Control.Concurrent.Chan.Unagi as Q
 import Control.Monad (forever, void, foldM)
 import Control.Monad.Fail (MonadFail(..))
 import Control.Monad.Trans (lift)
-import System.Clock (TimeSpec(..), Clock(Monotonic), getTime, toNanoSecs)
+import System.Clock (Clock(Monotonic), getTime, toNanoSecs)
 import Network.Simple.TCP (connect, Socket, SockAddr)
 import Network.Socket.ByteString (send, recv)
 

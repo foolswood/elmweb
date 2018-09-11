@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE
     FlexibleInstances
   , GeneralizedNewtypeDeriving
@@ -22,7 +23,6 @@ import Data.Aeson (
 import Data.Aeson.Types (Parser)
 import Data.Maybe (fromJust)
 import qualified Data.Vector as Vec
-import qualified Data.ByteString.Lazy as B
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
@@ -145,9 +145,11 @@ instance ToJSON WireValue where
 instance FromJSON SubMessage where
     parseJSON = parseTaggedJson subMsgTaggedData $ \e -> case e of
         SubMsgTSub -> fmap MsgSubscribe . parseJSON
+        SubMsgTPostTypeSub -> fmap MsgPostTypeSubscribe . parseJSON
         SubMsgTTypeSub -> fmap MsgTypeSubscribe . parseJSON
         SubMsgTUnsub -> fmap MsgUnsubscribe . parseJSON
         SubMsgTTypeUnsub -> fmap MsgTypeUnsubscribe . parseJSON
+        SubMsgTPostTypeUnsub -> fmap MsgPostTypeUnsubscribe . parseJSON
 
 instance FromJSON Time where
     parseJSON = withArray "Time" (\v -> case Vec.toList v of
@@ -164,9 +166,10 @@ buildTaggedJson :: TaggedData e a -> (a -> Value) -> a -> Value
 buildTaggedJson td b i = toJSON [toJSON $ tdInstanceToTag td i, b i]
 
 instance FromJSON Interpolation where
-    parseJSON = parseTaggedJson interpolationTaggedData $ \e v -> case e of
+    parseJSON = parseTaggedJson interpolationTaggedData $ \e _v -> case e of
         ItConstant -> return IConstant
         ItLinear -> return ILinear
+        ItBezier -> error "Unsupported right now"
 
 instance ToJSON Interpolation where
     toJSON = buildTaggedJson interpolationTaggedData $ const $ toJSON (Nothing :: Maybe Int)
@@ -234,6 +237,7 @@ instance (FromJSON a) => FromJSON (TimeStamped a) where
 instance ToJSON DataErrorIndex where
     toJSON = buildTaggedJson dataErrIndexTaggedData $ \case
         GlobalError -> toJSON (Nothing :: Maybe Int)
+        NamespaceError ns -> toJSON ns
         PathError p -> toJSON p
         TimePointError p tpid -> object ["path" .= p, "tpid" .= tpid]
 
