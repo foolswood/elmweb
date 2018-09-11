@@ -144,7 +144,7 @@ init =
     engineNs = Tagged "engine"
     relayNs = Tagged "relay"
     initialNodeFs = TD.empty
-    initialLayout = BlView ["relay", "version"]
+    initialLayout = BlView ["relay", "build"]
     childSources = Dict.empty
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialLayout childSources
@@ -445,7 +445,7 @@ view m = div []
         (.layout m)
     -- FIXME: Just stringing everything is pointless:
     UmView -> Layout.view
-        (text << toString)
+        (Html.map NodeUiEvent << viewPath (.nodeFs m) (.state m) (.recent m) (.pending m) << dsidToPath)
         (text << toString)
         (always <| text << toString)
         -- FIXME: Repeated from the child finding doodad:
