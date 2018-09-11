@@ -54,12 +54,12 @@ encodeSubPath (Tagged p) = encodePair encodeSeg encodePath p
 
 encodeSubMsg : SubMsg -> JE.Value
 encodeSubMsg sm = JE.list <| case sm of
-    MsgSub p -> [JE.string "s", encodePath p]
-    MsgTypeSub tn -> [JE.string "S", encodeTaggedSeg tn]
-    MsgPostTypeSub tn -> [JE.string "pS", encodeTaggedSeg tn]
-    MsgUnsub p -> [JE.string "u", encodePath p]
-    MsgTypeUnsub tn -> [JE.string "U", encodeTaggedSeg tn]
-    MsgPostTypeUnsub tn -> [JE.string "pU", encodeTaggedSeg tn]
+    MsgSub p -> [JE.string "S", encodePath p]
+    MsgTypeSub tn -> [JE.string "T", encodeTaggedSeg tn]
+    MsgPostTypeSub tn -> [JE.string "P", encodeTaggedSeg tn]
+    MsgUnsub p -> [JE.string "s", encodePath p]
+    MsgTypeUnsub tn -> [JE.string "t", encodeTaggedSeg tn]
+    MsgPostTypeUnsub tn -> [JE.string "p", encodeTaggedSeg tn]
 
 encodeTime : Time -> JE.Value
 encodeTime (s, f) = JE.list [JE.int s, JE.int f]

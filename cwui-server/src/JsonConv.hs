@@ -254,7 +254,7 @@ instance ToJSON SubErrorIndex where
         NamespaceSubError ns -> toJSON ns
         PostTypeSubError ns tn -> object ["ns" .= ns, "tn" .= tn]
         TypeSubError ns tn -> object ["ns" .= ns, "tn" .= tn]
-        PathSubError ns p -> object ["ns" .= ns, "path" .= p]
+        PathSubError ns p -> toJSON (ns, p)
 
 instance ToJSON SubErrorMessage where
     toJSON (MsgSubError ei m) = object ["eIdx" .= ei, "msg" .= m]
