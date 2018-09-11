@@ -100,6 +100,26 @@ viewArray editable arrayDef postability recentCops n s mp =
         FsViewing -> {chosen = defaultChildChoice <| Just rSegs, create = Nothing, dragging = Nothing}
         FsEditing v -> v
     chosenChange op = EeUpdate {editState | chosen = op <| .chosen editState}
+    viewSeg pendingRemoves pendingMoves additionalAttrFactory additionalElemFactory seg =
+      let
+        removed = Dict.member seg pendingRemoves || Dict.member seg recentRemoves
+        edited = Dict.member seg pendingMoves
+        added = not <| List.member seg baseSegs
+        segText = H.text <| case (Dict.get seg recentAttrib, edited) of
+            (Just (Just att), False) -> seg ++ " (" ++ att ++ ")"
+            _ -> seg
+        segWidget = if Set.member seg <| .chosen editState
+            then H.b
+                ((HE.onClick <| chosenChange <| Set.remove seg) :: additionalAttrFactory seg)
+                [segText]
+            else H.span
+                ((HE.onClick <| chosenChange <| Set.insert seg) :: additionalAttrFactory seg)
+                [segText]
+      in if removed
+        then H.div [] [H.del [] [segWidget]]
+        else if added
+            then H.div [] <| H.ins [] [segWidget] :: additionalElemFactory seg
+            else H.div [] <| segWidget :: additionalElemFactory seg
     content = case .create editState of
         Just partialCreate ->
           let
@@ -153,51 +173,11 @@ viewArray editable arrayDef postability recentCops n s mp =
                             else [acDragOverAttr, dragEntered, onDrop <| EeSubmit <| NacMove startSeg <| Just seg]
                       , mEndSeg
                       )
-                viewSeg seg =
-                  let
-                    removed = Dict.member seg pendingRemoves || Dict.member seg recentRemoves
-                    edited = Dict.member seg pendingMoves
-                    added = not <| List.member seg baseSegs
-                    segText = H.text <| case (Dict.get seg recentAttrib, edited) of
-                        (Just (Just att), False) -> seg ++ " (" ++ att ++ ")"
-                        _ -> seg
-                    segWidget = if Set.member seg <| .chosen editState
-                        then H.b
-                            ((HE.onClick <| chosenChange <| Set.remove seg) :: dragAttrsFor seg)
-                            [segText]
-                        else H.span
-                            ((HE.onClick <| chosenChange <| Set.insert seg) :: dragAttrsFor seg)
-                            [segText]
-                  in if removed
-                    then H.div [] [H.del [] [segWidget]]
-                    else if added
-                        then H.div [] [H.ins [] [segWidget], addBtn <| Just seg, delBtn seg]
-                        else H.div [] [segWidget, addBtn <| Just seg, delBtn seg]
-                segViews = List.map viewSeg allSegs
+                segViews = List.map
+                    (viewSeg
+                        pendingRemoves pendingMoves
+                        dragAttrsFor (\seg -> [addBtn <| Just seg, delBtn seg]))
+                    allSegs
               in addBtn Nothing :: segViews
-            ReadOnly ->
-              let
-                viewSeg seg =
-                  let
-                    {attrs, segStr} =
-                      let
-                        segText = H.text <| case Dict.get seg recentAttrib of
-                            Just (Just att) -> seg ++ " (" ++ att ++ ")"
-                            _ -> seg
-                      in if Set.member seg <| .chosen editState
-                        then
-                          { segStr = H.b [] [segText]
-                          , attrs = [HE.onClick <| chosenChange <| Set.remove seg]
-                          }
-                        else
-                          { segStr = segText
-                          , attrs = [HE.onClick <| chosenChange <| Set.insert seg]
-                          }
-                    segStyled = if Dict.member seg recentRemoves
-                        then H.del [] [segStr]
-                        else if Dict.member seg recentMoves
-                            then H.ins [] [segStr]
-                            else segStr
-                  in H.div attrs [segStyled]
-              in List.map viewSeg rSegs
+            ReadOnly -> List.map (viewSeg Dict.empty Dict.empty (always []) (always [])) rSegs
   in H.div [] content
