@@ -144,8 +144,13 @@ init =
     engineNs = Tagged "engine"
     relayNs = Tagged "relay"
     initialNodeFs = TD.empty
-    initialLayout = BlView ["relay", "build"]
-    childSources = Dict.empty
+    initialLayout = BlContainer ["root"]
+    childSources = Dict.fromList [
+        (["root"], CsFixed
+          [ BlView ["relay", "build"]
+          , BlChildControl ["relay", "clients"] ["all_clients"]
+          ])
+        ]
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialLayout childSources
     initialModel =

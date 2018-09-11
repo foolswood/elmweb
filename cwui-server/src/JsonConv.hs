@@ -287,8 +287,8 @@ instance ToJSON PostDefinition where
         asTypeO (s, tts) = object ["seg" .= s, "tys" .= toJSONList tts]
 
 instance ToJSON ArrayDefinition where
-    toJSON (ArrayDefinition doc ptn cTn cLib) =
-      object ["doc" .= doc, "ptn" .= ptn, "ctn" .= cTn, "clib" .= cLib]
+    toJSON (ArrayDefinition doc ptn cTn cEd) =
+      object ["doc" .= doc, "ptn" .= ptn, "ctn" .= cTn, "ced" .= cEd]
 
 instance ToJSON Definition where
     toJSON = buildTaggedJson defTaggedData $ \v -> case v of

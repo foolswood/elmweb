@@ -200,13 +200,15 @@ requiredDataSources =
 
 -- FIXME: Rest of this is abject tat
 editDsid : DataSourceId -> Html DataSourceId
-editDsid _ = H.text "dsideditor"
+editDsid dsid = H.input
+    [HA.value <| String.join "/" dsid, HE.onInput <| String.split "/"]
+    []
 
 editCsid : ChildSourceId -> Html ChildSourceId
-editCsid _ = H.text "csideditor"
+editCsid = editDsid
 
 editCssid : ChildSourceStateId -> Html ChildSourceStateId
-editCssid _ = H.text "cssideditor"
+editCssid = editDsid
 
 editPattern : Pattern a b -> Html (Pattern a b)
 editPattern _ = H.text "not implemented"
