@@ -181,7 +181,6 @@ type alias NeSeriesT = TimeSeries NeTimePoint
 
 type alias NeChildrenT =
   { create : Maybe NeChildCreate
-  , chosen : Set Seg
   , dragging : Maybe (String, Maybe String)
   }
 

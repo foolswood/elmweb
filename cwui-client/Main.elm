@@ -28,7 +28,7 @@ import MonoTime
 import Layout exposing (BoundLayout(..), ChildSource(..), ChildSources, DataSourceId, ChildSourceStateId, Pattern(..))
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
 import TupleViews exposing (viewWithRecent)
-import ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, arrayActionStateUpdate)
+import ArrayView exposing (viewArray, defaultChildChoice, remoteChildSegs, arrayActionStateUpdate)
 import EditTypes exposing
   ( NodeEdit(NeChildren), EditEvent(..), mapEe, NodeAction(..), NaChildrenT(..)
   , NeConstT, constNeConv, seriesNeConv, childrenNeConv, constNaConv
@@ -104,19 +104,13 @@ getTsModel ns m = tsModelEmpty
 qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
 
-visibleChildren : Valuespace -> NodeFs -> Path -> Array Path
-visibleChildren vs fs p = qualifySegs p <| case chosenChildSegs (formState p fs) of
-    Just chosen -> chosen
-    Nothing -> defaultChildChoice (remoteChildSegs vs p)
-
 requiredChildrenVs : Valuespace -> NodeFs -> Path -> Array Path
 requiredChildrenVs vs fs p = case remoteChildSegs vs p of
     Nothing -> Array.empty
     Just segs ->
       let
-        chosen = case chosenChildSegs (formState p fs) of
-            Just c -> Set.filter (flip List.member segs) c
-            Nothing -> defaultChildChoice <| Just segs
+        -- FIXME: Child seg thing:
+        chosen = defaultChildChoice <| Just segs
       in qualifySegs p chosen
 
 requiredChildren : RemoteState -> NodesFs -> SubPath -> Array SubPath

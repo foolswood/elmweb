@@ -1,4 +1,6 @@
-module ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, rectifyEdits, arrayActionStateUpdate, segViewerWidget)
+module ArrayView exposing
+  ( viewArray, defaultChildChoice, remoteChildSegs, rectifyEdits,
+  arrayActionStateUpdate, SegChooser, segViewerWidget)
 
 import Html as H exposing (Html)
 import Html.Events as HE
@@ -23,11 +25,6 @@ defaultChildChoice : Maybe (List Seg) -> Set Seg
 defaultChildChoice mSegs = case mSegs of
     Just (seg :: _) -> Set.singleton seg
     _ -> Set.empty
-
-chosenChildSegs : FormState NodeEdit -> Maybe (Set Seg)
-chosenChildSegs nfs = case nfs of
-    FsEditing (NeChildren v) -> Just <| .chosen v
-    _ -> Nothing
 
 remoteChildSegs : Valuespace -> Path -> Maybe (List Seg)
 remoteChildSegs vs p = case Dict.get p <| .nodes vs of
@@ -57,8 +54,7 @@ rectifyEdits initialList cops edits =
       in case op of
         SoAbsent ->
             { es
-            | chosen = Set.remove seg <| .chosen es
-            , dragging = newDrag
+            | dragging = newDrag
             }
         SoPresentAfter _ -> { es | dragging = newDrag}
   in Dict.foldl rectifyEdit edits cops
@@ -120,10 +116,8 @@ viewArray segChooser wrapper editable arrayDef postability recentCops n s mp =
         List.foldl (Dict.union << Dict.map (always Tuple.second)) Dict.empty recentCops
     rSegs = Maybe.withDefault baseSegs <| Result.toMaybe <| applySeqOps recentMoves baseSegs
     editState = case s of
-        FsViewing -> {chosen = defaultChildChoice <| Just rSegs, create = Nothing, dragging = Nothing}
+        FsViewing -> {create = Nothing, dragging = Nothing}
         FsEditing v -> v
-    chosenChange op = EeUpdate {editState | chosen = op <| .chosen editState}
-    segChoices = Just <| .chosen editState
     viewSeg pendingRemoves pendingMoves additionalAttrFactory additionalElemFactory seg =
       let
         removed = Dict.member seg pendingRemoves || Dict.member seg recentRemoves
