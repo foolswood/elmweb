@@ -574,7 +574,7 @@ viewNode editable def postability node recentCops recentDums formState maybeNas 
     StructDef d -> viewStruct d
     ArrayDef d -> withCasts
         Ok childrenNeConv childrenPaConv childrenNaConv (.unwrap childrenNodeConv) recentCops
-        (viewArray editable d postability)
+        (viewArray ArrayView.segViewerWidget identity editable d postability)
 
 viewStruct : StructDefinition -> Html a
 viewStruct structDef =

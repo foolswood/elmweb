@@ -1,4 +1,4 @@
-module ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, rectifyEdits, arrayActionStateUpdate)
+module ArrayView exposing (viewArray, defaultChildChoice, chosenChildSegs, remoteChildSegs, rectifyEdits, arrayActionStateUpdate, segViewerWidget)
 
 import Html as H exposing (Html)
 import Html.Events as HE
@@ -85,11 +85,34 @@ acDragOverAttr =
 emptyPostDefPartial : PostDefinition -> NeConstT
 emptyPostDefPartial = emptyPartial << List.map second << .fieldDescs
 
+type alias SegChooser a b = (Seg -> List (H.Attribute a)) -> String -> Seg -> H.Html b
+
+segChooserWidget
+   : Set Seg -> (Seg -> List (H.Attribute a))
+  -> String -> Seg -> H.Html (Either (Set Seg) a)
+segChooserWidget chosen additionalAttrFactory segText seg =
+  let
+    additionalAttrs = List.map (HA.map Right) <| additionalAttrFactory seg
+  in
+    if Set.member seg chosen
+        then H.b
+            ((HE.onClick <| Left <| Set.remove seg chosen) :: additionalAttrs)
+            [H.text segText]
+        else H.span
+            ((HE.onClick <| Left <| Set.insert seg chosen) :: additionalAttrs)
+            [H.text segText]
+
+segViewerWidget : (Seg -> List (H.Attribute a)) -> String -> Seg -> H.Html a
+segViewerWidget additionalAttrFactory segText seg =
+    H.span (additionalAttrFactory seg) [H.text segText]
+
 viewArray
-   : Editable -> ArrayDefinition -> Postability -> List Cops
+   : SegChooser (EditEvent NeChildrenT NaChildrenT) b
+  -> (EditEvent NeChildrenT NaChildrenT -> b)
+  -> Editable -> ArrayDefinition -> Postability -> List Cops
   -> ContainerNodeT -> FormState NeChildrenT -> Maybe PaChildrenT
-  -> Html (EditEvent NeChildrenT NaChildrenT)
-viewArray editable arrayDef postability recentCops n s mp =
+  -> Html b
+viewArray segChooser wrapper editable arrayDef postability recentCops n s mp =
   let
     baseSegs = List.map .seg n
     recentAttrib = List.foldl (Dict.union << Dict.map (always Tuple.first)) Dict.empty recentCops
@@ -100,26 +123,21 @@ viewArray editable arrayDef postability recentCops n s mp =
         FsViewing -> {chosen = defaultChildChoice <| Just rSegs, create = Nothing, dragging = Nothing}
         FsEditing v -> v
     chosenChange op = EeUpdate {editState | chosen = op <| .chosen editState}
+    segChoices = Just <| .chosen editState
     viewSeg pendingRemoves pendingMoves additionalAttrFactory additionalElemFactory seg =
       let
         removed = Dict.member seg pendingRemoves || Dict.member seg recentRemoves
         edited = Dict.member seg pendingMoves
         added = not <| List.member seg baseSegs
-        segText = H.text <| case (Dict.get seg recentAttrib, edited) of
+        segString = case (Dict.get seg recentAttrib, edited) of
             (Just (Just att), False) -> seg ++ " (" ++ att ++ ")"
             _ -> seg
-        segWidget = if Set.member seg <| .chosen editState
-            then H.b
-                ((HE.onClick <| chosenChange <| Set.remove seg) :: additionalAttrFactory seg)
-                [segText]
-            else H.span
-                ((HE.onClick <| chosenChange <| Set.insert seg) :: additionalAttrFactory seg)
-                [segText]
+        segWidget = segChooser additionalAttrFactory segString seg
       in if removed
         then H.div [] [H.del [] [segWidget]]
         else if added
-            then H.div [] <| H.ins [] [segWidget] :: additionalElemFactory seg
-            else H.div [] <| segWidget :: additionalElemFactory seg
+            then H.div [] <| H.ins [] [segWidget] :: List.map (H.map wrapper) (additionalElemFactory seg)
+            else H.div [] <| segWidget :: List.map (H.map wrapper) (additionalElemFactory seg)
     content = case .create editState of
         Just partialCreate ->
           let
@@ -129,7 +147,7 @@ viewArray editable arrayDef postability recentCops n s mp =
             partialVals = .vals partialCreate
             editForm = H.map (\pcs -> EeUpdate <| {editState | create = Just {partialCreate | vals = pcs}}) <|
                 viewConstTupleEdit atomDefs partialVals
-          in case asSubmittable atomDefs partialVals of
+          in List.map (H.map wrapper) <| case asSubmittable atomDefs partialVals of
             Just wvs -> [editForm, H.button [HE.onClick <| EeSubmit <| NacCreate (Maybe.map Right <| .ref partialCreate) wvs] [H.text "Create"]]
             Nothing -> [editForm]
         Nothing -> case editable of
@@ -178,6 +196,6 @@ viewArray editable arrayDef postability recentCops n s mp =
                         pendingRemoves pendingMoves
                         dragAttrsFor (\seg -> [addBtn <| Just seg, delBtn seg]))
                     allSegs
-              in addBtn Nothing :: segViews
+              in (H.map wrapper <| addBtn Nothing) :: segViews
             ReadOnly -> List.map (viewSeg Dict.empty Dict.empty (always []) (always [])) rSegs
   in H.div [] content
