@@ -25,7 +25,7 @@ import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
-import Layout exposing (BoundLayout(..), ChildSource(..), ChildSources, DataSourceId, ChildSourceStateId, Pattern(..))
+import Layout exposing (BoundLayout(..), ChildSource(..), ChildSources, Pattern(..))
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
 import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, remoteChildSegs, arrayActionStateUpdate)
@@ -33,7 +33,7 @@ import EditTypes exposing
   ( NodeEdit(NeChildren), EditEvent(..), mapEe, NodeAction(..), NaChildrenT(..)
   , NeConstT, constNeConv, seriesNeConv, childrenNeConv, constNaConv
   , seriesNaConv, childrenNaConv, constPaConv , seriesPaConv, childrenPaConv
-  , PendingActions(..))
+  , PendingActions(..), ChildSourceStateId, DataSourceId)
 import SequenceOps exposing (SeqOp(..))
 import Transience
 import TransportTracker exposing (transportSubs, transport, transportCueDum)
@@ -69,6 +69,7 @@ type alias Model =
   -- Layout:
   , layout : BoundLayout
   , childSources : ChildSources ChildSourceStateId
+  , childSelections : Dict ChildSourceStateId (CmpSet SubPath (Seg, Path))
   -- Special:
   , clockFs : ByNs (FormState EditTypes.PartialTime)
   -- Data:
@@ -141,8 +142,8 @@ init =
     initialLayout = BlContainer ["root"]
     childSources = Dict.fromList [
         (["root"], CsFixed
-          [ BlView ["relay", "build"]
-          , BlChildControl ["relay", "clients"] ["all_clients"]
+          [ BlView ["relay", "build"] dropCssid
+          , BlView ["relay", "clients"] ["all_clients"]
           ])
         ]
     initialState = remoteStateEmpty
@@ -155,6 +156,7 @@ init =
       , timeNow = 0.0
       , layout = initialLayout
       , childSources = childSources
+      , childSelections = Dict.empty
       , clockFs = TD.empty
       , recent = []
       , pathSubs = initialSubs
@@ -259,6 +261,10 @@ rectifyEdits rs d editFormState =
       in CDict.update ns (Maybe.map go) fs
   in CDict.foldl rectifyNsEdits editFormState <| .nsds d
 
+-- FIXME: Find this a home:
+appendSegSp : SubPath -> Seg -> SubPath
+appendSegSp (Tagged (ns, p)) s = Tagged (ns, appendSeg p s)
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
     AddError idx msg -> ({model | errs = (Tagged "UI_INTERNAL", idx, msg) :: .errs model}, Cmd.none)
@@ -341,6 +347,7 @@ update msg model = case msg of
                 Ok (_, def, _, postability) -> case def of
                     ArrayDef _ ->
                       let
+                        -- FIXME: Refactor to switch on the nac higher up:
                         mergePending mExisting =
                           let
                             existing = case mExisting of
@@ -350,6 +357,16 @@ update msg model = case msg of
                             NacMove tgt ref -> {existing | childMods = Dict.insert tgt (SoPresentAfter ref) <| .childMods existing}
                             NacDelete tgt -> {existing | childMods = Dict.insert tgt SoAbsent <| .childMods existing}
                             NacCreate mesp wvs -> {existing | creates = CDict.insert phPh (mesp, wvs) <| .creates existing}
+                            -- FIXME: These aren't right here because they can't pend?:
+                            NacSelect _ _ -> existing
+                            NacDeselect _ _ -> existing
+                        applySelection = case nac of
+                            NacSelect cssid seg -> Just << CSet.insert (appendSegSp sp seg) << Maybe.withDefault (CSet.empty tagCmp)
+                            NacDeselect cssid seg ->
+                              let
+                                emptyToNothing s = if CSet.isEmpty s then Nothing else Just s
+                              in emptyToNothing << CSet.remove (appendSegSp sp seg) << Maybe.withDefault (CSet.empty tagCmp)
+                            _ -> identity
                         newM =
                           { model
                           | pending = CDict.update ns (Maybe.map <| Dict.update p mergePending) <| .pending model
@@ -380,6 +397,8 @@ producePCms postability nac = case nac of
         {msgTgt=tgt, msgRef=mRef, msgAttributee=Nothing}
     NacDelete tgt -> Ok <| ClMsgTypes.MsgDelete
         {msgTgt=tgt, msgAttributee=Nothing}
+    NacSelect _ _ -> Err "FIXME: kinda in a hole here"
+    NacDeselect _ _ -> Err "FIXME: kinda in a hole here"
 
 -- Subscriptions
 
@@ -407,6 +426,9 @@ patternify segs = case segs of
     s :: remainder -> PatternPrefix s <| patternify remainder
     [] -> PatternSubstitute
 
+dropCssid : ChildSourceStateId
+dropCssid = ["drop"]
+
 dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> (List BoundLayout, ChildSources ChildSourceStateId)
 dynamicLayout rs dsid seriesCssid =
   let
@@ -426,27 +448,30 @@ dynamicLayout rs dsid seriesCssid =
                 (BlContainer [])
             dynChildSources = List.map (\cd -> (cd, CsDynamic cd seriesCssid)) <| List.map (List.singleton << .seg) attributedSegs
           in
-            ( [BlContainer csid, BlChildControl dsid cssid]
+            ( [BlContainer csid, BlView dsid cssid]
             , Dict.fromList <| (csid, childSource) :: dynChildSources)
-        ConstDataNode _ -> ([BlView dsid], Dict.empty)
-        TimeSeriesNode _ -> ([BlChildControl dsid seriesCssid], Dict.empty)
+        ConstDataNode _ -> ([BlView dsid dropCssid], Dict.empty)
+        TimeSeriesNode _ -> ([BlView dsid seriesCssid], Dict.empty)
 
 view : Model -> Html Msg
 view m = div []
   [ viewErrors <| .errs m
   , button [onClick SwapViewMode] [text "switcheroo"]
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
-  , div [] [text <| toString <| .nodeFs m]
+  , div [] [text <| "Remote: " ++  (toString <| latestState m)]
+  , div [] [text <| "Subs: " ++  (toString <| .pathSubs m)]
+  , div [] [text <| "FormState: " ++  (toString <| .nodeFs m)]
   , case .viewMode m of
     UmEdit -> Html.map (uncurry LayoutUiEvent) <| Layout.edit
         (text << toString)
         (.childSources m)
         (.layout m)
-    -- FIXME: Just stringing everything is pointless:
     UmView -> Layout.view
-        (Html.map NodeUiEvent << viewPath (.nodeFs m) (.state m) (.recent m) (.pending m) << dsidToPath)
+        -- FIXME: Just stringing everything is pointless:
         (text << toString)
-        (always <| text << toString)
+        (\cssid dsid -> Html.map NodeUiEvent <| viewPath
+            (.childSelections m) (.nodeFs m) (.state m) (.recent m)
+            (.pending m) cssid <| dsidToPath dsid)
         -- FIXME: Repeated from the child finding doodad:
         (Layout.cement
             (Layout.resolveChild
@@ -497,16 +522,21 @@ viewLoading : Html a
 viewLoading = text "Loading..."
 
 viewPath
-   : NodesFs -> RemoteState -> List (Digest, RemoteState) -> Pendings -> SubPath
+   : Dict ChildSourceStateId (CmpSet SubPath (Seg, Path)) -> NodesFs -> RemoteState -> List (Digest, RemoteState) -> Pendings
+  -> ChildSourceStateId -> SubPath
   -> Html (SubPath, EditEvent NodeEdit NodeAction)
-viewPath nodeFs baseState recent pending sp =
+viewPath childSelections nodeFs baseState recent pending cssid sp =
   let
     (ns, p) = unSubPath sp
     viewerFor s = case remoteStateLookup ns p s of
         Err _ -> Nothing
         Ok (n, def, ed, post) ->
             Just <| \fs mPending recentCops recentDums -> viewNode
-                ed def post n recentCops recentDums fs mPending
+                -- FIXME: Awkwardly overcomplicated:
+                (\s -> case Dict.get cssid childSelections of
+                    Nothing -> False
+                    Just childSources -> CSet.member (appendSegSp sp s) childSources)
+                ed def post n recentCops recentDums fs mPending cssid
     bordered highlightCol h = div
         [style [("border", "0.2em solid " ++ highlightCol)]] [h]
     viewDigestAfter (d, s) (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
@@ -540,24 +570,22 @@ viewPath nodeFs baseState recent pending sp =
     contents = finalise <| List.foldl viewDigestAfter (viewerFor baseState, [], [], [], False) recent
   in Html.map (\e -> (subPath ns p, e)) <| div [] contents
 
-viewCasted : (a -> Result String b) -> (b -> Html r) -> a -> Html r
-viewCasted c h a = case c a of
+viewCasted : (b -> Html r) -> Result String b -> Html r
+viewCasted h r = case r of
     Ok b -> h b
     Err m -> text m
 
 viewNode
-   : Editable -> Definition -> Postability -> Node
-   -> List Cops -> List DataChange
-   -> FormState NodeEdit -> Maybe PendingActions
-   -> Html (EditEvent NodeEdit NodeAction)
-viewNode editable def postability node recentCops recentDums formState maybeNas =
+   : (Seg -> Bool) -> Editable -> Definition -> Postability -> Node -> List Cops
+  -> List DataChange -> FormState NodeEdit -> Maybe PendingActions -> ChildSourceStateId
+  -> Html (EditEvent NodeEdit NodeAction)
+viewNode isSelected editable def postability node recentCops recentDums formState maybeNas cssid =
   let
     withCasts recentCast neConv pConv naConv cn recents h = viewCasted
-        (\(r, n, s, a) -> Result.map4 (,,,)
-            (castList recentCast r) (cn n)
-            (castFormState (.unwrap neConv) s) (castMaybe (.unwrap pConv) a))
         (\(r, n, fs, mp) -> Html.map (mapEe (.wrap neConv) (.wrap naConv)) <| h r n fs mp)
-        (recents, node, formState, maybeNas)
+        (Result.map4 (,,,)
+            (castList recentCast recents) (cn node)
+            (castFormState (.unwrap neConv) formState) (castMaybe (.unwrap pConv) maybeNas))
   in case def of
     TupleDef d -> case .interpLim d of
         ILUninterpolated -> withCasts
@@ -567,8 +595,16 @@ viewNode editable def postability node recentCops recentDums formState maybeNas 
             recentDums (\rs n fs mp -> Html.text <| toString (rs, n, fs, mp))
     StructDef d -> viewStruct d
     ArrayDef d -> withCasts
-        Ok childrenNeConv childrenPaConv childrenNaConv (.unwrap childrenNodeConv) recentCops
-        (viewArray ArrayView.segViewerWidget identity editable d postability)
+        Ok childrenNeConv childrenPaConv childrenNaConv
+        (.unwrap childrenNodeConv) recentCops
+        (\r n fs mp -> viewArray cssid isSelected editable d postability recentCops n fs mp)
+
+-- viewChildChoice
+--    : Editable -> Definition -> Postability -> Node
+--    -> List Cops -> List DataChange
+--    -> FormState NodeEdit -> Maybe PendingActions
+--    -> Set Seg -> Html (Either (Set Seg) (EditEvent NodeEdit NodeAction))
+-- viewChildChoice editable def postability node recentCops recentDums formState maybeNas chosen = H.text "foo"
 
 viewStruct : StructDefinition -> Html a
 viewStruct structDef =

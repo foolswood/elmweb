@@ -11,26 +11,16 @@ import Cmp.Cmp exposing (Cmp)
 import Cmp.Set as CSet exposing (CmpSet)
 import Futility exposing (updateIdx, getWithDefault)
 import Form exposing (FormState(..), formState, FormStore, formInsert)
-import EditTypes exposing (EditEvent(..), mapEe)
-
-type alias ChildSourceSeg = String
-type alias ChildSourceStateSeg = String
-type alias DataSourceSeg = String
-
-type alias ChildSourceId = List ChildSourceSeg
-type alias ChildSourceStateId = List ChildSourceStateSeg
-type alias DataSourceId = List DataSourceSeg
+import EditTypes exposing (EditEvent(..), mapEe, ChildSourceSeg, ChildSourceId, DataSourceSeg, DataSourceId, ChildSourceStateSeg, ChildSourceStateId)
 
 type BoundLayout
   = BlContainer ChildSourceId
-  | BlChildControl DataSourceId ChildSourceStateId
-  | BlView DataSourceId
+  | BlView DataSourceId ChildSourceStateId
   | BlSeries ChildSourceStateId
 
 type ConcreteBoundLayout
   = CblContainer (List ConcreteBoundLayout)
-  | CblChildControl DataSourceId ChildSourceStateId
-  | CblView DataSourceId
+  | CblView DataSourceId ChildSourceStateId
   | CblSeries (List DataSourceId)
 
 cement
@@ -44,20 +34,18 @@ cement expandContainer stateDataSources cs l = case l of
         ncs = Dict.union cs newChildSources
       in CblContainer <|
         List.map (cement expandContainer stateDataSources ncs) subLs
-    BlChildControl dsid csid -> CblChildControl dsid csid
-    BlView dsid -> CblView dsid
+    BlView dsid csid -> CblView dsid csid
     BlSeries cssid -> CblSeries <| stateDataSources cssid
 
 view
-   : (DataSourceId -> Html a) -> (List DataSourceId -> Html a)
+   : (List DataSourceId -> Html a)
   -> (DataSourceId -> ChildSourceStateId -> Html a)
   -> ConcreteBoundLayout -> Html a
-view viewData viewSeries viewChildCtl =
+view viewSeries viewData =
   let
     go cl = case cl of
         CblContainer subLs -> H.div [] <| List.map go subLs
-        CblChildControl dsid csid -> viewChildCtl dsid csid
-        CblView dsid -> viewData dsid
+        CblView dsid csid -> viewData dsid csid
         CblSeries dsids -> viewSeries dsids
   in go
 
@@ -112,8 +100,7 @@ rebaseBl
   -> BoundLayout -> BoundLayout
 rebaseBl csr cssr dsr bl = case bl of
     BlContainer csid -> BlContainer <| csr csid
-    BlChildControl dsid cssid -> BlChildControl (dsr dsid) (cssr cssid)
-    BlView dsid -> BlView <| dsr dsid
+    BlView dsid cssid -> BlView (dsr dsid) (cssr cssid)
     BlSeries cssid -> BlSeries <| cssr cssid
 
 edit : (a -> Html a) -> ChildSources a -> BoundLayout -> Html (BoundLayout, ChildSources a)
@@ -152,11 +139,10 @@ edit dynEdit childSources =
                           <| go subL
                       ]
               ]
-            BlChildControl dsid cssid -> H.div []
-              [ H.map (\newDsid -> (BlChildControl newDsid cssid, childSources)) <| editDsid dsid
-              , H.map (\newCssid -> (BlChildControl dsid newCssid, childSources)) <| editCssid cssid
+            BlView dsid cssid -> H.div []
+              [ H.map (\newDsid -> (BlView newDsid cssid, childSources)) <| editDsid dsid
+              , H.map (\newCssid -> (BlView dsid newCssid, childSources)) <| editCssid cssid
               ]
-            BlView dsid -> H.map (\newDsid -> (BlView newDsid, childSources)) <| editDsid dsid
             BlSeries cssid -> H.map (\newCssid -> (BlSeries newCssid, childSources)) <| editCssid cssid
       ]
   in go
@@ -164,8 +150,7 @@ edit dynEdit childSources =
 emptyBlFromStr : String -> BoundLayout
 emptyBlFromStr s = case s of
     "container" -> BlContainer ["root"]
-    "childControl" -> BlChildControl ["root"] ["default"]
-    "view" -> BlView ["api", "version"]
+    "view" -> BlView ["root"] ["default"]
     "series" -> BlSeries ["series"]
     _ -> BlContainer ["tosh"]
 
@@ -173,8 +158,7 @@ blStrOpts bl =
   let
     selected  = case bl of
         BlContainer _ -> "container"
-        BlChildControl _ _ -> "childControl"
-        BlView _ -> "view"
+        BlView _ _ -> "view"
         BlSeries _ -> "series"
     asOpt s = H.option [HA.value s, HA.selected <| s == selected] [H.text s]
   in List.map asOpt ["container", "childControl", "view"]
@@ -193,8 +177,7 @@ requiredDataSources =
   let
     go cbl acc = case cbl of
         CblContainer subLs -> List.foldl go acc subLs
-        CblChildControl dsid _ -> Set.insert dsid acc
-        CblView dsid -> Set.insert dsid acc
+        CblView dsid _ -> Set.insert dsid acc
         CblSeries dsids -> Set.union acc <| Set.fromList dsids
   in flip go Set.empty
 

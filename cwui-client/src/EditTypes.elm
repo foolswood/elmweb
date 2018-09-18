@@ -11,6 +11,15 @@ import Tagged.Tagged exposing (Tagged)
 import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireValue(..), Bounds, Placeholder)
 import TimeSeries exposing (TimeSeries)
 
+-- FIXME: The source seg/id types kinda suck
+type alias ChildSourceSeg = String
+type alias ChildSourceStateSeg = String
+type alias DataSourceSeg = String
+
+type alias ChildSourceId = List ChildSourceSeg
+type alias ChildSourceStateId = List ChildSourceStateSeg
+type alias DataSourceId = List DataSourceSeg
+
 type NaTimePoint
   = NatpSet
       { time : Time
@@ -25,6 +34,8 @@ type NaChildrenT
   = NacCreate (Maybe (Either Placeholder Seg)) (List WireValue)
   | NacMove Seg (Maybe Seg)
   | NacDelete Seg
+  | NacSelect ChildSourceStateId Seg
+  | NacDeselect ChildSourceStateId Seg
 
 type NodeAction
   = NaConst NaConstT
