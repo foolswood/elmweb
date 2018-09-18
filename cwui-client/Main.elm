@@ -468,7 +468,7 @@ view m = div []
     UmView -> Layout.view
         -- FIXME: Just stringing everything is pointless:
         (text << toString)
-        (\cssid dsid -> Html.map NodeUiEvent <| viewPath
+        (\dsid cssid -> Html.map NodeUiEvent <| viewPath
             (.childSelections m) (.nodeFs m) (.state m) (.recent m)
             (.pending m) cssid <| dsidToPath dsid)
         -- FIXME: Repeated from the child finding doodad:
@@ -559,7 +559,7 @@ viewPath childSelections nodeFs baseState recent pending cssid sp =
           else identity
         finalView = case mPartialViewer of
             Nothing -> if not typeChanged
-                then Just <| viewLoading
+                then Just viewLoading
                 else Nothing
             Just partialViewer -> Just <| highlight <| partialViewer
                 (formState p <| CDict.getWithDefault formStoreEmpty ns nodeFs)
