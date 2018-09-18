@@ -40,6 +40,7 @@ import TransportTracker exposing (transportSubs, transport, transportCueDum)
 import TransportClockView exposing (transportClockView)
 import TimeSeriesView exposing (TsModel, tsModelEmpty, TsMsg, viewTimeSeries, TsExternalMsg(..), processTimeSeriesEvent)
 import TimeSeries
+import DebugInfo
 
 main = Html.program {
     init = init, update = update, subscriptions = subscriptions, view = view}
@@ -458,9 +459,7 @@ view m = div []
   [ viewErrors <| .errs m
   , button [onClick SwapViewMode] [text "switcheroo"]
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
-  , div [] [text <| "Remote: " ++  (toString <| latestState m)]
-  , div [] [text <| "Subs: " ++  (toString <| .pathSubs m)]
-  , div [] [text <| "FormState: " ++  (toString <| .nodeFs m)]
+  , DebugInfo.viewRemoteState <| latestState m
   , case .viewMode m of
     UmEdit -> Html.map (uncurry LayoutUiEvent) <| Layout.edit
         (text << toString)
