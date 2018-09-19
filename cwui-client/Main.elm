@@ -126,9 +126,8 @@ requiredChildren rs fss sp =
     (Just vs, Just fs) -> Array.map (subPath ns) <| requiredChildrenVs vs fs p
     _ -> Array.empty
 
--- FIXME: Split properly
 subPathDsid : SubPath -> DataSourceId
-subPathDsid (Tagged (ns, p)) = [ns, p]
+subPathDsid (Tagged (ns, p)) = ns :: String.split "/" p
 
 cementedLayout : RemoteState -> BoundLayout -> ChildSources ChildSourceStateId -> ChildSelections -> Layout.ConcreteBoundLayout
 cementedLayout rs bl cs cSels =
@@ -416,13 +415,18 @@ modifyChildPending mod ns p model =
 modifyPendingChildren : (Dict Seg (SeqOp Seg) -> Dict Seg (SeqOp Seg)) -> Namespace -> Path -> Model -> Model
 modifyPendingChildren mod = modifyChildPending (\p -> {p | childMods = mod <| .childMods p})
 
-modifySelection : (CmpSet SubPath (Seg, Path) -> CmpSet SubPath (Seg, Path)) -> ChildSourceStateId -> Model -> (Model, Cmd a)
+modifySelection : (CmpSet SubPath (Seg, Path) -> CmpSet SubPath (Seg, Path)) -> ChildSourceStateId -> Model -> (Model, Cmd Msg)
 modifySelection mod cssid model =
-  ( {model | childSelections = Dict.update
+  let
+    newChildSelections = Dict.update
         cssid (Just << mod << Maybe.withDefault (CSet.empty tagCmp))
-        <| .childSelections model}
-  -- Subscribe when required
-  , Cmd.none)
+        <| .childSelections model
+    newPathSubs = requiredPaths
+        (latestState model) (.layout model) (.childSources model)
+        newChildSelections
+  in
+  ( {model | childSelections = newChildSelections, pathSubs = newPathSubs}
+  , subDiffToCmd (.pathSubs model) (.postTypeSubs model) newPathSubs (.postTypeSubs model))
 
 -- FIXME: Using the same placeholder for everything
 phPh : Placeholder
