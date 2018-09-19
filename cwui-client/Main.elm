@@ -20,7 +20,7 @@ import ClNodes exposing (..)
 import ClMsgTypes exposing
   ( FromRelayClientBundle, ToRelayClientBundle(..), SubMsg(..)
   , DataErrorIndex(..), ToRelayUpdateBundle(..), ToRelaySubBundle(..))
-import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe)
+import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault)
 import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
@@ -60,6 +60,9 @@ type alias NodesFs = ByNs NodeFs
 type alias Pending = Dict Path PendingActions
 type alias Pendings = ByNs Pending
 
+type alias ChildSelection = CmpSet SubPath (Seg, Path)
+type alias ChildSelections = Dict ChildSourceStateId ChildSelection
+
 type alias Model =
   -- Global:
   { errs : List (Namespace, DataErrorIndex, String)
@@ -70,7 +73,7 @@ type alias Model =
   -- Layout:
   , layout : BoundLayout
   , childSources : ChildSources ChildSourceStateId
-  , childSelections : Dict ChildSourceStateId (CmpSet SubPath (Seg, Path))
+  , childSelections : ChildSelections
   -- Special:
   , clockFs : ByNs (FormState EditTypes.PartialTime)
   -- Data:
@@ -123,16 +126,30 @@ requiredChildren rs fss sp =
     (Just vs, Just fs) -> Array.map (subPath ns) <| requiredChildrenVs vs fs p
     _ -> Array.empty
 
-requiredPaths : RemoteState -> BoundLayout -> ChildSources ChildSourceStateId -> CmpSet SubPath (Seg, Path)
-requiredPaths rs bl cs =
-    CSet.fromList tagCmp <| List.map dsidToPath <| Set.toList <| Layout.requiredDataSources <| Layout.cement
-        (Layout.resolveChild
-            (always [])
-            (dynamicLayout rs))
-        -- FIXME: This should actually do something
-        (\_ -> [])
-        cs
-        bl
+-- FIXME: Split properly
+subPathDsid : SubPath -> DataSourceId
+subPathDsid (Tagged (ns, p)) = [ns, p]
+
+cementedLayout : RemoteState -> BoundLayout -> ChildSources ChildSourceStateId -> ChildSelections -> Layout.ConcreteBoundLayout
+cementedLayout rs bl cs cSels =
+  let
+    cssidSelected cssid = List.map subPathDsid <| CSet.toList <| getWithDefault TS.empty cssid cSels
+    -- FIXME: This is bizarre and is a symptom of a design stuff up:
+    triplyLast dsid = case dsid of
+        a :: [] -> (a, a, a)
+        _ :: rest -> triplyLast rest
+        [] -> ("haters", "gonna", "hate")
+  in Layout.cement
+    (Layout.resolveChild
+        (List.map triplyLast << cssidSelected)
+        (dynamicLayout rs))
+    cssidSelected
+    cs
+    bl
+
+requiredPaths : RemoteState -> BoundLayout -> ChildSources ChildSourceStateId -> ChildSelections -> CmpSet SubPath (Seg, Path)
+requiredPaths rs bl cs cSels =
+    CSet.fromList tagCmp <| List.map dsidToPath <| Set.toList <| Layout.requiredDataSources <| cementedLayout rs bl cs cSels
 
 init : (Model, Cmd Msg)
 init =
@@ -141,14 +158,21 @@ init =
     relayNs = Tagged "relay"
     initialNodeFs = TD.empty
     initialLayout = BlContainer ["root"]
-    childSources = Dict.fromList [
-        (["root"], CsFixed
+    childSources = Dict.fromList
+        [ (["root"], CsFixed
           [ BlView ["relay", "build"] dropCssid
-          , BlView ["relay", "clients"] ["all_clients"]
+          , BlView ["relay", "clients"] ["clients"]
+          , BlContainer ["all_clients"]
           ])
+        , (["all_clients"], CsTemplate ["clients"]
+            (PatternPrefix "relay" <| PatternPrefix "clients" <| PatternSubstitute)
+            (PatternPrefix "relay" <| PatternPrefix "clients" <| PatternSubstitute)
+            (PatternPrefix "relay" <| PatternPrefix "clients" <| PatternSubstitute)
+            (BlView [] dropCssid))
         ]
+    childSelections = Dict.empty
     initialState = remoteStateEmpty
-    initialSubs = requiredPaths initialState initialLayout childSources
+    initialSubs = requiredPaths initialState initialLayout childSources childSelections
     initialModel =
       { errs = []
       , viewMode = UmEdit
@@ -157,7 +181,7 @@ init =
       , timeNow = 0.0
       , layout = initialLayout
       , childSources = childSources
-      , childSelections = Dict.empty
+      , childSelections = childSelections
       , clockFs = TD.empty
       , recent = []
       , pathSubs = initialSubs
@@ -273,7 +297,7 @@ update msg model = case msg of
       let
         d = digest b
         (newState, errs) = applyDigest d <| latestState model
-        pathSubs = requiredPaths newState (.layout model) (.childSources model)
+        pathSubs = requiredPaths newState (.layout model) (.childSources model) (.childSelections model)
         postTypeSubs = unloadedPostTypes newState
         newM =
           { model
@@ -298,7 +322,7 @@ update msg model = case msg of
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
     LayoutUiEvent bl cs ->
           let
-            pathSubs = requiredPaths (latestState model) bl cs
+            pathSubs = requiredPaths (latestState model) bl cs (.childSelections model)
           in
             ( {model | layout = bl, childSources = cs, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
@@ -345,61 +369,64 @@ update msg model = case msg of
             NaSeries sops -> addDGlobalError "Series submit not implemented" model
             NaChildren nac -> case remoteStateLookup ns p <| latestState model of
                 Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
-                Ok (_, def, _, postability) -> case def of
-                    ArrayDef _ ->
-                      let
-                        -- FIXME: Refactor to switch on the nac higher up:
-                        mergePending mExisting =
-                          let
-                            existing = case mExisting of
-                                Just (PaChildren e) -> e
-                                _ -> {childMods = Dict.empty, creates = CDict.empty tagCmp}
-                          in Just <| PaChildren <| case nac of
-                            NacMove tgt ref -> {existing | childMods = Dict.insert tgt (SoPresentAfter ref) <| .childMods existing}
-                            NacDelete tgt -> {existing | childMods = Dict.insert tgt SoAbsent <| .childMods existing}
-                            NacCreate mesp wvs -> {existing | creates = CDict.insert phPh (mesp, wvs) <| .creates existing}
-                            -- FIXME: These aren't right here because they can't pend?:
-                            NacSelect _ _ -> existing
-                            NacDeselect _ _ -> existing
-                        applySelection = case nac of
-                            NacSelect cssid seg -> Just << CSet.insert (appendSegSp sp seg) << Maybe.withDefault (CSet.empty tagCmp)
-                            NacDeselect cssid seg ->
-                              let
-                                emptyToNothing s = if CSet.isEmpty s then Nothing else Just s
-                              in emptyToNothing << CSet.remove (appendSegSp sp seg) << Maybe.withDefault (CSet.empty tagCmp)
-                            _ -> identity
-                        newM =
-                          { model
-                          | pending = CDict.update ns (Maybe.map <| Dict.update p mergePending) <| .pending model
-                          , nodeFs = CDict.update ns (Maybe.map <| formUpdateEditing p <| arrayActionStateUpdate nac) <| .nodeFs model
-                          }
-                      in case producePCms postability nac of
-                        Ok tpcm -> (newM, sendBundle <| Trcub <|
-                            ToRelayUpdateBundle ns [] [(p, tpcm)])
-                        Err msg -> addDGlobalError msg model
-                    _ -> addDGlobalError "Attempted to change children of non-array" model
+                Ok (_, def, _, postability) ->
+                  let
+                    updateCmd m = sendBundle <| Trcub <| ToRelayUpdateBundle ns [] [(p, m)]
+                  in case def of
+                    ArrayDef _ -> case nac of
+                        NacMove tgt ref ->
+                          ( modifyPendingChildren
+                              (Dict.insert tgt (SoPresentAfter ref)) ns p model
+                          , updateCmd <| ClMsgTypes.MsgMoveAfter
+                              {msgTgt=tgt, msgRef=ref, msgAttributee=Nothing}
+                          )
+                        NacDelete tgt ->
+                          ( modifyPendingChildren
+                                (Dict.insert tgt SoAbsent) ns p model
+                          , updateCmd <| ClMsgTypes.MsgDelete
+                              {msgTgt=tgt, msgAttributee=Nothing}
+                          )
+                        NacCreate ref wvs -> case postability of
+                            RemoteState.PostableLoaded pdef ->
+                                ( modifyChildPending
+                                    (\p -> {p | creates = CDict.insert phPh (ref, wvs) <| .creates p})
+                                    ns p model
+                                , updateCmd <| ClMsgTypes.MsgCreateAfter
+                                    {msgTgt=phPh, msgRef = ref, msgAttributee=Nothing, msgPostArgs = Futility.zip
+                                        (List.map (defWireType << Tuple.second) <| .fieldDescs pdef)
+                                        wvs}
+                                )
+                            _ -> addDGlobalError "Create on unpostable type" model
+                        NacSelect cssid seg -> modifySelection (CSet.insert (appendSegSp sp seg)) cssid model
+                        NacDeselect cssid seg -> modifySelection (CSet.remove (appendSegSp sp seg)) cssid model
+                    _ -> addDGlobalError "Child modification on non-array" model
+
+modifyChildPending : (EditTypes.PaChildrenT -> EditTypes.PaChildrenT) -> Namespace -> Path -> Model -> Model
+modifyChildPending mod ns p model =
+  let
+    fillBlank mpac = case mpac of
+        Just (PaChildren e) -> e
+        _ -> {childMods = Dict.empty, creates = CDict.empty tagCmp}
+    paUpdate = Just << PaChildren << mod << fillBlank
+  in {model | pending = CDict.update
+    ns
+    (Just << Dict.update p paUpdate << Maybe.withDefault Dict.empty)
+    <| .pending model}
+
+modifyPendingChildren : (Dict Seg (SeqOp Seg) -> Dict Seg (SeqOp Seg)) -> Namespace -> Path -> Model -> Model
+modifyPendingChildren mod = modifyChildPending (\p -> {p | childMods = mod <| .childMods p})
+
+modifySelection : (CmpSet SubPath (Seg, Path) -> CmpSet SubPath (Seg, Path)) -> ChildSourceStateId -> Model -> (Model, Cmd a)
+modifySelection mod cssid model =
+  ( {model | childSelections = Dict.update
+        cssid (Just << mod << Maybe.withDefault (CSet.empty tagCmp))
+        <| .childSelections model}
+  -- Subscribe when required
+  , Cmd.none)
 
 -- FIXME: Using the same placeholder for everything
 phPh : Placeholder
 phPh = Tagged "ph"
-
-producePCms
-   : Postability -> NaChildrenT
-  -> Result String ClMsgTypes.ToProviderContainerUpdateMsg
-producePCms postability nac = case nac of
-    NacCreate mRef wvs -> case postability of
-        RemoteState.PostableLoaded pdef -> Ok <| ClMsgTypes.MsgCreateAfter
-            { msgTgt = phPh, msgRef = mRef, msgAttributee = Nothing
-            , msgPostArgs = Futility.zip
-                (List.map (defWireType << Tuple.second) <| .fieldDescs pdef)
-                wvs}
-        _ -> Err "Create for non-postable"
-    NacMove tgt mRef -> Ok <| ClMsgTypes.MsgMoveAfter
-        {msgTgt=tgt, msgRef=mRef, msgAttributee=Nothing}
-    NacDelete tgt -> Ok <| ClMsgTypes.MsgDelete
-        {msgTgt=tgt, msgAttributee=Nothing}
-    NacSelect _ _ -> Err "FIXME: kinda in a hole here"
-    NacDeselect _ _ -> Err "FIXME: kinda in a hole here"
 
 -- Subscriptions
 
@@ -471,15 +498,7 @@ view m = div []
         (\dsid cssid -> Html.map NodeUiEvent <| viewPath
             (.childSelections m) (.nodeFs m) (.state m) (.recent m)
             (.pending m) cssid <| dsidToPath dsid)
-        -- FIXME: Repeated from the child finding doodad:
-        (Layout.cement
-            (Layout.resolveChild
-                (always [])
-                (dynamicLayout <| latestState m))
-            -- FIXME: This should actually do something
-            (\_ -> [])
-            (.childSources m)
-            (.layout m))
+        (cementedLayout (latestState m) (.layout m) (.childSources m) (.childSelections m))
   ]
 
 viewErrors : List (Namespace, DataErrorIndex, String) -> Html a
