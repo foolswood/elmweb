@@ -25,7 +25,7 @@ import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
-import Layout exposing (BoundLayout(..), ChildSource(..), ChildSources)
+import Layout exposing (BoundLayout(..), ChildSource(..))
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
 import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, remoteChildSegs, arrayActionStateUpdate)
@@ -71,8 +71,7 @@ type alias Model =
   , keepRecent : Float
   , timeNow : Float
   -- Layout:
-  , layout : BoundLayout
-  , childSources : ChildSources ChildSourceStateId
+  , layout : BoundLayout ChildSourceStateId
   , childSelections : ChildSelections
   -- Special:
   , clockFs : ByNs (FormState EditTypes.PartialTime)
@@ -129,8 +128,8 @@ requiredChildren rs fss sp =
 subPathDsid : SubPath -> DataSourceId
 subPathDsid (Tagged (ns, p)) = ns :: String.split "/" p
 
-cementedLayout : RemoteState -> BoundLayout -> ChildSources ChildSourceStateId -> ChildSelections -> Layout.ConcreteBoundLayout
-cementedLayout rs bl cs cSels =
+cementedLayout : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> Layout.ConcreteBoundLayout
+cementedLayout rs bl cSels =
   let
     cssidSelected cssid = List.map subPathDsid <| CSet.toList <| getWithDefault TS.empty cssid cSels
     -- FIXME: This is bizarre and is a symptom of a design stuff up:
@@ -139,12 +138,11 @@ cementedLayout rs bl cs cSels =
         cssidSelected
         (dynamicLayout rs))
     cssidSelected
-    cs
     bl
 
-requiredPaths : RemoteState -> BoundLayout -> ChildSources ChildSourceStateId -> ChildSelections -> CmpSet SubPath (Seg, Path)
-requiredPaths rs bl cs cSels =
-    CSet.fromList tagCmp <| List.map dsidToPath <| Set.toList <| Layout.requiredDataSources <| cementedLayout rs bl cs cSels
+requiredPaths : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> CmpSet SubPath (Seg, Path)
+requiredPaths rs bl cSels =
+    CSet.fromList tagCmp <| List.map dsidToPath <| Set.toList <| Layout.requiredDataSources <| cementedLayout rs bl cSels
 
 init : (Model, Cmd Msg)
 init =
@@ -152,19 +150,14 @@ init =
     engineNs = Tagged "engine"
     relayNs = Tagged "relay"
     initialNodeFs = TD.empty
-    initialLayout = BlContainer ["root"]
-    childSources = Dict.fromList
-        [ (["root"], CsFixed
-          [ BlView ["relay", "build"] dropCssid
-          , BlView ["relay", "clients"] ["clients"]
-          , BlContainer ["all_clients"]
-          ])
-        , (["all_clients"], CsTemplate ["clients"]
-            (BlView ["clock_diff"] dropCssid))
+    initialLayout = BlContainer <| CsFixed
+        [ BlView ["relay", "build"] dropCssid
+        , BlView ["relay", "clients"] ["clients"]
+        , BlContainer <| CsTemplate ["clients"] <| BlView ["clock_diff"] dropCssid
         ]
     childSelections = Dict.empty
     initialState = remoteStateEmpty
-    initialSubs = requiredPaths initialState initialLayout childSources childSelections
+    initialSubs = requiredPaths initialState initialLayout childSelections
     initialModel =
       { errs = []
       , viewMode = UmEdit
@@ -172,7 +165,6 @@ init =
       , keepRecent = 5000.0
       , timeNow = 0.0
       , layout = initialLayout
-      , childSources = childSources
       , childSelections = childSelections
       , clockFs = TD.empty
       , recent = []
@@ -211,7 +203,7 @@ type Msg
   | NetworkEvent FromRelayClientBundle
   | SquashRecent
   | SecondPassedTick
-  | LayoutUiEvent BoundLayout (ChildSources ChildSourceStateId)
+  | LayoutUiEvent (BoundLayout ChildSourceStateId)
   | SpecialUiEvent SpecialEvent
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
 
@@ -289,7 +281,7 @@ update msg model = case msg of
       let
         d = digest b
         (newState, errs) = applyDigest d <| latestState model
-        pathSubs = requiredPaths newState (.layout model) (.childSources model) (.childSelections model)
+        pathSubs = requiredPaths newState (.layout model) (.childSelections model)
         postTypeSubs = unloadedPostTypes newState
         newM =
           { model
@@ -312,11 +304,11 @@ update msg model = case msg of
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
-    LayoutUiEvent bl cs ->
+    LayoutUiEvent bl ->
           let
-            pathSubs = requiredPaths (latestState model) bl cs (.childSelections model)
+            pathSubs = requiredPaths (latestState model) bl (.childSelections model)
           in
-            ( {model | layout = bl, childSources = cs, pathSubs = pathSubs}
+            ( {model | layout = bl, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
     SpecialUiEvent se -> case se of
         SpeClock ns evt -> case evt of
@@ -415,8 +407,7 @@ modifySelection mod cssid model =
         cssid (Just << mod << Maybe.withDefault (CSet.empty tagCmp))
         <| .childSelections model
     newPathSubs = requiredPaths
-        (latestState model) (.layout model) (.childSources model)
-        newChildSelections
+        (latestState model) (.layout model) newChildSelections
   in
   ( {model | childSelections = newChildSelections, pathSubs = newPathSubs}
   , subDiffToCmd (.pathSubs model) (.postTypeSubs model) newPathSubs (.postTypeSubs model))
@@ -449,27 +440,22 @@ dsidToPath dsid = case dsid of
 dropCssid : ChildSourceStateId
 dropCssid = ["drop"]
 
--- FIXME: Almost certainly doesn't work after pattern change thing
-dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> (List BoundLayout, ChildSources ChildSourceStateId)
+dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> List (BoundLayout ChildSourceStateId)
 dynamicLayout rs dsid seriesCssid =
   let
     (ns, p) = unSubPath <| dsidToPath dsid
   in case remoteStateLookup ns p rs of
-    Err _ -> ([], Dict.empty)
+    Err _ -> []
     Ok (n, _, _, _) -> case n of
         ContainerNode attributedSegs ->
           let
-            csid = Layout.dataDerivedChildSource dsid
             cssid = Layout.dataDerivedChildSourceState dsid
             childSource = CsTemplate
                 cssid
-                (BlContainer [])
-            dynChildSources = List.map (\cd -> (cd, CsDynamic cd seriesCssid)) <| List.map (List.singleton << .seg) attributedSegs
-          in
-            ( [BlContainer csid, BlView dsid cssid]
-            , Dict.fromList <| (csid, childSource) :: dynChildSources)
-        ConstDataNode _ -> ([BlView dsid dropCssid], Dict.empty)
-        TimeSeriesNode _ -> ([BlView dsid seriesCssid], Dict.empty)
+                (BlContainer <| CsDynamic [] cssid)
+          in [BlContainer childSource, BlView dsid cssid]
+        ConstDataNode _ -> [BlView dsid dropCssid]
+        TimeSeriesNode _ -> [BlView dsid seriesCssid]
 
 view : Model -> Html Msg
 view m = div []
@@ -478,9 +464,8 @@ view m = div []
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
   , DebugInfo.viewRemoteState <| latestState m
   , case .viewMode m of
-    UmEdit -> Html.map (uncurry LayoutUiEvent) <| Layout.edit
+    UmEdit -> Html.map LayoutUiEvent <| Layout.edit
         (text << toString)
-        (.childSources m)
         (.layout m)
     UmView -> Layout.view
         -- FIXME: Just stringing everything is pointless:
@@ -488,7 +473,7 @@ view m = div []
         (\dsid cssid -> Html.map NodeUiEvent <| viewPath
             (.childSelections m) (.nodeFs m) (.state m) (.recent m)
             (.pending m) cssid <| dsidToPath dsid)
-        (cementedLayout (latestState m) (.layout m) (.childSources m) (.childSelections m))
+        (cementedLayout (latestState m) (.layout m) (.childSelections m))
   ]
 
 viewErrors : List (Namespace, DataErrorIndex, String) -> Html a
@@ -543,7 +528,7 @@ viewPath childSelections nodeFs baseState recent pending cssid sp =
                 -- FIXME: Awkwardly overcomplicated:
                 (\s -> case Dict.get cssid childSelections of
                     Nothing -> False
-                    Just childSources -> CSet.member (appendSegSp sp s) childSources)
+                    Just dsids -> CSet.member (appendSegSp sp s) dsids)
                 ed def post n recentCops recentDums fs mPending cssid
     bordered highlightCol h = div
         [style [("border", "0.2em solid " ++ highlightCol)]] [h]

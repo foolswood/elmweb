@@ -12,11 +12,9 @@ import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireV
 import TimeSeries exposing (TimeSeries)
 
 -- FIXME: The source seg/id types kinda suck
-type alias ChildSourceSeg = String
 type alias ChildSourceStateSeg = String
 type alias DataSourceSeg = String
 
-type alias ChildSourceId = List ChildSourceSeg
 type alias ChildSourceStateId = List ChildSourceStateSeg
 type alias DataSourceId = List DataSourceSeg
 
