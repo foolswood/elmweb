@@ -64,7 +64,7 @@ transport ns rs now =
         Result.andThen asFloat <|
         Result.andThen (uncurry rConstNode) <| Result.map2 (,)
             (ownerClockDiffPath ns rs)
-            (rVs ns rs)
+            (rVs (Tagged "relay") rs)
     rTranspState = Result.andThen asTranspState <| rSubNode "state"
     rChangedTime = Result.andThen asTime <| rSubNode "changed"
     rCueTime = Result.andThen asTime <| rSubNode "cue"
@@ -98,7 +98,7 @@ transportSubs (Tagged ns) rs =
     ownerRefPath = ("relay", appendSeg "/owners" ns)
     oipl = case ownerClockDiffPath (Tagged ns) rs of
         Err _ -> []
-        Ok p -> [p]
+        Ok p -> [("relay", p)]
     structPath = "/transport"
     nsTransp = List.map (\p -> (ns, p)) <|
         [ structPath
@@ -106,7 +106,7 @@ transportSubs (Tagged ns) rs =
         , appendSeg structPath "changed"
         , appendSeg structPath "cue"
         ]
-  in CSet.fromList tagCmp <| List.map Tagged <| ("relay", "/owners") :: ownerRefPath :: nsTransp
+  in CSet.fromList tagCmp <| List.map Tagged <| ("relay", "/owners") :: ownerRefPath :: nsTransp ++ oipl
 
 transportCueDum : Time -> DataUpdateMsg
 transportCueDum t = MsgConstSet

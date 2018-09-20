@@ -115,17 +115,18 @@ cementedLayout : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelection
 cementedLayout rs bl cSels =
   let
     cssidSelected cssid = List.map subPathDsid <| CSet.toList <| getWithDefault TS.empty cssid cSels
-    -- FIXME: This is bizarre and is a symptom of a design stuff up:
   in Layout.cement
-    (Layout.resolveChild
-        cssidSelected
-        (dynamicLayout rs))
+    (Layout.resolveChild cssidSelected (dynamicLayout rs))
     cssidSelected
     bl
 
 requiredPaths : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> CmpSet SubPath (Seg, Path)
 requiredPaths rs bl cSels =
-    CSet.fromList tagCmp <| List.map dsidToPath <| Set.toList <| Layout.requiredDataSources <| cementedLayout rs bl cSels
+  let
+    layoutRequires = CSet.fromList tagCmp <| List.map dsidToPath <| Set.toList <| Layout.requiredDataSources <| cementedLayout rs bl cSels
+    -- FIXME: Fixed clock source
+    clocksRequire = transportSubs (Tagged "engine") rs
+  in CSet.union layoutRequires clocksRequire
 
 init : (Model, Cmd Msg)
 init =
@@ -137,6 +138,7 @@ init =
         [ BlView ["relay", "build"] dropCssid
         , BlView ["relay", "clients"] ["clients"]
         , BlContainer <| CsTemplate ["clients"] <| BlView ["clock_diff"] dropCssid
+        , BlSeries ["series"]
         ]
     childSelections = Dict.empty
     initialState = remoteStateEmpty
@@ -187,7 +189,9 @@ type Msg
   | SquashRecent
   | SecondPassedTick
   | LayoutUiEvent (BoundLayout ChildSourceStateId)
+  -- FIXME: Get rid of special
   | SpecialUiEvent SpecialEvent
+  | TsUiEvent TsMsg
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
 
 addDGlobalError : String -> Model -> (Model, Cmd Msg)
@@ -304,6 +308,8 @@ update msg model = case msg of
             TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
             -- FIXME: time point changes go nowhere:
             TsemPointChange _ _ _ -> (model, Cmd.none)
+    -- FIXME: Do something with this:
+    TsUiEvent tsMsg -> (model, Cmd.none)
     NodeUiEvent (sp, ue) ->
       let
         (ns, p) = unSubPath sp
@@ -450,8 +456,14 @@ view m = div []
         (text << toString)
         (.layout m)
     UmView -> Layout.view
-        -- FIXME: Just stringing everything is pointless:
-        (text << toString)
+        (\dsids ->
+          let
+            -- FIXME: Hard coded clock source
+            rTransp = transport (Tagged "engine") (latestState m) (.timeNow m)
+          in case rTransp of
+            Ok transp -> Html.map TsUiEvent <| viewTimeSeries
+                (getTsModel (Tagged "engine") m) transp
+            Err msg -> Html.text <| toString msg)
         (\dsid cssid -> Html.map NodeUiEvent <| viewPath
             (.childSelections m) (.nodeFs m) (.state m) (.recent m)
             (.pending m) cssid <| dsidToPath dsid)
