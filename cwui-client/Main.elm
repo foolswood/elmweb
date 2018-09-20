@@ -308,8 +308,11 @@ update msg model = case msg of
             TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
             -- FIXME: time point changes go nowhere:
             TsemPointChange _ _ _ -> (model, Cmd.none)
-    -- FIXME: Do something with this:
-    TsUiEvent tsMsg -> (model, Cmd.none)
+    TsUiEvent tsMsg -> case processTimeSeriesEvent tsMsg <| getTsModel (Tagged "FIXME") model of
+        -- FIXME: Hard coded clock source
+        TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle (Tagged "engine") [transportCueDum t] [])
+        -- FIXME: Does nothing
+        _ -> (model, Cmd.none)
     NodeUiEvent (sp, ue) ->
       let
         (ns, p) = unSubPath sp
