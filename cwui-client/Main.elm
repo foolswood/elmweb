@@ -25,7 +25,7 @@ import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
-import Layout exposing (BoundLayout(..), ChildSource(..), ChildSources, Pattern(..))
+import Layout exposing (BoundLayout(..), ChildSource(..), ChildSources)
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
 import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, remoteChildSegs, arrayActionStateUpdate)
@@ -134,13 +134,9 @@ cementedLayout rs bl cs cSels =
   let
     cssidSelected cssid = List.map subPathDsid <| CSet.toList <| getWithDefault TS.empty cssid cSels
     -- FIXME: This is bizarre and is a symptom of a design stuff up:
-    triplyLast dsid = case dsid of
-        a :: [] -> (a, a, a)
-        _ :: rest -> triplyLast rest
-        [] -> ("haters", "gonna", "hate")
   in Layout.cement
     (Layout.resolveChild
-        (List.map triplyLast << cssidSelected)
+        cssidSelected
         (dynamicLayout rs))
     cssidSelected
     cs
@@ -164,10 +160,7 @@ init =
           , BlContainer ["all_clients"]
           ])
         , (["all_clients"], CsTemplate ["clients"]
-            (PatternPrefix "relay" <| PatternPrefix "clients" <| PatternSubstitute)
-            (PatternPrefix "relay" <| PatternPrefix "clients" <| PatternSubstitute)
-            (PatternPrefix "relay" <| PatternPrefix "clients" <| PatternSubstitute)
-            (BlView [] dropCssid))
+            (BlView ["clock_diff"] dropCssid))
         ]
     childSelections = Dict.empty
     initialState = remoteStateEmpty
@@ -453,14 +446,10 @@ dsidToPath dsid = case dsid of
     ns :: rest -> Tagged (ns, "/" ++ String.join "/" rest)
     [] -> Tagged ("utter", "/tosh")
 
-patternify : List String -> Pattern a String
-patternify segs = case segs of
-    s :: remainder -> PatternPrefix s <| patternify remainder
-    [] -> PatternSubstitute
-
 dropCssid : ChildSourceStateId
 dropCssid = ["drop"]
 
+-- FIXME: Almost certainly doesn't work after pattern change thing
 dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> (List BoundLayout, ChildSources ChildSourceStateId)
 dynamicLayout rs dsid seriesCssid =
   let
@@ -474,9 +463,6 @@ dynamicLayout rs dsid seriesCssid =
             cssid = Layout.dataDerivedChildSourceState dsid
             childSource = CsTemplate
                 cssid
-                (patternify dsid)
-                (patternify dsid)
-                (patternify dsid)
                 (BlContainer [])
             dynChildSources = List.map (\cd -> (cd, CsDynamic cd seriesCssid)) <| List.map (List.singleton << .seg) attributedSegs
           in

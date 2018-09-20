@@ -49,46 +49,25 @@ view viewSeries viewData =
         CblSeries dsids -> viewSeries dsids
   in go
 
-type Pattern a b
-  = PatternPrefix b (Pattern a b)
-  | PatternSubstitute
-  | PatternDone
-
-applyPattern : (b -> a -> a) -> b -> Pattern a b -> a -> a
-applyPattern join b =
-  let
-    go p a = case p of
-        PatternPrefix prefix subP -> go subP <| join prefix a
-        PatternSubstitute -> join b a
-        PatternDone -> a
-  in go
-
 type ChildSource a
   = CsFixed (List BoundLayout)
   | CsTemplate
         ChildSourceStateId
-        (Pattern ChildSourceId ChildSourceSeg)
-        (Pattern ChildSourceStateId ChildSourceStateSeg)
-        (Pattern DataSourceId DataSourceSeg)
         BoundLayout
   | CsDynamic DataSourceId a
 
 type alias ChildSources a = Dict ChildSourceId (ChildSource a)
 
 resolveChild
-   : (ChildSourceStateId -> List (ChildSourceSeg, ChildSourceStateSeg, DataSourceSeg))
+   : (ChildSourceStateId -> List DataSourceId)
   -> (DataSourceId -> a -> (List BoundLayout, ChildSources a))
   -> ChildSources a -> ChildSourceId -> (List BoundLayout, ChildSources a)
 resolveChild getSegs resolveDynamic childSources csid =
     case getWithDefault (CsFixed []) csid childSources of
         CsFixed subLayouts -> (subLayouts, Dict.empty)
         CsDynamic dsid a -> resolveDynamic dsid a
-        CsTemplate cssid csp cssp dsp subLayout ->
-          let
-            applyPatterns (css, csss, dss) = rebaseBl
-                (applyPattern lAppend css csp) (applyPattern lAppend csss cssp)
-                (applyPattern lAppend dss dsp) subLayout
-          in (List.map applyPatterns <| getSegs cssid, Dict.empty)
+        -- FIXME: This needs to actually instantiate the template
+        CsTemplate cssid subLayout -> ([], Dict.empty)
 
 lAppend : a -> List a -> List a
 lAppend a l = l ++ [a]
@@ -121,21 +100,12 @@ edit dynEdit childSources =
                       [ H.map (\newDsid -> (CsDynamic newDsid a, childSources)) <| editDsid dsid
                       , H.map (\newA -> (CsDynamic dsid newA, childSources)) <| dynEdit a
                       ]
-                    CsTemplate cssid csPat cssPat dsPat subL -> H.div []
+                    CsTemplate cssid subL -> H.div []
                       [ H.map
-                          (\newCssid -> (CsTemplate newCssid csPat cssPat dsPat subL, childSources))
+                          (\newCssid -> (CsTemplate newCssid subL, childSources))
                           <| editCssid cssid
                       , H.map
-                          (\newCsPat -> (CsTemplate cssid newCsPat cssPat dsPat subL, childSources))
-                          <| editPattern csPat
-                      , H.map
-                          (\newCssPat -> (CsTemplate cssid csPat newCssPat dsPat subL, childSources))
-                          <| editPattern cssPat
-                      , H.map
-                          (\newDsPat -> (CsTemplate cssid csPat cssPat newDsPat subL, childSources))
-                          <| editPattern dsPat
-                      , H.map
-                          (\(newSubL, newSources) -> (CsTemplate cssid csPat cssPat dsPat newSubL, newSources))
+                          (\(newSubL, newSources) -> (CsTemplate cssid newSubL, newSources))
                           <| go subL
                       ]
               ]
@@ -192,9 +162,6 @@ editCsid = editDsid
 
 editCssid : ChildSourceStateId -> Html ChildSourceStateId
 editCssid = editDsid
-
-editPattern : Pattern a b -> Html (Pattern a b)
-editPattern _ = H.text "not implemented"
 
 dataDerivedChildSource : DataSourceId -> ChildSourceId
 dataDerivedChildSource dsid = "dataDerived" :: dsid
