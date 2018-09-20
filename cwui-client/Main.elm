@@ -126,7 +126,7 @@ requiredChildren rs fss sp =
     _ -> Array.empty
 
 subPathDsid : SubPath -> DataSourceId
-subPathDsid (Tagged (ns, p)) = ns :: String.split "/" p
+subPathDsid (Tagged (ns, p)) = ns :: String.split "/" (String.dropLeft 1 p)
 
 cementedLayout : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> Layout.ConcreteBoundLayout
 cementedLayout rs bl cSels =
@@ -431,7 +431,6 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
--- FIXME: Utter tosh
 dsidToPath : DataSourceId -> SubPath
 dsidToPath dsid = case dsid of
     ns :: rest -> Tagged (ns, "/" ++ String.join "/" rest)

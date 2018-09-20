@@ -61,16 +61,27 @@ expandWildcards dsid =
         else seg
   in List.map expandWildcard
 
+instantiateTemplate : BoundLayout a -> DataSourceId -> BoundLayout a
+instantiateTemplate bl dsid = case bl of
+    BlContainer cs -> BlContainer <| case cs of
+        CsFixed subLs -> CsFixed <| List.map (flip instantiateTemplate dsid) subLs
+        CsTemplate subCssid subL -> CsTemplate (expandWildcards dsid subCssid) subL
+        CsDynamic subDsid a -> CsDynamic (dsid ++ subDsid) a
+    BlView subDsid subCssid -> BlView
+        (dsid ++ subDsid) (expandWildcards dsid subCssid)
+    BlSeries subCssid -> BlSeries <| expandWildcards dsid subCssid
+
 resolveChild
    : (ChildSourceStateId -> List DataSourceId)
   -> (DataSourceId -> a -> List (BoundLayout a))
   -> ChildSource a -> List (BoundLayout a)
-resolveChild getSegs resolveDynamic childSource =
+resolveChild getDsids resolveDynamic childSource =
     case childSource of
         CsFixed subLayouts -> subLayouts
         CsDynamic dsid a -> resolveDynamic dsid a
-        -- FIXME: This needs to actually instantiate the template
-        CsTemplate cssid subLayout -> []
+        CsTemplate cssid subLayout -> List.map
+            (instantiateTemplate subLayout)
+            (getDsids cssid)
 
 lAppend : a -> List a -> List a
 lAppend a l = l ++ [a]
