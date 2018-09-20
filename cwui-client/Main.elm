@@ -108,23 +108,6 @@ getTsModel ns m = tsModelEmpty
 qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
 
-requiredChildrenVs : Valuespace -> NodeFs -> Path -> Array Path
-requiredChildrenVs vs fs p = case remoteChildSegs vs p of
-    Nothing -> Array.empty
-    Just segs ->
-      let
-        -- FIXME: Child seg thing:
-        chosen = defaultChildChoice <| Just segs
-      in qualifySegs p chosen
-
-requiredChildren : RemoteState -> NodesFs -> SubPath -> Array SubPath
-requiredChildren rs fss sp =
-  let
-    (ns, p) = unSubPath sp
-  in case (CDict.get ns rs, CDict.get ns fss) of
-    (Just vs, Just fs) -> Array.map (subPath ns) <| requiredChildrenVs vs fs p
-    _ -> Array.empty
-
 subPathDsid : SubPath -> DataSourceId
 subPathDsid (Tagged (ns, p)) = ns :: String.split "/" (String.dropLeft 1 p)
 
