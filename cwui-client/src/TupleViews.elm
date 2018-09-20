@@ -7,12 +7,13 @@ import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
 
 import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood, lastJust, last)
-import ClTypes exposing (Bounds, Attributee, TypeName, WireValue, asWord8, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time, Editable(..))
+import ClTypes exposing (Bounds, Attributee, Seg, WireValue, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time, Editable(..), Definition, asWord32)
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial, fullPartial)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (ConstChangeT)
 import Limits exposing (maxWord64, maxWord32)
+import Tagged.Tagged exposing (Tagged)
 
 type EditTarget k v p
   = EditableTarget k p
@@ -108,7 +109,7 @@ viewAtom def wv =
         Err msg -> text msg
   in case def of
     ADTime bounds -> castedView asTime <| timeViewer bounds
-    ADEnum opts -> castedView asWord8 <| enumViewer opts
+    ADEnum opts -> castedView asWord32 <| enumViewer opts
     ADFloat bounds -> castedView asFloat <| floatViewer bounds
     ADDouble bounds -> castedView asDouble <| floatViewer bounds
     ADString (reString, _) -> castedView asString <| textViewer reString
@@ -160,7 +161,7 @@ viewAtomEdit d =
         Err msg -> text msg
         Ok sa -> h sa
   in case d of
-    ADEnum opts -> castedView asWord8 pEnumConv <| enumEditor opts
+    ADEnum opts -> castedView asWord32 pEnumConv <| enumEditor opts
     ADTime bounds -> castedView asTime pTimeConv <| timeEditor bounds
     ADString (reString, _) -> castedView asString pStringConv <| textEditor reString
     ADFloat bounds -> castedView asFloat pFloatConv <| floatEditor bounds

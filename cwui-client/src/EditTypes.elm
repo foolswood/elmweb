@@ -145,7 +145,7 @@ asFullTime _ pt = case pt of
 
 asFull : (PartialEdit, AtomDef) -> Maybe WireValue
 asFull ped = case ped of
-    (PeEnum mi, ADEnum _) -> Maybe.map WvWord8 mi
+    (PeEnum mi, ADEnum _) -> Maybe.map WvWord32 mi
     (PeTime pt, ADTime bs) -> Maybe.map WvTime <| asFullTime bs pt
     (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
         [] -> Nothing
@@ -159,7 +159,7 @@ asPartialTime _ mt = case mt of
 
 asPartial : AtomDef -> Maybe WireValue -> PartialEdit
 asPartial d mwv = case (d, mwv) of
-    (ADEnum _, Just (WvWord8 w)) -> PeEnum <| Just w
+    (ADEnum _, Just (WvWord32 w)) -> PeEnum <| Just w
     (ADEnum _, _) -> PeEnum Nothing
     (ADTime bs, Just (WvTime t)) -> PeTime <| asPartialTime bs <| Just t
     (ADTime bs, _) -> PeTime <| asPartialTime bs Nothing

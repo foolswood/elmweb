@@ -94,7 +94,6 @@ type alias PostDefinition = {doc : String, fieldDescs : List (Seg, AtomDef)}
 
 type WireValue
   = WvTime Time
-  | WvWord8 Int
   | WvWord32 Int
   | WvWord64 Int
   | WvInt32 Int
@@ -109,10 +108,10 @@ asTime wv = case wv of
     WvTime t -> Ok t
     _ -> Err "Not a Time"
 
-asWord8 : WireValue -> Result String Int
-asWord8 wv = case wv of
-    WvWord8 i -> Ok i
-    _ -> Err "Not a Word8"
+asWord32 : WireValue -> Result String Int
+asWord32 wv = case wv of
+    WvWord32 w -> Ok w
+    _ -> Err "Not a Word32"
 
 asFloat : WireValue -> Result String Float
 asFloat wv = case wv of
@@ -131,7 +130,6 @@ asString wv = case wv of
 
 type WireType
   = WtTime
-  | WtWord8
   | WtWord32
   | WtWord64
   | WtInt32
@@ -144,7 +142,7 @@ type WireType
 defWireType : AtomDef -> WireType
 defWireType def = case def of
     ADTime _ -> WtTime
-    ADEnum _ -> WtWord8
+    ADEnum _ -> WtWord32
     ADWord32 _ -> WtWord32
     ADWord64 _ -> WtWord64
     ADInt32 _ -> WtInt32

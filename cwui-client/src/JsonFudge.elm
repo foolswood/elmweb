@@ -72,7 +72,6 @@ encodeWv wt wv =
   let
     encodeWv v = case v of
         (WvTime t) -> encodeTime t
-        (WvWord8 i) -> JE.int i
         (WvWord32 i) -> JE.int i
         (WvWord64 i) -> JE.int i
         (WvInt32 i) -> JE.int i
@@ -83,7 +82,6 @@ encodeWv wt wv =
         (WvList l) -> JE.list (List.map encodeWv l)
     typeTag t = case t of
         WtTime -> "t"
-        WtWord8 -> "b"
         WtWord32 -> "w"
         WtWord64 -> "W"
         WtInt32 -> "i"
@@ -292,7 +290,6 @@ decodeWv =
     unpackWt wts = case String.uncons wts of
         Just (awt, rem) -> case awt of
             't' -> Ok WtTime
-            'b' -> Ok WtWord8
             'w' -> Ok WtWord32
             'W' -> Ok WtWord64
             'i' -> Ok WtInt32
@@ -308,7 +305,6 @@ decodeWv =
         Err msg -> JD.fail msg
     wvd wt = case wt of
         WtTime -> JD.map WvTime decodeTime
-        WtWord8 -> JD.map WvWord8 JD.int
         WtWord32 -> JD.map WvWord32 JD.int
         WtWord64 -> JD.map WvWord64 JD.int
         WtInt32 -> JD.map WvInt32 JD.int

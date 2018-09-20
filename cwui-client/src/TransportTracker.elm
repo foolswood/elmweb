@@ -75,7 +75,7 @@ transport ns rs now =
         (ma, [WvTime t]) -> Ok (ma, t)
         _ -> Err <| BadWvs <| toString vs
     asTranspState vs = case vs of
-        (ma, [WvWord8 i]) -> if i == 0
+        (ma, [WvWord32 i]) -> if i == 0
             then Ok (ma, TransportStopped)
             else if i == 1
                 then Ok (ma, TransportRolling)
