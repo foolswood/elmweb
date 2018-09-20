@@ -119,7 +119,7 @@ viewAtom def wv =
 textViewer : String -> String -> Html a
 textViewer reString s = text s
 
-refViewer : TypeName -> String -> Html a
+refViewer : Tagged Definition Seg -> String -> Html a
 refViewer tn tgt = text tgt
 
 floatViewer : Bounds Float -> Float -> Html a

@@ -32,7 +32,7 @@ constraintParsers =
     ("string", Result.map ADString << cRegex),
     ("list", Result.map ADList << parseAtomDef),
     ("set", Result.map ADSet << parseAtomDef),
-    ("ref", Result.map ADRef << parseTypeName)]
+    ("ref", Ok << ADRef << Tagged)]
 
 parseAtomDefWith : String -> List ConstraintParser -> Result String AtomDef
 parseAtomDefWith s cps = case cps of

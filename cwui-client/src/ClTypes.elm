@@ -68,7 +68,7 @@ type AtomDef
   | ADFloat (Bounds Float)
   | ADDouble (Bounds Float)
   | ADString (String, Regex)
-  | ADRef TypeName
+  | ADRef (Tagged Definition Seg)
   | ADList AtomDef
   | ADSet AtomDef
 
