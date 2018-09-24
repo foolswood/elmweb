@@ -87,7 +87,6 @@ type alias Model =
 -- FIXME: Delete later
 type SpecialEvent
   = SpeClock Namespace (EditEvent EditTypes.PartialTime Time)
-  | SpeTimeline Namespace TsMsg
 
 -- FIXME: Just always returns empty
 getTsModel : Namespace -> Model -> TsModel
@@ -109,7 +108,7 @@ qualifySegs : Path -> Set Seg -> Array Path
 qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
 
 subPathDsid : SubPath -> DataSourceId
-subPathDsid (Tagged (ns, p)) = ns :: String.split "/" (String.dropLeft 1 p)
+subPathDsid (Tagged (ns, p)) = "path" :: ns :: String.split "/" (String.dropLeft 1 p)
 
 cementedLayout : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> Layout.ConcreteBoundLayout
 cementedLayout rs bl cSels =
@@ -124,7 +123,7 @@ requiredPaths : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections
 requiredPaths rs bl cSels =
   let
     layoutRequires = CSet.fromList tagCmp
-        <| List.filterMap (Result.toMaybe << dsidToPath)
+        <| List.filterMap (Maybe.andThen dspAsPath << Result.toMaybe << dsidToDsp)
         <| Set.toList
         <| Layout.requiredDataSources
         <| cementedLayout rs bl cSels
@@ -139,9 +138,10 @@ init =
     relayNs = Tagged "relay"
     initialNodeFs = TD.empty
     initialLayout = BlContainer <| CsFixed
-        [ BlView ["relay", "build"] dropCssid
-        , BlView ["relay", "clients"] ["clients"]
+        [ BlView ["path", "relay", "build"] dropCssid
+        , BlView ["path", "relay", "clients"] ["clients"]
         , BlContainer <| CsTemplate ["clients"] <| BlView ["clock_diff"] dropCssid
+        , BlView ["clock", "engine"] dropCssid
         , BlSeries ["series"]
         ]
     childSelections = Dict.empty
@@ -306,12 +306,6 @@ update msg model = case msg of
             EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
             EeSubmit t ->
               (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
-        SpeTimeline ns evt -> case processTimeSeriesEvent evt <| getTsModel ns model of
-            -- TsemUpdate tsm -> ({model | timelines = CDict.insert ns tsm <| .timelines model}, Cmd.none)
-            TsemUpdate tsm -> (model, Cmd.none)
-            TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
-            -- FIXME: time point changes go nowhere:
-            TsemPointChange _ _ _ -> (model, Cmd.none)
     TsUiEvent tsMsg -> case processTimeSeriesEvent tsMsg <| getTsModel (Tagged "FIXME") model of
         -- FIXME: Hard coded clock source
         TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle (Tagged "engine") [transportCueDum t] [])
@@ -427,17 +421,27 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
-dsidToPath : DataSourceId -> Result String SubPath
-dsidToPath dsid = case dsid of
-    ns :: rest -> Ok <| Tagged (ns, "/" ++ String.join "/" rest)
-    [] -> Err "not a path"
+type DataSourcePtr
+  = DsPath SubPath
+  | DsClock Namespace
+
+dspAsPath : DataSourcePtr -> Maybe SubPath
+dspAsPath dsp = case dsp of
+    DsPath sp -> Just sp
+    _ -> Nothing
+
+dsidToDsp : DataSourceId -> Result String DataSourcePtr
+dsidToDsp dsid = case dsid of
+    "path" :: ns :: rest -> Ok <| DsPath <| Tagged (ns, "/" ++ String.join "/" rest)
+    ["clock", ns] -> Ok <| DsClock <| Tagged ns
+    _ -> Err <| "Invalid dsid: " ++ toString dsid
 
 dropCssid : ChildSourceStateId
 dropCssid = ["drop"]
 
 dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> List (BoundLayout ChildSourceStateId)
-dynamicLayout rs dsid seriesCssid = case dsidToPath dsid of
-    Ok sp ->
+dynamicLayout rs dsid seriesCssid = case dsidToDsp dsid of
+    Ok (DsPath sp) ->
       let
         (ns, p) = unSubPath sp
       in case remoteStateLookup ns p rs of
@@ -452,6 +456,7 @@ dynamicLayout rs dsid seriesCssid = case dsidToPath dsid of
               in [BlContainer childSource, BlView dsid cssid]
             ConstDataNode _ -> [BlView dsid dropCssid]
             TimeSeriesNode _ -> [BlView dsid seriesCssid]
+    Ok (DsClock s) -> []  -- FIXME: This makes sense but is kinda opaque
     Err msg -> []
 
 view : Model -> Html Msg
@@ -473,10 +478,14 @@ view m = div []
             Ok transp -> Html.map TsUiEvent <| viewTimeSeries
                 (getTsModel (Tagged "engine") m) transp
             Err msg -> Html.text <| toString msg)
-        (\dsid cssid -> case dsidToPath dsid of
-            Ok sp -> Html.map NodeUiEvent <| viewPath
+        (\dsid cssid -> case dsidToDsp dsid of
+            Ok (DsPath sp) -> Html.map NodeUiEvent <| viewPath
                 (.childSelections m) (.nodeFs m) (.state m) (.recent m)
                 (.pending m) cssid sp
+            Ok (DsClock s) ->
+              let
+                transp = transport s (latestState m) (.timeNow m)
+              in Html.map (SpecialUiEvent << SpeClock s) <| transportClockView transp <| CDict.getWithDefault FsViewing s <| .clockFs m
             Err msg -> Html.text msg)
         (cementedLayout (latestState m) (.layout m) (.childSelections m))
   ]
@@ -501,20 +510,6 @@ pathEditView mp fs = case fs of
         , input [value nsSeg, type_ "text", onInput <| \pns -> EeUpdate (Tagged (pns, partialPath))] []
         , input [value partialPath, type_ "text", onInput <| EeUpdate << subPath partialNs] []
         ]
-
--- FIXME: Delete later:
--- specialEditView : Special -> Html Special
--- specialEditView sp = text <| toString sp
-
--- viewSpecial : Model -> Special -> Html SpecialEvent
--- viewSpecial m sp = case sp of
---     SpClock ns ->
---       let
---         transp = transport ns (latestState m) (.timeNow m)
---       in Html.map (SpeClock ns) <| transportClockView transp <| CDict.getWithDefault FsViewing ns <| .clockFs m
---     SpTimeline ns -> case transport ns (latestState m) (.timeNow m) of
---         Err e -> Html.text <| toString e
---         Ok transp -> Html.map (SpeTimeline ns) <| viewTimeSeries (getTsModel ns m) transp
 
 viewLoading : Html a
 viewLoading = text "Loading..."
