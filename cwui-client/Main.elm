@@ -123,7 +123,11 @@ cementedLayout rs bl cSels =
 requiredPaths : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> CmpSet SubPath (Seg, Path)
 requiredPaths rs bl cSels =
   let
-    layoutRequires = CSet.fromList tagCmp <| List.map dsidToPath <| Set.toList <| Layout.requiredDataSources <| cementedLayout rs bl cSels
+    layoutRequires = CSet.fromList tagCmp
+        <| List.filterMap (Result.toMaybe << dsidToPath)
+        <| Set.toList
+        <| Layout.requiredDataSources
+        <| cementedLayout rs bl cSels
     -- FIXME: Fixed clock source
     clocksRequire = transportSubs (Tagged "engine") rs
   in CSet.union layoutRequires clocksRequire
@@ -423,30 +427,32 @@ eventFromNetwork s = case parseBundle s of
 
 -- View
 
-dsidToPath : DataSourceId -> SubPath
+dsidToPath : DataSourceId -> Result String SubPath
 dsidToPath dsid = case dsid of
-    ns :: rest -> Tagged (ns, "/" ++ String.join "/" rest)
-    [] -> Tagged ("utter", "/tosh")
+    ns :: rest -> Ok <| Tagged (ns, "/" ++ String.join "/" rest)
+    [] -> Err "not a path"
 
 dropCssid : ChildSourceStateId
 dropCssid = ["drop"]
 
 dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> List (BoundLayout ChildSourceStateId)
-dynamicLayout rs dsid seriesCssid =
-  let
-    (ns, p) = unSubPath <| dsidToPath dsid
-  in case remoteStateLookup ns p rs of
-    Err _ -> []
-    Ok (n, _, _, _) -> case n of
-        ContainerNode attributedSegs ->
-          let
-            cssid = Layout.dataDerivedChildSourceState dsid
-            childSource = CsTemplate
-                cssid
-                (BlContainer <| CsDynamic [] cssid)
-          in [BlContainer childSource, BlView dsid cssid]
-        ConstDataNode _ -> [BlView dsid dropCssid]
-        TimeSeriesNode _ -> [BlView dsid seriesCssid]
+dynamicLayout rs dsid seriesCssid = case dsidToPath dsid of
+    Ok sp ->
+      let
+        (ns, p) = unSubPath sp
+      in case remoteStateLookup ns p rs of
+        Err _ -> []
+        Ok (n, _, _, _) -> case n of
+            ContainerNode attributedSegs ->
+              let
+                cssid = Layout.dataDerivedChildSourceState dsid
+                childSource = CsTemplate
+                    cssid
+                    (BlContainer <| CsDynamic [] cssid)
+              in [BlContainer childSource, BlView dsid cssid]
+            ConstDataNode _ -> [BlView dsid dropCssid]
+            TimeSeriesNode _ -> [BlView dsid seriesCssid]
+    Err msg -> []
 
 view : Model -> Html Msg
 view m = div []
@@ -467,9 +473,11 @@ view m = div []
             Ok transp -> Html.map TsUiEvent <| viewTimeSeries
                 (getTsModel (Tagged "engine") m) transp
             Err msg -> Html.text <| toString msg)
-        (\dsid cssid -> Html.map NodeUiEvent <| viewPath
-            (.childSelections m) (.nodeFs m) (.state m) (.recent m)
-            (.pending m) cssid <| dsidToPath dsid)
+        (\dsid cssid -> case dsidToPath dsid of
+            Ok sp -> Html.map NodeUiEvent <| viewPath
+                (.childSelections m) (.nodeFs m) (.state m) (.recent m)
+                (.pending m) cssid sp
+            Err msg -> Html.text msg)
         (cementedLayout (latestState m) (.layout m) (.childSelections m))
   ]
 
@@ -588,13 +596,6 @@ viewNode isSelected editable def postability node recentCops recentDums formStat
         Ok childrenNeConv childrenPaConv childrenNaConv
         (.unwrap childrenNodeConv) recentCops
         (\r n fs mp -> viewArray cssid isSelected editable d postability recentCops n fs mp)
-
--- viewChildChoice
---    : Editable -> Definition -> Postability -> Node
---    -> List Cops -> List DataChange
---    -> FormState NodeEdit -> Maybe PendingActions
---    -> Set Seg -> Html (Either (Set Seg) (EditEvent NodeEdit NodeAction))
--- viewChildChoice editable def postability node recentCops recentDums formState maybeNas chosen = H.text "foo"
 
 viewStruct : StructDefinition -> Html a
 viewStruct structDef =
