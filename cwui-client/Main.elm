@@ -190,7 +190,7 @@ subDiffToCmd oldP oldPt newP newPt =
 type Msg
   = AddError DataErrorIndex String
   | SwapViewMode
-  | NetworkEvent FromRelayClientBundle
+  | NetworkEvent Digest
   | SquashRecent
   | SecondPassedTick
   | LayoutUiEvent (BoundLayout ChildSourceStateId)
@@ -269,9 +269,8 @@ appendSegSp (Tagged (ns, p)) s = Tagged (ns, appendSeg p s)
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
     AddError idx msg -> ({model | errs = (Tagged "UI_INTERNAL", idx, msg) :: .errs model}, Cmd.none)
-    NetworkEvent b ->
+    NetworkEvent d ->
       let
-        d = digest b
         (newState, errs) = applyDigest d <| latestState model
         pathSubs = requiredPaths newState (.layout model) (.childSelections model)
         postTypeSubs = requiredPostTypes newState
@@ -417,7 +416,7 @@ subscriptions model = Sub.batch
 
 eventFromNetwork : String -> Msg
 eventFromNetwork s = case parseBundle s of
-    (Ok b) -> NetworkEvent b
+    (Ok b) -> NetworkEvent <| digest b
     (Err e) -> AddError DGlobalError (e ++ "  <-  " ++ s)
 
 -- View
