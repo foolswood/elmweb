@@ -29,7 +29,7 @@ type NaTimePoint
 type alias NaConstT = List WireValue
 type alias NaSeriesT = TimeSeries NaTimePoint
 type NaChildrenT
-  = NacCreate (Maybe (Either Placeholder Seg)) (List WireValue)
+  = NacCreate (Maybe (Either Placeholder Seg)) (List (List WireValue))
   | NacMove Seg (Maybe Seg)
   | NacDelete Seg
   | NacSelect ChildSourceStateId Seg
@@ -66,7 +66,7 @@ childrenNaConv =
 
 type alias PaChildrenT =
   { childMods : Dict Seg (SeqOp Seg)
-  , creates : CmpDict Placeholder Seg (Maybe (Either Placeholder Seg), List WireValue)
+  , creates : CmpDict Placeholder Seg (Maybe (Either Placeholder Seg), List (List WireValue))
   }
 
 type PendingActions
@@ -183,7 +183,7 @@ type alias NeConstT = List PartialEdit
 
 type alias NeChildCreate =
   { ref : Maybe Seg
-  , vals : NeConstT
+  , vals : List NeConstT
   }
 
 type alias NeSeriesT = TimeSeries NeTimePoint

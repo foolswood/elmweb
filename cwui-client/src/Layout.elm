@@ -10,6 +10,7 @@ import Html.Attributes as HA
 import Cmp.Cmp exposing (Cmp)
 import Cmp.Set as CSet exposing (CmpSet)
 import Futility exposing (updateIdx, getWithDefault)
+import HtmlHelpers exposing (listEdit)
 import Form exposing (FormState(..), formState, FormStore, formInsert)
 import EditTypes exposing (EditEvent(..), mapEe, DataSourceSeg, DataSourceId, ChildSourceStateSeg, ChildSourceStateId)
 
@@ -96,7 +97,7 @@ edit dynEdit =
             BlContainer childSource -> H.map BlContainer
               <| case childSource of
                 CsFixed subLayouts -> H.map CsFixed
-                    <| H.div [] <| listEdit go subLayouts
+                    <| H.div [] <| listEdit identity go subLayouts
                 CsDynamic dsid a -> H.div []
                   [ H.map (\newDsid -> CsDynamic newDsid a) <| editDsid dsid
                   , H.map (\newA -> CsDynamic dsid newA) <| dynEdit a
@@ -132,15 +133,6 @@ blStrOpts bl =
         BlSeries _ -> "series"
     asOpt s = H.option [HA.value s, HA.selected <| s == selected] [H.text s]
   in List.map asOpt ["container", "childControl", "view"]
-
-listEdit : (a -> Html a) -> List a -> List (Html (List a))
-listEdit f =
-  let
-    go pre l = case l of
-        a :: rest ->
-            (H.map (\newA -> pre ++ (newA :: rest)) <| f a) :: go (pre ++ [a]) rest
-        [] -> []
-  in go []
 
 requiredDataSources : ConcreteBoundLayout -> Set DataSourceId
 requiredDataSources =

@@ -10,7 +10,8 @@ import Set exposing (Set)
 import Json.Encode as JE
 import Tuple exposing (second)
 
-import Futility exposing (dictMapMaybe, Either(..))
+import Futility exposing (dictMapMaybe, Either(..), zip, allGood)
+import HtmlHelpers exposing (listEdit)
 import SequenceOps exposing (SeqOp(..), applySeqOps, inject)
 import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace, Editable(..), PostDefinition)
 import ClNodes exposing (Node(ContainerNode), ContainerNodeT)
@@ -78,8 +79,8 @@ acDragOverAttr =
         Just _ -> {preventDefault = True, stopPropagation = False}
   in dragOverAttr acHandler
 
-emptyPostDefPartial : PostDefinition -> NeConstT
-emptyPostDefPartial = emptyPartial << List.map second << .fieldDescs
+emptyPostDefPartial : PostDefinition -> List NeConstT
+emptyPostDefPartial = List.map emptyPartial << List.map second << .fieldDescs
 
 type alias ContainerEdit = EditEvent NeChildrenT NaChildrenT
 
@@ -127,12 +128,13 @@ viewArray cssid isSelected editable arrayDef postability recentCops n s mp =
         Just partialCreate ->
           let
             atomDefs = case postability of
-                PostableLoaded postDef -> List.map Tuple.second <| .fieldDescs postDef
+                PostableLoaded _ postDef -> List.map Tuple.second <| .fieldDescs postDef
                 _ -> []
             partialVals = .vals partialCreate
-            editForm = H.map (\pcs -> EeUpdate <| {editState | create = Just {partialCreate | vals = pcs}}) <|
-                viewConstTupleEdit atomDefs partialVals
-          in case asSubmittable atomDefs partialVals of
+            editForm = H.map
+                (\pcs -> EeUpdate <| {editState | create = Just {partialCreate | vals = pcs}})
+                <| H.div [] <| listEdit (Tuple.second) (uncurry viewConstTupleEdit) (zip atomDefs partialVals)
+          in case allGood (uncurry asSubmittable) (zip atomDefs partialVals) of
             Just wvs ->
               [ editForm
               , H.button
@@ -148,7 +150,7 @@ viewArray cssid isSelected editable arrayDef postability recentCops n s mp =
                 addBtn mPrevSeg =
                   let
                     attrs = case postability of
-                        PostableLoaded postDef ->
+                        PostableLoaded _ postDef ->
                           [ HE.onClick <| EeUpdate
                             { editState
                             | create = Just {ref = mPrevSeg, vals = emptyPostDefPartial postDef}

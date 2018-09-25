@@ -23,7 +23,7 @@ import ClMsgTypes exposing
 import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault)
 import PathManipulation exposing (appendSeg)
 import Digests exposing (..)
-import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, unloadedPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
+import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, requiredPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
 import Layout exposing (BoundLayout(..), ChildSource(..))
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
@@ -138,9 +138,10 @@ init =
     relayNs = Tagged "relay"
     initialNodeFs = TD.empty
     initialLayout = BlContainer <| CsFixed
-        [ BlView ["path", "relay", "build"] dropCssid
-        , BlView ["path", "relay", "clients"] ["clients"]
-        , BlContainer <| CsTemplate ["clients"] <| BlView ["clock_diff"] dropCssid
+        [ BlView ["path", "engine", "kinds"] dropCssid
+        , BlView ["path", "engine", "types", "amp"] dropCssid
+        , BlView ["path", "engine", "types"] ["clients"]
+        , BlContainer <| CsTemplate ["clients"] <| BlView [] dropCssid
         , BlView ["clock", "engine"] dropCssid
         , BlSeries ["series"]
         ]
@@ -273,7 +274,7 @@ update msg model = case msg of
         d = digest b
         (newState, errs) = applyDigest d <| latestState model
         pathSubs = requiredPaths newState (.layout model) (.childSelections model)
-        postTypeSubs = unloadedPostTypes newState
+        postTypeSubs = requiredPostTypes newState
         newM =
           { model
           | errs = (.errs model) ++ (CDict.foldl (\ns es acc -> (List.map (\(idx, msg) -> (ns, idx, msg)) es) ++ acc) [] errs)
@@ -360,15 +361,15 @@ update msg model = case msg of
                           , updateCmd <| ClMsgTypes.MsgDelete
                               {msgTgt=tgt, msgAttributee=Nothing}
                           )
-                        NacCreate ref wvs -> case postability of
-                            RemoteState.PostableLoaded pdef ->
+                        NacCreate ref postArgs -> case postability of
+                            RemoteState.PostableLoaded _ pdef ->
                                 ( modifyChildPending
-                                    (\p -> {p | creates = CDict.insert phPh (ref, wvs) <| .creates p})
+                                    (\p -> {p | creates = CDict.insert phPh (ref, postArgs) <| .creates p})
                                     ns p model
                                 , updateCmd <| ClMsgTypes.MsgCreateAfter
-                                    {msgTgt=phPh, msgRef = ref, msgAttributee=Nothing, msgPostArgs = Futility.zip
-                                        (List.map (defWireType << Tuple.second) <| .fieldDescs pdef)
-                                        wvs}
+                                    {msgTgt=phPh, msgRef = ref, msgAttributee=Nothing, msgPostArgs = List.map2
+                                        (\fieldDesc wvs -> Futility.zip (List.map defWireType <| Tuple.second fieldDesc) wvs)
+                                        (.fieldDescs pdef) postArgs}
                                 )
                             _ -> addDGlobalError "Create on unpostable type" model
                         NacSelect cssid seg -> modifySelection (CSet.insert (appendSegSp sp seg)) cssid model
@@ -511,8 +512,8 @@ pathEditView mp fs = case fs of
         , input [value partialPath, type_ "text", onInput <| EeUpdate << subPath partialNs] []
         ]
 
-viewLoading : Html a
-viewLoading = text "Loading..."
+viewLoading : String -> Html a
+viewLoading s = text <| "Loading " ++ s ++ "..."
 
 viewPath
    : Dict ChildSourceStateId (CmpSet SubPath (Seg, Path)) -> NodesFs -> RemoteState -> List (Digest, RemoteState) -> Pendings
@@ -522,7 +523,7 @@ viewPath childSelections nodeFs baseState recent pending cssid sp =
   let
     (ns, p) = unSubPath sp
     viewerFor s = case remoteStateLookup ns p s of
-        Err _ -> Nothing
+        Err err -> Debug.log ("Lookup failed: " ++ err) Nothing
         Ok (n, def, ed, post) ->
             Just <| \fs mPending recentCops recentDums -> viewNode
                 -- FIXME: Awkwardly overcomplicated:
@@ -553,7 +554,7 @@ viewPath childSelections nodeFs baseState recent pending cssid sp =
           else identity
         finalView = case mPartialViewer of
             Nothing -> if not typeChanged
-                then Just viewLoading
+                then Just <| viewLoading <| toString sp
                 else Nothing
             Just partialViewer -> Just <| highlight <| partialViewer
                 (formState p <| CDict.getWithDefault formStoreEmpty ns nodeFs)

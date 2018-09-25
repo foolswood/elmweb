@@ -141,7 +141,7 @@ encodeRefField ref = ("ref", encodeNullable encodeSeg ref)
 providerContToJsonValue : ToProviderContainerUpdateMsg -> JE.Value
 providerContToJsonValue m = case m of
     MsgCreateAfter {msgPostArgs, msgTgt, msgRef, msgAttributee} -> tagged '+' <| JE.object
-      [ ("args", JE.list <| List.map (uncurry encodeWv) msgPostArgs)
+      [ ("args", JE.list <| List.map (JE.list << List.map (uncurry encodeWv)) msgPostArgs)
       , ("tgt", encodePlaceholder msgTgt)
       , ("ref", encodeNullable (encodeEither encodePlaceholder encodeSeg) msgRef)
       , encodeAttributeeField msgAttributee
@@ -265,9 +265,9 @@ decodeDef = decodeTagged defTagDecoders
 decodePostDef : JD.Decoder PostDefinition
 decodePostDef = JD.map2 PostDefinition
     (JD.field "doc" JD.string)
-    (JD.field "fields" <| JD.list <| JD.map2 (,)
-        (JD.field "name" JD.string)
-        (JD.field "type" decodeAtomDef))
+    (JD.field "args" <| JD.list <| JD.map2 (,)
+        (JD.field "seg" JD.string)
+        (JD.field "tys" <| JD.list decodeAtomDef))
 
 decodeDefMsg : JD.Decoder a -> JD.Decoder (DefMsg a)
 decodeDefMsg defDec = decodeTagged (Dict.fromList
@@ -342,7 +342,7 @@ decodeNs = JD.map Tagged decodeSeg
 
 decodeTypeName : JD.Decoder (Tagged a TypeName)
 decodeTypeName = JD.map2 typeName
-    (JD.field "ns" decodeNs) (JD.field "seg" <| JD.map Tagged decodeSeg)
+    (JD.field "0" decodeNs) (JD.field "1" <| JD.map Tagged decodeSeg)
 
 decodeTypeMsg : JD.Decoder TypeMsg
 decodeTypeMsg = JD.map3 MsgAssignType

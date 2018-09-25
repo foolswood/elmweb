@@ -70,7 +70,7 @@ type alias PostArgs = List (WireType, WireValue)
 
 type ToProviderContainerUpdateMsg
   = MsgCreateAfter
-      { msgPostArgs : PostArgs
+      { msgPostArgs : List PostArgs
       , msgTgt : Placeholder
       , msgRef : Maybe (Either Placeholder Seg)
       , msgAttributee : Maybe Attributee

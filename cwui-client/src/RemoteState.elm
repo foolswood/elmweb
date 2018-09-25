@@ -1,6 +1,6 @@
 module RemoteState exposing
   ( TypeMap, TypeAssignMap, NodeMap, RemoteState, remoteStateEmpty
-  , remoteStateLookup, Valuespace, vsEmpty, unloadedPostTypes, ByNs
+  , remoteStateLookup, Valuespace, vsEmpty, requiredPostTypes, ByNs
   , Postability(..), allTimeSeries)
 
 import Dict exposing (Dict)
@@ -50,7 +50,7 @@ vsTyDef p vs = case vsTyAssn p vs of
         Just def -> Ok (def, ed)
 
 type Postability
-  = PostableLoaded PostDefinition
+  = PostableLoaded (Tagged PostDefinition Seg) PostDefinition
   | PostableUnloaded (Tagged PostDefinition Seg)
   | Unpostable
 
@@ -59,7 +59,7 @@ vsPostability d vs = case d of
     ArrayDef {postType} -> case postType of
         Nothing -> Unpostable
         Just postSeg -> case CDict.get postSeg <| .postTypes vs of
-            Just postDef -> PostableLoaded postDef
+            Just postDef -> PostableLoaded postSeg postDef
             Nothing -> PostableUnloaded postSeg
     _ -> Unpostable
 
@@ -77,13 +77,14 @@ remoteStateLookup ns p rs = case CDict.get ns rs of
     Just vs -> Result.map2 (\n (d, e) -> (n, d, e, vsPostability d vs))
         (vsNode p vs) (vsTyDef p vs)
 
-unloadedPostTypes : RemoteState -> TaggedSet PostDefinition TypeName
-unloadedPostTypes =
+requiredPostTypes : RemoteState -> TaggedSet PostDefinition TypeName
+requiredPostTypes =
   let
-    appendUnloaded ns vs def acc = case vsPostability def vs of
+    appendRequired ns vs def acc = case vsPostability def vs of
+        (PostableLoaded s _) -> typeName ns s :: acc
         (PostableUnloaded s) -> typeName ns s :: acc
         _ -> acc
-    ulpt ns vs acc = List.foldl (appendUnloaded ns vs) acc <| CDict.values <| .types vs
+    ulpt ns vs acc = List.foldl (appendRequired ns vs) acc <| CDict.values <| .types vs
   in TS.fromList << CDict.foldl ulpt []
 
 allTimeSeries

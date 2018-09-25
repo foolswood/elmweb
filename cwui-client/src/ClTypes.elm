@@ -90,7 +90,7 @@ type Definition
   | StructDef StructDefinition
   | ArrayDef ArrayDefinition
 
-type alias PostDefinition = {doc : String, fieldDescs : List (Seg, AtomDef)}
+type alias PostDefinition = {doc : String, fieldDescs : List (Seg, List AtomDef)}
 
 type WireValue
   = WvTime Time
