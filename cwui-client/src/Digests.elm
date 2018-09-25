@@ -1,7 +1,8 @@
 module Digests exposing
   ( Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT
   , constChangeCast, TimeChangeT, seriesChangeCast, TimeSeriesDataOp(..)
-  , DataDigest)
+  , DataDigest
+  , digestFrcub, digestFrseb, digestFrrub)
 
 import Dict exposing (Dict)
 import Set exposing (Set)

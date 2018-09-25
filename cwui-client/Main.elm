@@ -14,7 +14,7 @@ import Cmp.Dict as CDict
 import Tagged.Tagged exposing (Tagged(..), tagCmp)
 import Tagged.Set as TS exposing (TaggedSet)
 import Tagged.Dict as TD
-import JsonFudge exposing (serialiseBundle, parseBundle)
+import JsonFudge exposing (serialiseBundle, parseDigest)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
 import ClMsgTypes exposing
@@ -22,7 +22,7 @@ import ClMsgTypes exposing
   , DataErrorIndex(..), ToRelayUpdateBundle(..), ToRelaySubBundle(..))
 import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault)
 import PathManipulation exposing (appendSeg)
-import Digests exposing (..)
+import Digests exposing (Digest, DataChange(..), Cops, seriesChangeCast, constChangeCast, TaOp(..), applyDigest)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, requiredPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
 import Layout exposing (BoundLayout(..), ChildSource(..))
@@ -415,8 +415,8 @@ subscriptions model = Sub.batch
   ]
 
 eventFromNetwork : String -> Msg
-eventFromNetwork s = case parseBundle s of
-    (Ok b) -> NetworkEvent <| digest b
+eventFromNetwork s = case parseDigest s of
+    (Ok d) -> NetworkEvent d
     (Err e) -> AddError DGlobalError (e ++ "  <-  " ++ s)
 
 -- View

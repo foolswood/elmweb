@@ -1,4 +1,4 @@
-module JsonFudge exposing (serialiseBundle, parseBundle)
+module JsonFudge exposing (serialiseBundle, parseDigest)
 
 import Json.Encode as JE
 import Json.Decode as JD
@@ -13,6 +13,7 @@ import ClTypes exposing
   , WireValue(..), WireType(..), SubPath)
 import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
+import Digests exposing (Digest, digestFrcub, digestFrseb, digestFrrub)
 
 -- Json serialisation fudging
 
@@ -422,9 +423,9 @@ parseUpdateBundle = JD.map7 FromRelayClientUpdateBundle
     (JD.field "dd" (JD.list decodeDum))
     (JD.field "co" (JD.list <| decodePair decodePath decodeCCm))
 
-parseBundle : String -> Result String FromRelayClientBundle
-parseBundle = JD.decodeString <| decodeTagged <| Dict.fromList
-  [ ("R", JD.map Frrub parseRootBundle)
-  , ("S", JD.map Frseb parseSubBundle)
-  , ("U", JD.map Frcub parseUpdateBundle)
+parseDigest : String -> Result String Digest
+parseDigest = JD.decodeString <| decodeTagged <| Dict.fromList
+  [ ("R", JD.map digestFrrub parseRootBundle)
+  , ("S", JD.map digestFrseb parseSubBundle)
+  , ("U", JD.map digestFrcub parseUpdateBundle)
   ]
