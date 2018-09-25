@@ -2,7 +2,7 @@ module JsonFudge exposing (serialiseBundle, parseDigest)
 
 import Json.Encode as JE
 import Json.Decode as JD
-import Dict
+import Dict exposing (Dict)
 
 import Futility exposing (Either(..))
 import Tagged.Tagged exposing (Tagged(..))
@@ -13,7 +13,10 @@ import ClTypes exposing
   , WireValue(..), WireType(..), SubPath)
 import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
-import Digests exposing (Digest, digestFrcub, digestFrseb, digestFrrub)
+
+import Digests exposing (Digest, digestFrcub, digestFrseb)
+import SequenceOps exposing (SeqOp(..))
+import Tagged.Dict as TD
 
 -- Json serialisation fudging
 
@@ -403,9 +406,6 @@ decodeCCm =
           decodeAttributeeField)
     ]
 
-parseRootBundle : JD.Decoder FromRelayRootBundle
-parseRootBundle = JD.map FromRelayRootBundle <| JD.list decodeCCm
-
 parseSubBundle : JD.Decoder FromRelaySubErrorBundle
 parseSubBundle = JD.map4 FromRelaySubErrorBundle
     (JD.field "errs" (JD.list <| decodeErrMsg decodeSubErrIdx))
@@ -423,9 +423,20 @@ parseUpdateBundle = JD.map7 FromRelayClientUpdateBundle
     (JD.field "dd" (JD.list decodeDum))
     (JD.field "co" (JD.list <| decodePair decodePath decodeCCm))
 
+decodeSeqOp : JD.Decoder (SeqOp Seg)
+decodeSeqOp = decodeTagged <| Dict.fromList
+  [ (">", JD.map SoPresentAfter <| JD.nullable decodeSeg)
+  , ("-", JD.succeed SoAbsent)
+  ]
+
+decodeContOps : JD.Decoder (Dict Seg (Maybe Attributee, SeqOp Seg))
+decodeContOps = JD.map Dict.fromList <| JD.list <| decodePair
+    decodeSeg
+    <| decodePair (JD.nullable decodeAttributee) decodeSeqOp
+
 parseDigest : String -> Result String Digest
 parseDigest = JD.decodeString <| decodeTagged <| Dict.fromList
-  [ ("R", JD.map digestFrrub parseRootBundle)
+  [ ("R", JD.map (\rcs -> {nsds = TD.empty, rootCops = rcs, subErrs = []}) decodeContOps)
   , ("S", JD.map digestFrseb parseSubBundle)
   , ("U", JD.map digestFrcub parseUpdateBundle)
   ]

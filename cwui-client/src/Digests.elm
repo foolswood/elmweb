@@ -1,8 +1,8 @@
 module Digests exposing
-  ( Digest, digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT
+  ( Digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT
   , constChangeCast, TimeChangeT, seriesChangeCast, TimeSeriesDataOp(..)
   , DataDigest
-  , digestFrcub, digestFrseb, digestFrrub)
+  , digestFrcub, digestFrseb)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
@@ -238,19 +238,6 @@ digestFrseb (FromRelaySubErrorBundle errs pUnsubs tUnsubs dUnsubs) =
       }
     nsds = CSet.foldl genNsd TD.empty mentionedNss
   in {rootCops = Dict.empty, nsds = nsds, subErrs = List.map unErrMsg errs}
-
-digestFrrub : FromRelayRootBundle -> Digest
-digestFrrub (FromRelayRootBundle contUps) =
-  { rootCops = Dict.fromList <| List.map digestCm contUps
-  , nsds = TD.empty
-  , subErrs = []
-  }
-
-digest : FromRelayClientBundle -> Digest
-digest b = case b of
-    Frcub ub -> digestFrcub ub
-    Frseb eb -> digestFrseb eb
-    Frrub rb -> digestFrrub rb
 
 applyNsDigest : NsDigest -> Valuespace -> (Valuespace, List (DataErrorIndex, String))
 applyNsDigest d rs =
