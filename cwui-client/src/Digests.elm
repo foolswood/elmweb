@@ -2,11 +2,12 @@ module Digests exposing
   ( Digest, applyDigest, TaOp, Cops, DataChange(..), ConstChangeT
   , constChangeCast, TimeChangeT, seriesChangeCast, TimeSeriesDataOp(..)
   , DataDigest, DefOp(..), NsDigest, TrcUpdateDigest, CreateOp, TrcSubDigest
-  , SubOp(..), ToRelayDigest(..))
+  , SubOp(..), ToRelayDigest(..), ntsCmp)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
 
+import Cmp.Cmp exposing (Cmp)
 import Cmp.Set as CSet
 import Cmp.Dict as CDict exposing (CmpDict)
 import Tagged.Tagged as T exposing (Tagged(..))
@@ -14,9 +15,7 @@ import Tagged.Dict as TD exposing (TaggedDict)
 import ClTypes exposing
   ( Path, Seg, Namespace, TpId, Interpolation, Time, Attributee, WireValue
   , WireType, Definition, PostDefinition, Editable, TypeName, SubPath, Placeholder)
-import ClMsgTypes exposing
-  ( DefMsg(..), ToProviderContainerUpdateMsg(..), DataUpdateMsg(..)
-  , DataErrorIndex(..), SubErrorIndex(..))
+import ClMsgTypes exposing (DataErrorIndex(..), SubErrorIndex(..))
 import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData)
 import SequenceOps exposing (SeqOp(..))
 import RemoteState exposing (RemoteState, NodeMap, TypeAssignMap, TypeMap, Valuespace, vsEmpty, ByNs)
@@ -181,6 +180,12 @@ type alias CreateOp =
   }
 
 type alias Creates = Dict Path (CmpDict Placeholder Seg (Maybe Attributee, CreateOp))
+
+ntsCmp : Cmp (Namespace, Tagged a Seg) (Seg, Seg)
+ntsCmp =
+  { toCmp = \(Tagged ns, Tagged s) -> (ns, s)
+  , fromCmp = \(ns, s) -> (Tagged ns, Tagged s)
+  }
 
 type alias TrcUpdateDigest =
   { ns : Namespace

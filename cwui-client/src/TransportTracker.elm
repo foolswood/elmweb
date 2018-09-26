@@ -1,4 +1,4 @@
-module TransportTracker exposing (transport, transportSubs, Transport, TransportLoadError(..), TransportState(..), transportCueDum)
+module TransportTracker exposing (transport, transportSubs, Transport, TransportLoadError(..), TransportState(..), transportCueDd)
 
 import Dict
 import Set exposing (Set)
@@ -11,7 +11,7 @@ import ClTypes exposing (Time, Namespace, WireValue(..), fromTime, fromFloat, At
 import ClNodes exposing (Node(ConstDataNode), ConstData)
 import RemoteState exposing (RemoteState, Valuespace)
 import PathManipulation exposing (appendSeg, asPath)
-import ClMsgTypes exposing (DataUpdateMsg(MsgConstSet))
+import Digests exposing (DataChange(..), DataDigest)
 
 type TransportState
   = TransportStopped
@@ -108,10 +108,6 @@ transportSubs (Tagged ns) rs =
         ]
   in CSet.fromList tagCmp <| List.map Tagged <| ("relay", "/owners") :: ownerRefPath :: nsTransp ++ oipl
 
-transportCueDum : Time -> DataUpdateMsg
-transportCueDum t = MsgConstSet
-  { msgPath = "/transport/cue"
-  , msgTypes = [WtTime]
-  , msgArgs = [WvTime t]
-  , msgAttributee = Nothing
-  }
+transportCueDd : Time -> DataDigest
+transportCueDd t = Dict.singleton "/transport/cue"
+    <| ConstChange (Nothing, [WtTime], [WvTime t])

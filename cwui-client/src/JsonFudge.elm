@@ -1,4 +1,4 @@
-module JsonFudge exposing (serialiseBundle, parseDigest)
+module JsonFudge exposing (serialiseDigest, parseDigest)
 
 import Json.Encode as JE
 import Json.Decode as JD
@@ -12,8 +12,6 @@ import ClTypes exposing
   , PostDefinition, AtomDef , InterpolationLimit(..) , ChildDescription
   , WireValue(..), WireType(..), SubPath, typeNameGetNs, typeNameGetSeg)
 import ClSpecParser exposing (parseAtomDef)
-import ClMsgTypes exposing (..)
-
 import Cmp.Set as CSet
 import Cmp.Dict as CDict exposing (CmpDict)
 import Digests exposing
@@ -22,6 +20,7 @@ import Digests exposing
 import SequenceOps exposing (SeqOp(..))
 import Tagged.Dict as TD exposing (TaggedDict)
 import Tagged.Set as TS
+import ClMsgTypes exposing (SubErrorIndex(..), DataErrorIndex(..))
 
 -- Json serialisation fudging
 
@@ -53,22 +52,8 @@ encodeNs = encodeTaggedSeg
 encodePath : Path -> JE.Value
 encodePath = JE.string
 
-encodeTypeName : Tagged a TypeName -> JE.Value
-encodeTypeName (Tagged (ns, seg)) = JE.object
-  [ ("ns", encodeSeg ns)
-  , ("seg", encodeSeg seg)]
-
 encodeSubPath : SubPath -> JE.Value
 encodeSubPath (Tagged p) = encodePair encodeSeg encodePath p
-
-encodeSubMsg : SubMsg -> JE.Value
-encodeSubMsg sm = JE.list <| case sm of
-    MsgSub p -> [JE.string "S", encodePath p]
-    MsgTypeSub tn -> [JE.string "T", encodeTaggedSeg tn]
-    MsgPostTypeSub tn -> [JE.string "P", encodeTaggedSeg tn]
-    MsgUnsub p -> [JE.string "s", encodePath p]
-    MsgTypeUnsub tn -> [JE.string "t", encodeTaggedSeg tn]
-    MsgPostTypeUnsub tn -> [JE.string "p", encodeTaggedSeg tn]
 
 encodeTime : Time -> JE.Value
 encodeTime (s, f) = JE.list [JE.int s, JE.int f]
@@ -103,90 +88,12 @@ encodeWv wt wv =
     [ ("type", JE.string (typeTag wt))
     , ("val", encodeWv wv)]
 
-encodePathField : Path -> (String, JE.Value)
-encodePathField p = ("path", JE.string p)
-
 encodeAttributee : Maybe Attributee -> JE.Value
 encodeAttributee = encodeNullable JE.string
-
-encodeAttributeeField : Maybe Attributee -> (String, JE.Value)
-encodeAttributeeField ma = ("att", encodeAttributee ma)
 
 encodeInterpolation i = case i of
     IConstant -> tagged 'C' (JE.list [])
     ILinear -> tagged 'L' (JE.list [])
-
-dumToJsonValue : DataUpdateMsg -> JE.Value
-dumToJsonValue dum =
-  let
-    encodeTpIdField tpid = ("tpid", JE.int tpid)
-    encodeArgsField types args = ("args", JE.list (List.map2 encodeWv types args))
-    encodeConstSet {msgPath, msgTypes, msgArgs, msgAttributee} = JE.object
-        [ encodePathField msgPath
-        , encodeArgsField msgTypes msgArgs
-        , encodeAttributeeField msgAttributee
-        ]
-    encodeSet {msgPath, msgTpId, msgTime, msgTypes, msgArgs, msgInterpolation, msgAttributee} = JE.object
-        [ encodePathField msgPath
-        , encodeTpIdField msgTpId
-        , ("time", encodeTime msgTime)
-        , encodeArgsField msgTypes msgArgs
-        , ("interpolation", encodeInterpolation msgInterpolation)
-        , encodeAttributeeField msgAttributee
-        ]
-    encodeRemove {msgPath, msgTpId, msgAttributee} = JE.object
-        [ encodePathField msgPath
-        , encodeTpIdField msgTpId
-        , encodeAttributeeField msgAttributee
-        ]
-  in
-    case dum of
-        MsgConstSet m -> tagged 'S' (encodeConstSet m)
-        MsgSet m -> tagged 's' (encodeSet m)
-        MsgRemove m -> tagged 'r' (encodeRemove m)
-
-encodeTgtField : Seg -> (String, JE.Value)
-encodeTgtField tgt = ("tgt", encodeSeg tgt)
-
-encodeRefField : Maybe Seg -> (String, JE.Value)
-encodeRefField ref = ("ref", encodeNullable encodeSeg ref)
-
-providerContToJsonValue : ToProviderContainerUpdateMsg -> JE.Value
-providerContToJsonValue m = case m of
-    MsgCreateAfter {msgPostArgs, msgTgt, msgRef, msgAttributee} -> tagged '+' <| JE.object
-      [ ("args", JE.list <| List.map (JE.list << List.map (uncurry encodeWv)) msgPostArgs)
-      , ("tgt", encodePlaceholder msgTgt)
-      , ("ref", encodeNullable (encodeEither encodePlaceholder encodeSeg) msgRef)
-      , encodeAttributeeField msgAttributee
-      ]
-    MsgMoveAfter {msgTgt, msgRef, msgAttributee} -> tagged '>' <| JE.object
-      [ encodeTgtField msgTgt
-      , encodeRefField msgRef
-      , encodeAttributeeField msgAttributee
-      ]
-    MsgDelete {msgTgt, msgAttributee} -> tagged '-' <| JE.object
-      [ encodeTgtField msgTgt
-      , encodeAttributeeField msgAttributee
-      ]
-
-encodeUpdateBundle : ToRelayUpdateBundle -> Time -> JE.Value
-encodeUpdateBundle (ToRelayUpdateBundle ns dums conts) t = JE.object
-  [ ("ns", encodeNs ns)
-  , ("data", JE.list (List.map dumToJsonValue dums))
-  , ("cont", JE.list (List.map (encodePair encodePath providerContToJsonValue) conts))
-  ]
-
-encodeSubBundle : ToRelaySubBundle -> Time -> JE.Value
-encodeSubBundle (ToRelaySubBundle subs) t = JE.object
-  [ ("subMsgs", JE.list (List.map (encodePair encodeNs encodeSubMsg) subs)) ]
-
-serialiseBundle : ToRelayClientBundle -> Time -> String
-serialiseBundle b t = JE.encode 2 <| JE.object
-  [ ("time", encodeTime t)
-  , ("val", case b of
-        Trcub ub -> tagged 'U' <| encodeUpdateBundle ub t
-        Trcsb sb -> tagged 'S' <| encodeSubBundle sb t)
-  ]
 
 encodeDict : (comparable -> JE.Value) -> (v -> JE.Value) -> Dict comparable v -> JE.Value
 encodeDict ek ev d = JE.list <| List.map (encodePair ek ev) <| Dict.toList d
@@ -240,7 +147,7 @@ encodeSubOp o = case o of
     Unsubscribe -> JE.string "U"
 
 encodeTypePtr : (Namespace, Tagged a Seg) -> JE.Value
-encodeTypePtr (ns, Tagged s) = encodePair encodeNs encodeSeg (ns, s)
+encodeTypePtr = encodePair encodeNs encodeTaggedSeg
 
 encodeTrcsd : TrcSubDigest -> JE.Value
 encodeTrcsd trcsd = JE.object

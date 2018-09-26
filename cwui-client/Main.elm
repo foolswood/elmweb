@@ -14,15 +14,13 @@ import Cmp.Dict as CDict
 import Tagged.Tagged exposing (Tagged(..), tagCmp)
 import Tagged.Set as TS exposing (TaggedSet)
 import Tagged.Dict as TD
-import JsonFudge exposing (serialiseBundle, parseDigest)
+import JsonFudge exposing (serialiseDigest, parseDigest)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
-import ClMsgTypes exposing
-  ( ToRelayClientBundle(..), SubMsg(..) , DataErrorIndex(..)
-  , ToRelayUpdateBundle(..), ToRelaySubBundle(..))
-import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault)
+import ClMsgTypes exposing (DataErrorIndex(..))
+import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault, Either(..))
 import PathManipulation exposing (appendSeg)
-import Digests exposing (Digest, DataChange(..), Cops, seriesChangeCast, constChangeCast, TaOp, applyDigest)
+import Digests exposing (Digest, DataChange(..), ToRelayDigest(..), TrcUpdateDigest, TrcSubDigest, Cops, seriesChangeCast, constChangeCast, TaOp, applyDigest, ntsCmp, SubOp(..))
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, requiredPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
 import Layout exposing (BoundLayout(..), ChildSource(..))
@@ -36,7 +34,7 @@ import EditTypes exposing
   , PendingActions(..), ChildSourceStateId, DataSourceId)
 import SequenceOps exposing (SeqOp(..))
 import Transience
-import TransportTracker exposing (transportSubs, transport, transportCueDum)
+import TransportTracker exposing (transportSubs, transport, transportCueDd)
 import TransportClockView exposing (transportClockView)
 import TimeSeriesView exposing (TsModel, tsModelEmpty, TsMsg, viewTimeSeries, TsExternalMsg(..), processTimeSeriesEvent)
 import TimeSeries
@@ -168,8 +166,8 @@ init =
 
 -- Update
 
-sendBundle : ToRelayClientBundle -> Cmd Msg
-sendBundle b = WebSocket.send wsTarget <| serialiseBundle b <| fromFloat <| MonoTime.rightNow ()
+sendDigest : ToRelayDigest -> Cmd Msg
+sendDigest d = WebSocket.send wsTarget <| serialiseDigest d <| fromFloat <| MonoTime.rightNow ()
 
 subDiffToCmd
    : CmpSet SubPath (Seg, Path) -> TaggedSet PostDefinition TypeName -> CmpSet SubPath (Seg, Path)
@@ -177,15 +175,18 @@ subDiffToCmd
 subDiffToCmd oldP oldPt newP newPt =
   let
     mapLod a b f = List.map f <| CSet.toList <| CSet.diff a b
-    paOps = mapLod newP oldP <| \(Tagged (ns, p)) -> (Tagged ns, MsgSub p)
-    prOps = mapLod oldP newP <| \(Tagged (ns, p)) -> (Tagged ns, MsgUnsub p)
+    paOps = mapLod newP oldP <| \sp -> (sp, Subscribe)
+    prOps = mapLod oldP newP <| \sp -> (sp, Unsubscribe)
     taOps = mapLod newPt oldPt <|
-        \(Tagged (ns, ts)) -> (Tagged ns, MsgPostTypeSub <| Tagged ts)
+        \(Tagged (ns, ts)) -> ((Tagged ns, Tagged ts), Subscribe)
     trOps = mapLod oldPt newPt <|
-        \(Tagged (ns, ts)) -> (Tagged ns, MsgPostTypeUnsub <| Tagged ts)
-  in case paOps ++ prOps ++ taOps ++ trOps of
-    [] -> Cmd.none
-    subOps -> sendBundle <| Trcsb <| ToRelaySubBundle subOps
+        \(Tagged (ns, ts)) -> ((Tagged ns, Tagged ts), Unsubscribe)
+  in case (paOps ++ prOps, taOps ++ trOps) of
+    ([], []) -> Cmd.none
+    (dSos, ptSos) -> sendDigest <| Trcsd <| TrcSubDigest
+        (CDict.fromList ntsCmp ptSos)
+        (CDict.empty ntsCmp)
+        (CDict.fromList tagCmp dSos)
 
 type Msg
   = AddError DataErrorIndex String
@@ -305,10 +306,10 @@ update msg model = case msg of
         SpeClock ns evt -> case evt of
             EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
             EeSubmit t ->
-              (model, sendBundle <| Trcub <| ToRelayUpdateBundle ns [transportCueDum t] [])
+              (model, sendDigest <| Trcud <| TrcUpdateDigest ns (transportCueDd t) Dict.empty Dict.empty)
     TsUiEvent tsMsg -> case processTimeSeriesEvent tsMsg <| getTsModel (Tagged "FIXME") model of
         -- FIXME: Hard coded clock source
-        TsemSeek t -> (model, sendBundle <| Trcub <| ToRelayUpdateBundle (Tagged "engine") [transportCueDum t] [])
+        TsemSeek t -> (model, sendDigest <| Trcud <| TrcUpdateDigest (Tagged "engine") (transportCueDd t) Dict.empty Dict.empty)
         -- FIXME: Does nothing
         _ -> (model, Cmd.none)
     NodeUiEvent (sp, ue) ->
@@ -326,49 +327,47 @@ update msg model = case msg of
                     TupleDef {types} ->
                       let
                         -- FIXME: Doesn't check anything lines up
-                        dum = ClMsgTypes.MsgConstSet
-                          { msgPath = p
-                          , msgTypes = List.map (defWireType << Tuple.second) types
-                          , msgArgs = wvs
-                          , msgAttributee = Nothing
-                          }
-                        b = ToRelayUpdateBundle ns [dum] []
+                        du = ConstChange (Nothing, List.map (defWireType << Tuple.second) types, wvs)
+                        d = TrcUpdateDigest ns (Dict.singleton p du) Dict.empty Dict.empty
                         newM =
                           { model
                           | pending = CDict.update ns (Maybe.map <| Dict.insert p <| PaConst wvs) <| .pending model
                           , nodeFs = CDict.update ns (Maybe.map <| formInsert p Nothing) <| .nodeFs model
                           }
-                      in (newM, sendBundle <| Trcub b)
+                      in (newM, sendDigest <| Trcud d)
                     _ -> addDGlobalError "Def type mismatch" model
             NaSeries sops -> addDGlobalError "Series submit not implemented" model
             NaChildren nac -> case remoteStateLookup ns p <| latestState model of
                 Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
                 Ok (_, def, _, postability) ->
                   let
-                    updateCmd m = sendBundle <| Trcub <| ToRelayUpdateBundle ns [] [(p, m)]
+                    updateCmd creates sos = sendDigest <| Trcud <| TrcUpdateDigest ns Dict.empty creates sos
                   in case def of
                     ArrayDef _ -> case nac of
                         NacMove tgt ref ->
                           ( modifyPendingChildren
                               (Dict.insert tgt (SoPresentAfter ref)) ns p model
-                          , updateCmd <| ClMsgTypes.MsgMoveAfter
-                              {msgTgt=tgt, msgRef=ref, msgAttributee=Nothing}
+                          , updateCmd Dict.empty <| Dict.singleton p <|
+                                Dict.singleton tgt (Nothing, SoPresentAfter <| Maybe.map Right ref)
                           )
                         NacDelete tgt ->
                           ( modifyPendingChildren
                                 (Dict.insert tgt SoAbsent) ns p model
-                          , updateCmd <| ClMsgTypes.MsgDelete
-                              {msgTgt=tgt, msgAttributee=Nothing}
+                          , updateCmd Dict.empty <| Dict.singleton p <| Dict.singleton tgt (Nothing, SoAbsent)
                           )
                         NacCreate ref postArgs -> case postability of
                             RemoteState.PostableLoaded _ pdef ->
                                 ( modifyChildPending
                                     (\p -> {p | creates = CDict.insert phPh (ref, postArgs) <| .creates p})
                                     ns p model
-                                , updateCmd <| ClMsgTypes.MsgCreateAfter
-                                    {msgTgt=phPh, msgRef = ref, msgAttributee=Nothing, msgPostArgs = List.map2
-                                        (\fieldDesc wvs -> Futility.zip (List.map defWireType <| Tuple.second fieldDesc) wvs)
-                                        (.fieldDescs pdef) postArgs}
+                                , updateCmd
+                                    (Dict.singleton p <| CDict.singleton tagCmp phPh (Nothing,
+                                        { args = List.map2
+                                            (\fieldDesc wvs -> Futility.zip (List.map defWireType <| Tuple.second fieldDesc) wvs)
+                                            (.fieldDescs pdef) postArgs
+                                        , after = ref
+                                        }))
+                                    Dict.empty
                                 )
                             _ -> addDGlobalError "Create on unpostable type" model
                         NacSelect cssid seg -> modifySelection (CSet.insert (appendSegSp sp seg)) cssid model
