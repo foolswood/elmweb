@@ -1,8 +1,7 @@
 module Digests exposing
   ( Digest, applyDigest, TaOp, Cops, DataChange(..), ConstChangeT
   , constChangeCast, TimeChangeT, seriesChangeCast, TimeSeriesDataOp(..)
-  , DataDigest, DefOp(..), NsDigest
-  , digestFrseb)
+  , DataDigest, DefOp(..), NsDigest)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
@@ -11,16 +10,12 @@ import Cmp.Set as CSet
 import Cmp.Dict as CDict
 import Tagged.Tagged as T exposing (Tagged(..))
 import Tagged.Dict as TD exposing (TaggedDict)
-import Tagged.Set as TS exposing (TaggedSet)
 import ClTypes exposing
-  ( Path, Seg, Namespace, TpId, Interpolation, Time, Attributee
-  , WireValue, WireType, Definition, PostDefinition, Editable, TypeName
-  , typeNameGetNs, typeNameGetSeg)
+  ( Path, Seg, Namespace, TpId, Interpolation, Time, Attributee, WireValue
+  , WireType, Definition, PostDefinition, Editable, TypeName)
 import ClMsgTypes exposing
-  ( FromRelayClientBundle(..), FromRelayClientUpdateBundle(..)
-  , FromRelaySubErrorBundle(..), FromRelayRootBundle(..), TypeMsg(..)
-  , DefMsg(..) , ToProviderContainerUpdateMsg(..), ToClientContainerUpdateMsg(..)
-  , DataUpdateMsg(..), dumPath, DataErrorIndex(..), MsgError(..), SubErrorIndex(..))
+  ( DefMsg(..), ToProviderContainerUpdateMsg(..), DataUpdateMsg(..)
+  , DataErrorIndex(..), SubErrorIndex(..))
 import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData)
 import SequenceOps exposing (SeqOp(..))
 import RemoteState exposing (RemoteState, NodeMap, TypeAssignMap, TypeMap, Valuespace, vsEmpty, ByNs)
@@ -126,41 +121,6 @@ type alias Digest =
   , rootCops : Cops
   , subErrs : List (SubErrorIndex, List String)
   }
-
-unErrMsg : MsgError i -> (i, List String)
-unErrMsg (MsgError i s) = (i, [s])
-
-digestFrseb : FromRelaySubErrorBundle -> Digest
-digestFrseb (FromRelaySubErrorBundle errs pUnsubs tUnsubs dUnsubs) =
-  let
-    insertUndef ts = CDict.insert ts OpUndefine
-    insertUnsub p = Dict.insert p DeletedChange
-    nsOrient = List.foldl
-        (\tn -> CDict.update
-            (typeNameGetNs tn)
-            (Just << (\a -> typeNameGetSeg tn :: a) << Maybe.withDefault []))
-        TD.empty
-    nsoPuns = nsOrient pUnsubs
-    nsoTuns = nsOrient tUnsubs
-    nsoDuns = List.foldl
-        (\(Tagged (ns, p)) -> CDict.update (Tagged ns) (Just << (\a -> p :: a) << Maybe.withDefault []))
-        TD.empty dUnsubs
-    mentionedNss = TS.fromList <| CDict.keys nsoPuns ++ CDict.keys nsoTuns ++ CDict.keys nsoDuns
-    forNs ns conv nsoUnsubs = case CDict.get ns nsoUnsubs of
-        Nothing -> TD.empty
-        Just unsubs -> List.foldl conv TD.empty unsubs
-    genNsd ns = CDict.insert ns
-      { postDefs = forNs ns insertUndef nsoPuns
-      , defs = forNs ns insertUndef nsoTuns
-      , dops = case CDict.get ns nsoDuns of
-            Nothing -> Dict.empty
-            Just unsubs -> List.foldl insertUnsub Dict.empty unsubs
-      , taOps = Dict.empty
-      , cops = Dict.empty
-      , errs = []
-      }
-    nsds = CSet.foldl genNsd TD.empty mentionedNss
-  in {rootCops = Dict.empty, nsds = nsds, subErrs = List.map unErrMsg errs}
 
 applyNsDigest : NsDigest -> Valuespace -> (Valuespace, List (DataErrorIndex, List String))
 applyNsDigest d rs =
