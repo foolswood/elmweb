@@ -153,3 +153,13 @@ defWireType def = case def of
     ADRef _ -> WtString
     ADList subDef -> WtList <| defWireType subDef
     ADSet subDef -> WtList <| defWireType subDef
+
+type SubErrorIndex
+  = SPathError SubPath
+  | STypeError (Tagged Definition TypeName)
+  | SPostTypeError (Tagged PostDefinition TypeName)
+
+type DataErrorIndex
+  = DGlobalError
+  | DPathError Path
+  | DTimePointError Path TpId

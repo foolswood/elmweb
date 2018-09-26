@@ -17,7 +17,6 @@ import Tagged.Dict as TD
 import JsonFudge exposing (serialiseDigest, parseDigest)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
-import ClMsgTypes exposing (DataErrorIndex(..))
 import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault, Either(..))
 import PathManipulation exposing (appendSeg)
 import Digests exposing (Digest, DataChange(..), ToRelayDigest(..), TrcUpdateDigest, TrcSubDigest, Cops, seriesChangeCast, constChangeCast, TaOp, applyDigest, ntsCmp, SubOp(..))

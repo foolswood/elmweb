@@ -14,8 +14,8 @@ import Tagged.Tagged as T exposing (Tagged(..))
 import Tagged.Dict as TD exposing (TaggedDict)
 import ClTypes exposing
   ( Path, Seg, Namespace, TpId, Interpolation, Time, Attributee, WireValue
-  , WireType, Definition, PostDefinition, Editable, TypeName, SubPath, Placeholder)
-import ClMsgTypes exposing (DataErrorIndex(..), SubErrorIndex(..))
+  , WireType, Definition, PostDefinition, Editable, TypeName, SubPath
+  , Placeholder, DataErrorIndex(..), SubErrorIndex(..))
 import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData)
 import SequenceOps exposing (SeqOp(..))
 import RemoteState exposing (RemoteState, NodeMap, TypeAssignMap, TypeMap, Valuespace, vsEmpty, ByNs)

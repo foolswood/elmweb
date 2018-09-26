@@ -10,7 +10,8 @@ import ClTypes exposing
   ( Namespace, Placeholder, Path, Time, Interpolation(..), TpId, Seg
   , Attributee , TypeName, typeName, Editable(..), Definition(..)
   , PostDefinition, AtomDef , InterpolationLimit(..) , ChildDescription
-  , WireValue(..), WireType(..), SubPath, typeNameGetNs, typeNameGetSeg)
+  , WireValue(..), WireType(..), SubPath, typeNameGetNs, typeNameGetSeg
+  , SubErrorIndex(..), DataErrorIndex(..))
 import ClSpecParser exposing (parseAtomDef)
 import Cmp.Set as CSet
 import Cmp.Dict as CDict exposing (CmpDict)
@@ -20,7 +21,6 @@ import Digests exposing
 import SequenceOps exposing (SeqOp(..))
 import Tagged.Dict as TD exposing (TaggedDict)
 import Tagged.Set as TS
-import ClMsgTypes exposing (SubErrorIndex(..), DataErrorIndex(..))
 
 -- Json serialisation fudging
 
