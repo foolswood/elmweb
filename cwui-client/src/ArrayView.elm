@@ -97,7 +97,7 @@ segChooserWidget cssid isSelected additionalAttrFactory segText seg =
             [H.text segText]
 
 viewArray
-   : ChildSourceStateId -> (Seg -> Bool) -> Editable -> ArrayDefinition -> Postability -> List Cops
+   : ChildSourceStateId -> (Seg -> Bool) -> Editable -> ArrayDefinition -> Postability -> List (Cops Seg)
   -> ContainerNodeT -> FormState NeChildrenT -> Maybe PaChildrenT
   -> Html ContainerEdit
 viewArray cssid isSelected editable arrayDef postability recentCops n s mp =

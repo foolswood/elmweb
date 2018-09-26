@@ -568,7 +568,7 @@ viewCasted h r = case r of
     Err m -> text m
 
 viewNode
-   : (Seg -> Bool) -> Editable -> Definition -> Postability -> Node -> List Cops
+   : (Seg -> Bool) -> Editable -> Definition -> Postability -> Node -> List (Cops Seg)
   -> List DataChange -> FormState NodeEdit -> Maybe PendingActions -> ChildSourceStateId
   -> Html (EditEvent NodeEdit NodeAction)
 viewNode isSelected editable def postability node recentCops recentDums formState maybeNas cssid =

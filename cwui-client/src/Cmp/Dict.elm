@@ -1,6 +1,6 @@
 module Cmp.Dict exposing
   ( CmpDict, empty, singleton, fromList, insert, remove, get, getWithDefault
-  , keys , values, foldl, update, map)
+  , toList, keys , values, foldl, update, map)
 
 import Dict exposing (Dict)
 
@@ -28,6 +28,9 @@ get k (CmpDict cmp d) = Dict.get (.toCmp cmp k) d
 
 getWithDefault : v -> k -> CmpDict k comparable v -> v
 getWithDefault v k cd = Maybe.withDefault v <| get k cd
+
+toList : CmpDict k comparable v -> List (k, v)
+toList (CmpDict cmp d) = List.map (Tuple.mapFirst <| .fromCmp cmp) <| Dict.toList d
 
 keys : CmpDict k comparable v -> List k
 keys (CmpDict cmp d) = List.map (.fromCmp cmp) <| Dict.keys d

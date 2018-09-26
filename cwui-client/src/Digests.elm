@@ -1,24 +1,26 @@
 module Digests exposing
   ( Digest, applyDigest, TaOp, Cops, DataChange(..), ConstChangeT
   , constChangeCast, TimeChangeT, seriesChangeCast, TimeSeriesDataOp(..)
-  , DataDigest, DefOp(..), NsDigest)
+  , DataDigest, DefOp(..), NsDigest, TrcUpdateDigest, CreateOp, TrcSubDigest
+  , SubOp(..), ToRelayDigest(..))
 
 import Dict exposing (Dict)
 import Set exposing (Set)
 
 import Cmp.Set as CSet
-import Cmp.Dict as CDict
+import Cmp.Dict as CDict exposing (CmpDict)
 import Tagged.Tagged as T exposing (Tagged(..))
 import Tagged.Dict as TD exposing (TaggedDict)
 import ClTypes exposing
   ( Path, Seg, Namespace, TpId, Interpolation, Time, Attributee, WireValue
-  , WireType, Definition, PostDefinition, Editable, TypeName)
+  , WireType, Definition, PostDefinition, Editable, TypeName, SubPath, Placeholder)
 import ClMsgTypes exposing
   ( DefMsg(..), ToProviderContainerUpdateMsg(..), DataUpdateMsg(..)
   , DataErrorIndex(..), SubErrorIndex(..))
 import ClNodes exposing (childUpdate, removeTimePoint, setTimePoint, setConstData)
 import SequenceOps exposing (SeqOp(..))
 import RemoteState exposing (RemoteState, NodeMap, TypeAssignMap, TypeMap, Valuespace, vsEmpty, ByNs)
+import Futility exposing (Either)
 
 failyUpdate
    : (Maybe a -> Result e a) -> (e -> e1) -> comparable
@@ -74,10 +76,10 @@ ddApply dd nodeMap =
         DeletedChange -> (errs, Dict.remove p nm)  -- FIXME: Too idempotent?
   in Dict.foldl dcApply ([], nodeMap) dd
 
-type alias Cops = Dict Seg (Maybe Attributee, SeqOp Seg)
-type alias CmDigest = Dict Path Cops
+type alias Cops a = Dict Seg (Maybe Attributee, SeqOp a)
+type alias CmDigest a = Dict Path (Cops a)
 
-applyCms : CmDigest -> NodeMap -> (List (Path, String), NodeMap)
+applyCms : CmDigest Seg -> NodeMap -> (List (Path, String), NodeMap)
 applyCms cms nm =
   let
     applyOps p ops = failyUpdate (childUpdate ops) identity p
@@ -111,14 +113,14 @@ type alias NsDigest =
   { postDefs : DefOps PostDefinition
   , defs : DefOps Definition
   , taOps : TaOps
-  , cops : CmDigest
+  , cops : CmDigest Seg
   , dops : DataDigest
   , errs : List (DataErrorIndex, List String)
   }
 
 type alias Digest =
   { nsds : ByNs NsDigest
-  , rootCops : Cops
+  , rootCops : Cops Seg
   , subErrs : List (SubErrorIndex, List String)
   }
 
@@ -160,3 +162,33 @@ applyDigest d rs =
             (CDict.insert ns newVs ars, CDict.insert ns es aerrs)
     (appliedVss, errs) = CDict.foldl applyNsd (nsCorrectedVss, TD.empty) <| .nsds d
   in (appliedVss, errs)
+
+-- To relay:
+
+type SubOp
+  = Subscribe
+  | Unsubscribe
+
+type alias TrcSubDigest =
+  { postTypes : CmpDict (Namespace, Tagged PostDefinition Seg) (Seg, Seg) SubOp
+  , types : CmpDict (Namespace, Tagged Definition Seg) (Seg, Seg) SubOp
+  , data : CmpDict SubPath (Seg, Path) SubOp
+  }
+
+type alias CreateOp =
+  { args : List (List (WireType, WireValue))
+  , after : Maybe (Either Placeholder Seg)
+  }
+
+type alias Creates = Dict Path (CmpDict Placeholder Seg (Maybe Attributee, CreateOp))
+
+type alias TrcUpdateDigest =
+  { ns : Namespace
+  , dd : DataDigest
+  , creates : Creates
+  , co : CmDigest (Either Placeholder Seg)
+  }
+
+type ToRelayDigest
+  = Trcsd TrcSubDigest
+  | Trcud TrcUpdateDigest

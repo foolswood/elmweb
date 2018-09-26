@@ -10,16 +10,15 @@ import ClTypes exposing
   ( Namespace, Placeholder, Path, Time, Interpolation(..), TpId, Seg
   , Attributee , TypeName, typeName, Editable(..), Definition(..)
   , PostDefinition, AtomDef , InterpolationLimit(..) , ChildDescription
-  , WireValue(..), WireType(..), SubPath
-  , typeNameGetNs, typeNameGetSeg)
+  , WireValue(..), WireType(..), SubPath, typeNameGetNs, typeNameGetSeg)
 import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
 
 import Cmp.Set as CSet
-import Cmp.Dict as CDict
+import Cmp.Dict as CDict exposing (CmpDict)
 import Digests exposing
   ( Digest, DefOp(..), DataDigest, DataChange(..), ConstChangeT
-  , TimeSeriesDataOp(..), NsDigest, Cops)
+  , TimeSeriesDataOp(..), NsDigest, Cops, TrcUpdateDigest, CreateOp, TrcSubDigest, SubOp(..), ToRelayDigest(..))
 import SequenceOps exposing (SeqOp(..))
 import Tagged.Dict as TD exposing (TaggedDict)
 import Tagged.Set as TS
@@ -107,15 +106,19 @@ encodeWv wt wv =
 encodePathField : Path -> (String, JE.Value)
 encodePathField p = ("path", JE.string p)
 
+encodeAttributee : Maybe Attributee -> JE.Value
+encodeAttributee = encodeNullable JE.string
+
 encodeAttributeeField : Maybe Attributee -> (String, JE.Value)
-encodeAttributeeField ma = ("att", encodeNullable JE.string ma)
+encodeAttributeeField ma = ("att", encodeAttributee ma)
+
+encodeInterpolation i = case i of
+    IConstant -> tagged 'C' (JE.list [])
+    ILinear -> tagged 'L' (JE.list [])
 
 dumToJsonValue : DataUpdateMsg -> JE.Value
 dumToJsonValue dum =
   let
-    encodeInterpolation i = case i of
-        IConstant -> tagged 'C' (JE.list [])
-        ILinear -> tagged 'L' (JE.list [])
     encodeTpIdField tpid = ("tpid", JE.int tpid)
     encodeArgsField types args = ("args", JE.list (List.map2 encodeWv types args))
     encodeConstSet {msgPath, msgTypes, msgArgs, msgAttributee} = JE.object
@@ -184,6 +187,77 @@ serialiseBundle b t = JE.encode 2 <| JE.object
         Trcub ub -> tagged 'U' <| encodeUpdateBundle ub t
         Trcsb sb -> tagged 'S' <| encodeSubBundle sb t)
   ]
+
+encodeDict : (comparable -> JE.Value) -> (v -> JE.Value) -> Dict comparable v -> JE.Value
+encodeDict ek ev d = JE.list <| List.map (encodePair ek ev) <| Dict.toList d
+
+encodeCDict : (k -> JE.Value) -> (v -> JE.Value) -> CmpDict k comparable v -> JE.Value
+encodeCDict ek ev d = JE.list <| List.map (encodePair ek ev) <| CDict.toList d
+
+encodeTsdo : TimeSeriesDataOp -> JE.Value
+encodeTsdo tsdo = case tsdo of
+    OpSet t wts wvs i -> tagged 's' <| JE.object
+      [ ("time", encodeTime t)
+      , ("wvs", JE.list <| List.map2 encodeWv wts wvs)
+      , ("interp", encodeInterpolation i)
+      ]
+    OpRemove -> tagged 'r' JE.null
+
+encodeDataChange : DataChange -> JE.Value
+encodeDataChange dc = case dc of
+    ConstChange (ma, wts, wvs) -> tagged 'c' <| encodePair encodeAttributee JE.list (ma, List.map2 encodeWv wts wvs)
+    TimeChange tc -> tagged 't' <| encodeDict JE.int (encodePair encodeAttributee encodeTsdo) tc
+    DeletedChange -> JE.string "somehow got a deleted"
+
+encodeCreateOp : CreateOp -> JE.Value
+encodeCreateOp {args, after} = JE.object
+  [ ("args", JE.list <| List.map (JE.list << List.map (uncurry encodeWv)) args)
+  , ("after", encodeNullable (encodeEither encodePlaceholder encodeSeg) after)
+  ]
+
+encodeCreates : CmpDict Placeholder Seg (Maybe Attributee, CreateOp) -> JE.Value
+encodeCreates = encodeCDict encodePlaceholder (encodePair encodeAttributee encodeCreateOp)
+
+encodeSeqOp : SeqOp (Either Placeholder Seg) -> JE.Value
+encodeSeqOp op = case op of
+    SoPresentAfter ref -> tagged '>' <| encodeNullable (encodeEither encodePlaceholder encodeSeg) ref
+    SoAbsent -> tagged '-' JE.null
+
+encodeCops : Cops (Either Placeholder Seg) -> JE.Value
+encodeCops = encodeDict encodeSeg <| encodePair encodeAttributee <| encodeSeqOp
+
+encodeTrcud : TrcUpdateDigest -> JE.Value
+encodeTrcud trcud = JE.object
+  [ ("ns", encodeNs <| .ns trcud)
+  , ("dd", encodeDict encodePath encodeDataChange <| .dd trcud)
+  , ("creates", encodeDict encodePath encodeCreates <| .creates trcud)
+  , ("co", encodeDict encodePath encodeCops <| .co trcud)
+  ]
+
+encodeSubOp : SubOp -> JE.Value
+encodeSubOp o = case o of
+    Subscribe -> JE.string "S"
+    Unsubscribe -> JE.string "U"
+
+encodeTypePtr : (Namespace, Tagged a Seg) -> JE.Value
+encodeTypePtr (ns, Tagged s) = encodePair encodeNs encodeSeg (ns, s)
+
+encodeTrcsd : TrcSubDigest -> JE.Value
+encodeTrcsd trcsd = JE.object
+  [ ("postTypes", encodeCDict encodeTypePtr encodeSubOp <| .postTypes trcsd)
+  , ("types", encodeCDict encodeTypePtr encodeSubOp <| .types trcsd)
+  , ("data", encodeCDict encodeSubPath encodeSubOp <| .data trcsd)
+  ]
+
+serialiseDigest : ToRelayDigest -> Time -> String
+serialiseDigest b t = JE.encode 2 <| JE.object
+  [ ("time", encodeTime t)
+  , ("val", case b of
+        Trcud ub -> tagged 'U' <| encodeTrcud ub
+        Trcsd sb -> tagged 'S' <| encodeTrcsd sb)
+  ]
+
+-- Decoding:
 
 decodePair : JD.Decoder a -> JD.Decoder b -> JD.Decoder (a, b)
 decodePair da db = JD.map2 (,) (JD.field "0" da) (JD.field "1" db)
@@ -412,7 +486,7 @@ decodeSeqOp = decodeTagged <| Dict.fromList
   , ("-", JD.succeed SoAbsent)
   ]
 
-decodeContOps : JD.Decoder Cops
+decodeContOps : JD.Decoder (Cops Seg)
 decodeContOps = decodeDict decodeSeg <|
     decodePair (JD.nullable decodeAttributee) decodeSeqOp
 
