@@ -14,9 +14,11 @@ import ClTypes exposing
 import ClSpecParser exposing (parseAtomDef)
 import ClMsgTypes exposing (..)
 
-import Digests exposing (Digest, digestFrcub, digestFrseb)
+import Digests exposing
+  ( Digest, digestFrseb, DefOp(..), DataDigest, DataChange(..)
+  , ConstChangeT, TimeSeriesDataOp(..), NsDigest, Cops)
 import SequenceOps exposing (SeqOp(..))
-import Tagged.Dict as TD
+import Tagged.Dict as TD exposing (TaggedDict)
 
 -- Json serialisation fudging
 
@@ -273,12 +275,6 @@ decodePostDef = JD.map2 PostDefinition
         (JD.field "seg" JD.string)
         (JD.field "tys" <| JD.list decodeAtomDef))
 
-decodeDefMsg : JD.Decoder a -> JD.Decoder (DefMsg a)
-decodeDefMsg defDec = decodeTagged (Dict.fromList
-  [ ("d", JD.map2 MsgDefine (JD.field "id" <| JD.map Tagged decodeSeg) (JD.field "def" defDec))
-  , ("u", JD.map MsgUndefine <| JD.map Tagged decodeSeg)
-  ])
-
 decodeEditable : JD.Decoder Editable
 decodeEditable =
   let
@@ -348,64 +344,6 @@ decodeTypeName : JD.Decoder (Tagged a TypeName)
 decodeTypeName = JD.map2 typeName
     (JD.field "0" decodeNs) (JD.field "1" <| JD.map Tagged decodeSeg)
 
-decodeTypeMsg : JD.Decoder TypeMsg
-decodeTypeMsg = JD.map3 MsgAssignType
-    decodePathField
-    (JD.field "typeName" <| JD.map Tagged decodeSeg)
-    (JD.field "ed" decodeEditable)
-
-decodeDum : JD.Decoder DataUpdateMsg
-decodeDum =
-  let
-    decodeArgsField = JD.field "args" (JD.map List.unzip (JD.list decodeWv))
-    decodeTpIdField = JD.field "tpid" decodeTpId
-    decodeInterpolationField = JD.field "interpolation" decodeInterpolation
-  in decodeTagged <| Dict.fromList
-    [ ("S", JD.map3
-        (\p (ts, vs) att -> MsgConstSet
-          { msgPath = p
-          , msgTypes = ts
-          , msgArgs = vs
-          , msgAttributee = att})
-        decodePathField
-        decodeArgsField
-        decodeAttributeeField)
-    , ("s", JD.map6
-        (\p tpid t (ts, vs) i a -> MsgSet
-          { msgPath=p, msgTpId=tpid, msgTime=t, msgTypes=ts
-          , msgArgs=vs, msgInterpolation=i, msgAttributee=a})
-        decodePathField
-        decodeTpIdField
-        (JD.field "time" decodeTime)
-        decodeArgsField
-        decodeInterpolationField
-        decodeAttributeeField)
-    , ("r", JD.map3
-        (\p tpid att -> MsgRemove
-          {msgPath = p, msgTpId = tpid, msgAttributee = att})
-        decodePathField
-        decodeTpIdField
-        decodeAttributeeField)
-    ]
-
-decodeCCm : JD.Decoder ToClientContainerUpdateMsg
-decodeCCm =
-  let
-    decodeTgtField = JD.field "tgt" decodeSeg
-  in decodeTagged <| Dict.fromList
-    [ (">", JD.map3
-          (\t r a -> MsgPresentAfter
-            {msgTgt = t, msgRef = r, msgAttributee = a})
-          decodeTgtField
-          (JD.field "ref" (JD.nullable decodeSeg))
-          decodeAttributeeField)
-    , ("-", JD.map2
-          (\t a -> MsgAbsent
-            {msgTgt = t, msgAttributee = a})
-          decodeTgtField
-          decodeAttributeeField)
-    ]
-
 parseSubBundle : JD.Decoder FromRelaySubErrorBundle
 parseSubBundle = JD.map4 FromRelaySubErrorBundle
     (JD.field "errs" (JD.list <| decodeErrMsg decodeSubErrIdx))
@@ -413,15 +351,25 @@ parseSubBundle = JD.map4 FromRelaySubErrorBundle
     (JD.field "tuns" (JD.list decodeTypeName))
     (JD.field "duns" (JD.list decodeSubPath))
 
-parseUpdateBundle : JD.Decoder FromRelayClientUpdateBundle
-parseUpdateBundle = JD.map7 FromRelayClientUpdateBundle
-    (JD.field "ns" <| JD.map Tagged JD.string)
-    (JD.field "errs" (JD.list <| decodeErrMsg decodeDataErrIdx))
-    (JD.field "pdefs" (JD.list <| decodeDefMsg decodePostDef))
-    (JD.field "defs" (JD.list <| decodeDefMsg decodeDef))
-    (JD.field "tas" (JD.list decodeTypeMsg))
-    (JD.field "dd" (JD.list decodeDum))
-    (JD.field "co" (JD.list <| decodePair decodePath decodeCCm))
+decodeDict : JD.Decoder comparable -> JD.Decoder v -> JD.Decoder (Dict comparable v)
+decodeDict dk dv = JD.map Dict.fromList <| JD.list <| decodePair dk dv
+
+decodeTaOps : JD.Decoder (Dict Path (Tagged Definition Seg, Editable))
+decodeTaOps = decodeDict decodePath <|
+    decodePair (JD.map Tagged decodeSeg) decodeEditable
+
+decodeDefOp : JD.Decoder a -> JD.Decoder (DefOp a)
+decodeDefOp defDec = decodeTagged <| Dict.fromList
+  [ ("d", JD.map OpDefine defDec)
+  , ("u", JD.succeed OpUndefine)
+  ]
+
+decodeDefs : JD.Decoder a -> JD.Decoder (TaggedDict a Seg (DefOp a))
+decodeDefs defDec = JD.map TD.fromList <| JD.list <| decodePair
+    (JD.map Tagged decodeSeg) <| decodeDefOp defDec
+
+decodeErr : JD.Decoder (DataErrorIndex, List String)
+decodeErr = decodePair decodeDataErrIdx (JD.list JD.string)
 
 decodeSeqOp : JD.Decoder (SeqOp Seg)
 decodeSeqOp = decodeTagged <| Dict.fromList
@@ -429,14 +377,54 @@ decodeSeqOp = decodeTagged <| Dict.fromList
   , ("-", JD.succeed SoAbsent)
   ]
 
-decodeContOps : JD.Decoder (Dict Seg (Maybe Attributee, SeqOp Seg))
-decodeContOps = JD.map Dict.fromList <| JD.list <| decodePair
-    decodeSeg
-    <| decodePair (JD.nullable decodeAttributee) decodeSeqOp
+decodeContOps : JD.Decoder Cops
+decodeContOps = decodeDict decodeSeg <|
+    decodePair (JD.nullable decodeAttributee) decodeSeqOp
+
+decodeConstChange : JD.Decoder ConstChangeT
+decodeConstChange = JD.map2 (\atts (wts, wvs) -> (atts, wts, wvs))
+    (JD.nullable decodeAttributee)
+    (JD.map List.unzip <| JD.list decodeWv)
+
+decodeTsdo : JD.Decoder TimeSeriesDataOp
+decodeTsdo = decodeTagged <| Dict.fromList <|
+  [ ("s", JD.map3 (\t (wts, wvs) i -> OpSet t wts wvs i)
+        (JD.field "time" decodeTime)
+        (JD.map List.unzip <| JD.field "wvs" <| JD.list decodeWv)
+        (JD.field "interp" decodeInterpolation))
+  , ("r", JD.succeed OpRemove)
+  ]
+
+decodeDataChange : JD.Decoder DataChange
+decodeDataChange = decodeTagged <| Dict.fromList
+  [ ("c", JD.map ConstChange decodeConstChange)
+  , ("t", JD.map TimeChange <| decodeDict
+        decodeTpId
+        <| JD.map2 (,) (JD.nullable decodeAttributee) decodeTsdo)
+  ]
+
+decodeData : JD.Decoder DataDigest
+decodeData = decodeDict decodePath decodeDataChange
+
+decodeNsd : JD.Decoder NsDigest
+decodeNsd = JD.map6
+    (\pd d ta co do e ->
+      {postDefs = pd, defs = d, taOps = ta, cops = co, dops = do, errs = e})
+    (JD.field "pdefs" <| decodeDefs decodePostDef)
+    (JD.field "defs" <| decodeDefs decodeDef)
+    (JD.field "tas" decodeTaOps)
+    (JD.field "co" <| decodeDict decodePath decodeContOps)
+    (JD.field "dd" decodeData)
+    (JD.field "errs" <| JD.list decodeErr)
 
 parseDigest : String -> Result String Digest
 parseDigest = JD.decodeString <| decodeTagged <| Dict.fromList
-  [ ("R", JD.map (\rcs -> {nsds = TD.empty, rootCops = rcs, subErrs = []}) decodeContOps)
+  [ ("R", JD.map
+        (\rcs -> {nsds = TD.empty, rootCops = rcs, subErrs = []})
+        decodeContOps)
   , ("S", JD.map digestFrseb parseSubBundle)
-  , ("U", JD.map digestFrcub parseUpdateBundle)
+  , ("U", JD.map2
+        (\ns nsd -> {nsds = TD.singleton ns nsd, rootCops = Dict.empty, subErrs = []})
+        (JD.field "ns" <| decodeNs)
+        decodeNsd)
   ]

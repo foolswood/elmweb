@@ -22,7 +22,7 @@ import ClMsgTypes exposing
   , DataErrorIndex(..), ToRelayUpdateBundle(..), ToRelaySubBundle(..))
 import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault)
 import PathManipulation exposing (appendSeg)
-import Digests exposing (Digest, DataChange(..), Cops, seriesChangeCast, constChangeCast, TaOp(..), applyDigest)
+import Digests exposing (Digest, DataChange(..), Cops, seriesChangeCast, constChangeCast, TaOp, applyDigest)
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, requiredPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
 import Layout exposing (BoundLayout(..), ChildSource(..))
@@ -65,7 +65,7 @@ type alias ChildSelections = Dict ChildSourceStateId ChildSelection
 
 type alias Model =
   -- Global:
-  { errs : List (Namespace, DataErrorIndex, String)
+  { errs : List (Namespace, DataErrorIndex, List String)
   , viewMode : UiMode
   , bundleCount : Int
   , keepRecent : Float
@@ -200,7 +200,7 @@ type Msg
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
 
 addDGlobalError : String -> Model -> (Model, Cmd Msg)
-addDGlobalError msg m = ({m | errs = (Tagged "UI_INTERNAL", DGlobalError, msg) :: .errs m}, Cmd.none)
+addDGlobalError msg m = ({m | errs = (Tagged "UI_INTERNAL", DGlobalError, [msg]) :: .errs m}, Cmd.none)
 
 latestState : Model -> RemoteState
 latestState m =
@@ -268,7 +268,7 @@ appendSegSp (Tagged (ns, p)) s = Tagged (ns, appendSeg p s)
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
-    AddError idx msg -> ({model | errs = (Tagged "UI_INTERNAL", idx, msg) :: .errs model}, Cmd.none)
+    AddError idx msg -> ({model | errs = (Tagged "UI_INTERNAL", idx, [msg]) :: .errs model}, Cmd.none)
     NetworkEvent d ->
       let
         (newState, errs) = applyDigest d <| latestState model
@@ -276,7 +276,7 @@ update msg model = case msg of
         postTypeSubs = requiredPostTypes newState
         newM =
           { model
-          | errs = (.errs model) ++ (CDict.foldl (\ns es acc -> (List.map (\(idx, msg) -> (ns, idx, msg)) es) ++ acc) [] errs)
+          | errs = (.errs model) ++ (CDict.foldl (\ns es acc -> (List.map (\(idx, msgs) -> (ns, idx, msgs)) es) ++ acc) [] errs)
           , pathSubs = pathSubs
           , postTypeSubs = postTypeSubs
           , recent = .recent model ++ [(d, newState)]
@@ -490,7 +490,7 @@ view m = div []
         (cementedLayout (latestState m) (.layout m) (.childSelections m))
   ]
 
-viewErrors : List (Namespace, DataErrorIndex, String) -> Html a
+viewErrors : List (Namespace, DataErrorIndex, List String) -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text <| toString s]) errs)
 
 pathEditView : Maybe SubPath -> FormState SubPath -> Html (EditEvent SubPath SubPath)
@@ -544,8 +544,7 @@ viewPath childSelections nodeFs baseState recent pending cssid sp =
             (Maybe.map (newCompleteView ls) mPartialViewer) completeViews
       in case rsGet .taOps of
             Nothing -> (mPartialViewer, newRecentCops, newRecentDums, completeViews, typeChanged)
-            Just OpDemote -> (Nothing, [], [], newCompleteViews "red", True)
-            Just (OpAssign tn) -> (viewerFor s, [], [], newCompleteViews "red", True)
+            Just tn -> (viewerFor s, [], [], newCompleteViews "red", True)
     finalise (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
       let
         highlight = if typeChanged

@@ -1,8 +1,8 @@
 module Digests exposing
-  ( Digest, applyDigest, TaOp(..), Cops, DataChange(..), ConstChangeT
+  ( Digest, applyDigest, TaOp, Cops, DataChange(..), ConstChangeT
   , constChangeCast, TimeChangeT, seriesChangeCast, TimeSeriesDataOp(..)
-  , DataDigest
-  , digestFrcub, digestFrseb)
+  , DataDigest, DefOp(..), NsDigest
+  , digestFrseb)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
@@ -57,26 +57,6 @@ seriesChangeCast dc = case dc of
 
 type alias DataDigest = Dict Path DataChange
 
-digestDum : DataUpdateMsg -> DataDigest -> DataDigest
-digestDum dum =
-  let
-    insertTs tpid ma tso mv = Just <| TimeChange <| case mv of
-        Just (TimeChange d) -> Dict.insert tpid (ma, tso) d
-        _ -> Dict.singleton tpid (ma, tso)
-    up mv = case dum of
-        MsgConstSet {msgTypes, msgArgs, msgAttributee} ->
-            Just <| ConstChange (msgAttributee, msgTypes, msgArgs)
-        MsgSet {msgTpId, msgTime, msgTypes, msgArgs, msgInterpolation, msgAttributee} ->
-          let
-            atp = OpSet msgTime msgTypes msgArgs msgInterpolation
-          in insertTs msgTpId msgAttributee atp mv
-        MsgRemove {msgTpId, msgAttributee} ->
-            insertTs msgTpId msgAttributee OpRemove mv
-  in Dict.update (dumPath dum) up
-
-digestDums : List DataUpdateMsg -> DataDigest
-digestDums = List.foldl digestDum Dict.empty
-
 ddApply : DataDigest -> NodeMap -> (List (Path, (Maybe TpId, String)), NodeMap)
 ddApply dd nodeMap =
   let
@@ -102,23 +82,6 @@ ddApply dd nodeMap =
 type alias Cops = Dict Seg (Maybe Attributee, SeqOp Seg)
 type alias CmDigest = Dict Path Cops
 
-digestCm : ToClientContainerUpdateMsg -> (Seg, (Maybe Attributee, SeqOp Seg))
-digestCm cm = case cm of
-    MsgPresentAfter {msgTgt, msgRef, msgAttributee} ->
-        (msgTgt, (msgAttributee, SoPresentAfter msgRef))
-    MsgAbsent {msgTgt, msgAttributee} ->
-        (msgTgt, (msgAttributee, SoAbsent))
-
-digestCCms : List (Path, ToClientContainerUpdateMsg) -> CmDigest
-digestCCms =
-  let
-    wedgeIn k v md = Just <| case md of
-        Nothing -> Dict.singleton k v
-        Just d -> Dict.insert k v d
-    go (p, cm) = let (seg, (ma, so)) = digestCm cm in
-        Dict.update p (wedgeIn seg (ma, so))
-  in List.foldl go Dict.empty
-
 applyCms : CmDigest -> NodeMap -> (List (Path, String), NodeMap)
 applyCms cms nm =
   let
@@ -131,14 +94,6 @@ type DefOp a
 
 type alias DefOps a = TaggedDict a Seg (DefOp a)
 
-digestDefOps : List (DefMsg a) -> DefOps a
-digestDefOps defs =
-  let
-    applyDefOp o = case o of
-        MsgDefine s def -> CDict.insert s <| OpDefine def
-        MsgUndefine s -> CDict.insert s OpUndefine
-  in List.foldl applyDefOp TD.empty defs
-
 applyDefOps : DefOps a -> TypeMap a -> TypeMap a
 applyDefOps dops tm =
   let
@@ -147,32 +102,14 @@ applyDefOps dops tm =
         OpUndefine -> CDict.remove tn
   in CDict.foldl applyOp tm dops
 
-type TaOp
-  = OpAssign (Tagged Definition Seg, Editable)
-  | OpDemote
+type alias TaOp = (Tagged Definition Seg, Editable)
 
 type alias TaOps = Dict Path TaOp
-
-digestTypeMsgs : List TypeMsg -> TaOps
-digestTypeMsgs tms =
-  let
-    tas = List.map (\(MsgAssignType p ts l) -> (p, OpAssign (ts, l))) tms
-  in Dict.fromList tas
-
-dropDemotes : TaOps -> Dict Path a -> Dict Path a
-dropDemotes tao d =
-  let
-    doDrop p op = case op of
-        OpDemote -> Dict.remove p
-        _ -> identity
-  in Dict.foldl doDrop d tao
 
 applyTypeMsgs : TaOps -> TypeAssignMap -> TypeAssignMap
 applyTypeMsgs tao tam =
   let
-    applyOp p op = case op of
-        OpAssign a -> Dict.insert p a
-        OpDemote -> Dict.remove p
+    applyOp p a = Dict.insert p a
   in Dict.foldl applyOp tam tao
 
 type alias NsDigest =
@@ -181,31 +118,17 @@ type alias NsDigest =
   , taOps : TaOps
   , cops : CmDigest
   , dops : DataDigest
-  , errs : List (DataErrorIndex, String)
+  , errs : List (DataErrorIndex, List String)
   }
 
 type alias Digest =
   { nsds : ByNs NsDigest
   , rootCops : Cops
-  , subErrs : List (SubErrorIndex, String)
+  , subErrs : List (SubErrorIndex, List String)
   }
 
-unErrMsg : MsgError i -> (i, String)
-unErrMsg (MsgError i s) = (i, s)
-
-digestFrcub : FromRelayClientUpdateBundle -> Digest
-digestFrcub (FromRelayClientUpdateBundle ns errs pDefs defs tas dums cms) =
-  { rootCops = Dict.empty
-  , nsds = TD.singleton ns <|
-      { defs = digestDefOps defs
-      , postDefs = digestDefOps pDefs
-      , taOps = digestTypeMsgs tas
-      , cops = digestCCms cms
-      , dops = digestDums dums
-      , errs = List.map unErrMsg errs
-      }
-  , subErrs = []
-  }
+unErrMsg : MsgError i -> (i, List String)
+unErrMsg (MsgError i s) = (i, [s])
 
 digestFrseb : FromRelaySubErrorBundle -> Digest
 digestFrseb (FromRelaySubErrorBundle errs pUnsubs tUnsubs dUnsubs) =
@@ -239,22 +162,21 @@ digestFrseb (FromRelaySubErrorBundle errs pUnsubs tUnsubs dUnsubs) =
     nsds = CSet.foldl genNsd TD.empty mentionedNss
   in {rootCops = Dict.empty, nsds = nsds, subErrs = List.map unErrMsg errs}
 
-applyNsDigest : NsDigest -> Valuespace -> (Valuespace, List (DataErrorIndex, String))
+applyNsDigest : NsDigest -> Valuespace -> (Valuespace, List (DataErrorIndex, List String))
 applyNsDigest d rs =
   let
     newTm = applyDefOps (.defs d) <| .types rs
     newPtm = Debug.log "PdApplied" <| applyDefOps (Debug.log "newdefs" <| .postDefs d) <| .postTypes rs
     newTam = applyTypeMsgs (.taOps d) <| .tyAssns rs
-    reducedNodes = dropDemotes (.taOps d) <| .nodes rs
-    (dataErrs, dataAppliedNm) = ddApply (.dops d) reducedNodes
+    (dataErrs, dataAppliedNm) = ddApply (.dops d) <| .nodes rs
     (contErrs, newNm) = applyCms (.cops d) dataAppliedNm
     indexDumErr (p, (mTpId, s)) = case mTpId of
-        Nothing -> (DPathError p, s)
-        Just tpId -> (DTimePointError p tpId, s)
+        Nothing -> (DPathError p, [s])
+        Just tpId -> (DTimePointError p tpId, [s])
     indexedErrs
        = .errs d
       ++ List.map indexDumErr dataErrs
-      ++ List.map (\(p, s) -> (DPathError p, s)) contErrs
+      ++ List.map (\(p, s) -> (DPathError p, [s])) contErrs
   in ({types = newTm, postTypes = newPtm, tyAssns = newTam, nodes = newNm}, indexedErrs)
 
 applyRootChanges : a -> Digest -> ByNs a -> ByNs a
@@ -267,13 +189,13 @@ applyRootChanges empty d bns =
 
 applyDigest
    : Digest -> RemoteState
-  -> (RemoteState, ByNs (List (DataErrorIndex, String)))
+  -> (RemoteState, ByNs (List (DataErrorIndex, List String)))
 applyDigest d rs =
   let
     nsCorrectedVss = applyRootChanges vsEmpty d rs
     applyNsd ns nsd (ars, aerrs) = case CDict.get ns ars of
         Nothing ->
-            (ars, CDict.insert ns [(DGlobalError, "Namespace missing from root")] aerrs)
+            (ars, CDict.insert ns [(DGlobalError, ["Namespace missing from root"])] aerrs)
         Just vs -> let (newVs, es) = applyNsDigest nsd vs in
             (CDict.insert ns newVs ars, CDict.insert ns es aerrs)
     (appliedVss, errs) = CDict.foldl applyNsd (nsCorrectedVss, TD.empty) <| .nsds d

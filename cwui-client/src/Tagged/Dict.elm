@@ -1,4 +1,4 @@
-module Tagged.Dict exposing (TaggedDict, empty, singleton)
+module Tagged.Dict exposing (TaggedDict, empty, singleton, fromList)
 
 import Tagged.Tagged exposing (Tagged(..), tagCmp)
 import Cmp.Dict as CmpDict exposing (CmpDict)
@@ -12,3 +12,6 @@ empty = CmpDict.empty tagCmp
 
 singleton : Tagged phantom comparable -> v -> TaggedDict phantom comparable v
 singleton k v = CmpDict.singleton tagCmp k v
+
+fromList : List (Tagged phantom comparable, v) -> TaggedDict phantom comparable v
+fromList vs = CmpDict.fromList tagCmp vs
