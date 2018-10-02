@@ -119,7 +119,7 @@ type alias NsDigest =
 
 type alias Digest =
   { nsds : ByNs NsDigest
-  , rootCops : Cops Seg
+  , rootCops : Dict Seg (SeqOp Seg)
   , subErrs : List (SubErrorIndex, List String)
   }
 
@@ -143,7 +143,7 @@ applyNsDigest d rs =
 applyRootChanges : a -> Digest -> ByNs a -> ByNs a
 applyRootChanges empty d bns =
   let
-    applyRc s (_, so) = let ns = Tagged s in case so of
+    applyRc s so = let ns = Tagged s in case so of
         SoAbsent -> CDict.remove ns
         SoPresentAfter _ -> CDict.update ns (Just << Maybe.withDefault empty)
   in Dict.foldl applyRc bns <| .rootCops d

@@ -112,7 +112,10 @@ encodeTsdo tsdo = case tsdo of
 
 encodeDataChange : DataChange -> JE.Value
 encodeDataChange dc = case dc of
-    ConstChange (ma, wts, wvs) -> tagged 'c' <| encodePair encodeAttributee JE.list (ma, List.map2 encodeWv wts wvs)
+    ConstChange (ma, wts, wvs) -> tagged 'c' <| JE.object
+      [ ("att", encodeAttributee ma)
+      , ("wvs", JE.list <| List.map2 encodeWv wts wvs)
+      ]
     TimeChange tc -> tagged 't' <| encodeDict JE.int (encodePair encodeAttributee encodeTsdo) tc
     DeletedChange -> JE.string "somehow got a deleted"
 
@@ -143,8 +146,8 @@ encodeTrcud trcud = JE.object
 
 encodeSubOp : SubOp -> JE.Value
 encodeSubOp o = case o of
-    Subscribe -> JE.string "S"
-    Unsubscribe -> JE.string "U"
+    Subscribe -> JE.list [JE.string "s", JE.null]
+    Unsubscribe -> JE.list [JE.string "u", JE.null]
 
 encodeTypePtr : (Namespace, Tagged a Seg) -> JE.Value
 encodeTypePtr = encodePair encodeNs encodeTaggedSeg
@@ -160,8 +163,8 @@ serialiseDigest : ToRelayDigest -> Time -> String
 serialiseDigest b t = JE.encode 2 <| JE.object
   [ ("time", encodeTime t)
   , ("val", case b of
-        Trcud ub -> tagged 'U' <| encodeTrcud ub
-        Trcsd sb -> tagged 'S' <| encodeTrcsd sb)
+        Trcud ub -> tagged 'u' <| encodeTrcud ub
+        Trcsd sb -> tagged 's' <| encodeTrcsd sb)
   ]
 
 -- Decoding:
@@ -435,11 +438,11 @@ decodeNsd = JD.map6
 
 parseDigest : String -> Result String Digest
 parseDigest = JD.decodeString <| decodeTagged <| Dict.fromList
-  [ ("R", JD.map
+  [ ("r", JD.map
         (\rcs -> {nsds = TD.empty, rootCops = rcs, subErrs = []})
-        decodeContOps)
-  , ("S", decodeSubDigest)
-  , ("U", JD.map2
+        (decodeDict decodeSeg decodeSeqOp))
+  , ("s", decodeSubDigest)
+  , ("u", JD.map2
         (\ns nsd -> {nsds = TD.singleton ns nsd, rootCops = Dict.empty, subErrs = []})
         (JD.field "ns" <| decodeNs)
         decodeNsd)
