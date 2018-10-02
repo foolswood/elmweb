@@ -26,11 +26,10 @@ import Clapi.Types
   , alFromList, alToMap
   , TimeSeriesDataOp(..), DataChange(..), DefOp(..)
   , WireValue(..), (<|$|>)
-  , produceToRelayBundle, digestFromRelayBundle
   )
-import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev, (<<->), mapProtocol, runProtocolIO)
+import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev, (<<->), runProtocolIO)
 import Clapi.SerialisationProtocol (serialiser)
-import Clapi.Serialisation.Messages ()
+import Clapi.Serialisation.Digests ()
 
 ns :: Seg
 ns = [segq|example|]
@@ -143,7 +142,6 @@ onSocketConnected (sock, _) = do
     startState = DummyApiState {dasDelay = Time 1 0}
     proto =
         serialiser <<-> timestampOutbound <<->
-        mapProtocol digestFromRelayBundle produceToRelayBundle <<->
         fwdProviderProto <<-> apiProto startState
 
 main :: IO ()

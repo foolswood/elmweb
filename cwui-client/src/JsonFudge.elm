@@ -399,8 +399,8 @@ decodeContOps = decodeDict decodeSeg <|
 
 decodeConstChange : JD.Decoder ConstChangeT
 decodeConstChange = JD.map2 (\atts (wts, wvs) -> (atts, wts, wvs))
-    (JD.nullable decodeAttributee)
-    (JD.map List.unzip <| JD.list decodeWv)
+    (JD.field "att" <| JD.nullable decodeAttributee)
+    (JD.field "wvs" <| JD.map List.unzip <| JD.list decodeWv)
 
 decodeTsdo : JD.Decoder TimeSeriesDataOp
 decodeTsdo = decodeTagged <| Dict.fromList <|

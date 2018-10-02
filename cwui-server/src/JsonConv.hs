@@ -17,6 +17,7 @@ import Prelude hiding (fail)
 import Control.Monad.Fail (MonadFail(..))
 
 import qualified Data.Set as Set
+import qualified Data.Map as Map
 import Data.Aeson (
     FromJSON(..), ToJSON(..), Value, withArray, Value(..),
     withObject, (.:), object, (.=))
@@ -34,37 +35,28 @@ import Data.Int
 import Blaze.ByteString.Builder (toByteString)
 import Data.Attoparsec.ByteString (parseOnly, endOfInput)
 
+import Data.Map.Mos as Mos
 import Clapi.Types.Path (Path, Seg, unSeg, segP, Namespace, Placeholder)
 import qualified Clapi.Types.Path as Path
 import Clapi.Types.WireTH (mkWithWtProxy)
 import Clapi.TaggedData
 import Clapi.Serialisation
-  ( subMsgTaggedData, SubMsgType(..), interpolationTaggedData
-  , dumtTaggedData, DataUpdateMsgType(..)
-  , tpcumTaggedData, TpcumType(..)
-  , tccumTaggedData, TccumType(..)
-  , dataErrIndexTaggedData, subErrIndexTaggedData
-  , trBundleTaggedData, TrBundleType(..)
-  , frBundleTaggedData , Encodable(..)
-  , defMsgTaggedData, ilTaggedData, defTaggedData)
+  ( interpolationTaggedData , dataErrIndexTaggedData, subErrIndexTaggedData
+  , Encodable(..) , ilTaggedData, defTaggedData, frTaggedData, trTaggedData
+  , soTaggedData, dcTaggedData, tsDOpTaggedData, defOpTaggedData
+  , subOpTaggedData, TrDigestType(..), SeqOpType(..), DataChangeType(..)
+  , TsDOpT(..))
 import Clapi.Types
   ( Time(..), Interpolation(..), InterpolationType(..), InterpolationLimit(..)
-  , DataUpdateMessage(..)
-  , TimeStamped(..)
-  , FromRelayClientRootBundle(..), FromRelayClientSubBundle(..)
-  , FromRelayClientUpdateBundle(..), FromRelayBundle(..)
-  , DataErrorIndex(..), DataErrorMessage(..)
-  , SubMessage(..), SubErrorIndex(..), SubErrorMessage(..)
-  , ToRelayBundle(..)
-  , ToRelayClientUpdateBundle(..), ToRelayClientSubBundle(..)
-  , ToProviderContainerUpdateMessage(..), ToClientContainerUpdateMessage(..)
-  , TypeMessage(..), Editable(..)
-  , WireValue(..)
-  , Wireable, WireType(..), wireValueWireType, Tag, mkTag, unTag, (<|$|>)
-  , DefMessage(..), Definition(..)
-  , ArrayDefinition(..), StructDefinition(..), TupleDefinition(..)
-  , PostDefinition(..)
-  , unAssocList, TreeType)
+  , TimeStamped(..) , DataErrorIndex(..) , SubErrorIndex(..) , Editable(..)
+  , Attributee(..) , WireValue(..) , Wireable, WireType(..), wireValueWireType
+  , Tag, mkTag, unTag , (<|$|>) , Definition(..) , ArrayDefinition(..)
+  , StructDefinition(..) , TupleDefinition(..) , PostDefinition(..)
+  , unAssocList, alFromList, TreeType , FrDigest(..), TrDigest(..)
+  , FrcRootDigest(..), FrcSubDigest(..) , FrcUpdateDigest(..), DataChange(..)
+  , TimeSeriesDataOp(..), DefOp(..), SubOp(..), CreateOp(..), TrcSubDigest(..)
+  , TrcUpdateDigest(..), DataDigest)
+import Clapi.Types.SequenceOps (SequenceOp(..))
 import Clapi.TextSerialisation (ttToText)
 import Clapi.Util (proxyF, proxyF3)
 
@@ -109,6 +101,9 @@ deriving instance FromJSON Namespace
 deriving instance ToJSON Placeholder
 deriving instance FromJSON Placeholder
 
+deriving instance ToJSON Attributee
+deriving instance FromJSON Attributee
+
 mkWithWtProxy "withJsonWtProxy" [''Wireable, ''ToJSON, ''FromJSON]
 
 instance FromJSON WireType where
@@ -142,15 +137,6 @@ instance ToJSON WireValue where
         wtjv = withJsonWtProxy wt wvj
       in object ["type" .= toJSON wt, "val" .= wtjv]
 
-instance FromJSON SubMessage where
-    parseJSON = parseTaggedJson subMsgTaggedData $ \e -> case e of
-        SubMsgTSub -> fmap MsgSubscribe . parseJSON
-        SubMsgTPostTypeSub -> fmap MsgPostTypeSubscribe . parseJSON
-        SubMsgTTypeSub -> fmap MsgTypeSubscribe . parseJSON
-        SubMsgTUnsub -> fmap MsgUnsubscribe . parseJSON
-        SubMsgTTypeUnsub -> fmap MsgTypeUnsubscribe . parseJSON
-        SubMsgTPostTypeUnsub -> fmap MsgPostTypeUnsubscribe . parseJSON
-
 instance FromJSON Time where
     parseJSON = withArray "Time" (\v -> case Vec.toList v of
         [sv, fv] -> do
@@ -174,65 +160,8 @@ instance FromJSON Interpolation where
 instance ToJSON Interpolation where
     toJSON = buildTaggedJson interpolationTaggedData $ const $ toJSON (Nothing :: Maybe Int)
 
-instance FromJSON DataUpdateMessage where
-    parseJSON = parseTaggedJson dumtTaggedData $ \e -> withObject "DataUpdateMessage" $ case e of
-        DUMTConstSet -> \v -> MsgConstSet
-            <$> v .: "path" <*> v .: "args" <*> v .: "att"
-        DUMTSet -> \v -> MsgSet
-            <$> v .: "path" <*> v .: "tpid" <*> v .: "time" <*> v .: "args"
-            <*> v .: "interpolation" <*> v .: "att"
-        DUMTRemove -> \v -> MsgRemove
-            <$> v .: "path" <*> v .: "tpid" <*> v .: "att"
-
-instance ToJSON DataUpdateMessage where
-    toJSON = buildTaggedJson dumtTaggedData $ \dum -> case dum of
-        MsgConstSet p vs ma -> object ["path" .= p, "args" .= vs, "att" .= ma]
-        MsgSet p tpId t vs i ma -> object
-          [ "path" .= p, "tpid" .= tpId, "time" .= t, "args" .= vs
-          , "interpolation" .= i, "att" .= ma]
-        MsgRemove p tpId ma -> object ["path" .= p, "tpid" .= tpId, "att" .= ma]
-
-instance FromJSON ToProviderContainerUpdateMessage where
-  parseJSON = parseTaggedJson tpcumTaggedData $ \case
-    TpcumtCreateAfter -> withObject "TpcumCreateAfter" $ \o ->
-      TpcumCreateAfter <$> o .: "args" <*> o .: "ph" <*> o .: "ref"
-        <*> o .: "att"
-    TpcumtMoveAfter -> withObject "TpcumMoveAfter" $ \o ->
-      TpcumMoveAfter <$> o .: "tgt" <*> o .: "ref" <*> o .: "att"
-    TpcumtAbsent -> withObject "TpcumAbsent" $ \o ->
-      TpcumAbsent <$> o .: "tgt" <*> o .: "att"
-
-instance ToJSON ToProviderContainerUpdateMessage where
-  toJSON = buildTaggedJson tpcumTaggedData $ \case
-    TpcumCreateAfter args ph ref att -> object
-      ["args" .= args, "ph" .= ph, "ref" .= ref, "att" .= att]
-    TpcumMoveAfter tgt ref att -> object
-      ["tgt" .= tgt, "ref" .= ref, "att" .= att]
-    TpcumAbsent tgt att -> object ["tgt" .= tgt, "att" .= att]
-
-instance FromJSON ToClientContainerUpdateMessage where
-  parseJSON = parseTaggedJson tccumTaggedData $ \case
-    TccumtPresentAfter -> withObject "TccumPresentAfter" $ \o ->
-      TccumPresentAfter <$> o .: "tgt" <*> o .: "ref" <*> o .: "att"
-    TccumtAbsent -> withObject "TccumAbsent" $ \o ->
-      TccumAbsent <$> o .: "tgt" <*> o .: "att"
-
-instance ToJSON ToClientContainerUpdateMessage where
-  toJSON = buildTaggedJson tccumTaggedData $ \case
-    TccumPresentAfter tgt ref att -> object
-      ["tgt" .= tgt, "ref" .= ref, "att" .= att]
-    TccumAbsent tgt att -> object ["tgt" .= tgt, "att" .= att]
-
-instance FromJSON ToRelayClientUpdateBundle where
-    parseJSON = withObject "ToRelayClientUpdateBundle" $ \b ->
-      ToRelayClientUpdateBundle <$> b .: "ns" <*> b .: "data" <*> b .: "cont"
-
-instance FromJSON ToRelayClientSubBundle where
-    parseJSON = withObject "ToRelayClientSubBundle" $ \b ->
-      ToRelayClientSubBundle <$> b .: "subMsgs"
-
 instance (FromJSON a) => FromJSON (TimeStamped a) where
-    parseJSON o = withObject "TimeStamped" (\ts -> curry TimeStamped <$> ts .: "time" <*> ts .: "val") o
+    parseJSON = withObject "TimeStamped" $ \ts -> curry TimeStamped <$> ts .: "time" <*> ts .: "val"
 
 instance ToJSON DataErrorIndex where
     toJSON = buildTaggedJson dataErrIndexTaggedData $ \case
@@ -246,21 +175,12 @@ instance ToJSON Editable where
         Editable -> ("rw" :: String)
         ReadOnly -> "ro"
 
-instance ToJSON DataErrorMessage where
-    toJSON (MsgDataError ei m) = object ["eIdx" .= ei, "msg" .= m]
-
 instance ToJSON SubErrorIndex where
     toJSON = buildTaggedJson subErrIndexTaggedData $ \case
         NamespaceSubError ns -> toJSON ns
         PostTypeSubError ns tn -> object ["ns" .= ns, "tn" .= tn]
         TypeSubError ns tn -> object ["ns" .= ns, "tn" .= tn]
         PathSubError ns p -> toJSON (ns, p)
-
-instance ToJSON SubErrorMessage where
-    toJSON (MsgSubError ei m) = object ["eIdx" .= ei, "msg" .= m]
-
-instance ToJSON TypeMessage where
-    toJSON (MsgAssignType p tn l) = object ["path" .= p, "typeName" .= tn, "ed" .= l]
 
 instance ToJSON StructDefinition where
     toJSON (StructDefinition doc al) = object ["doc" .= doc, "stls" .= (asStl <$> unAssocList al)]
@@ -296,43 +216,96 @@ instance ToJSON Definition where
         StructDef d -> toJSON d
         ArrayDef d -> toJSON d
 
-instance (ToJSON ident, ToJSON def) => ToJSON (DefMessage ident def) where
-    toJSON = buildTaggedJson defMsgTaggedData $ \v -> case v of
-        MsgDefine i def -> object ["id" .= toJSON i, "def" .= toJSON def]
-        MsgUndefine i -> toJSON i
+instance ToJSON a => ToJSON (SequenceOp a) where
+    toJSON = buildTaggedJson soTaggedData $ \o -> case o of
+        SoAfter ref -> toJSON ref
+        SoAbsent -> Null
 
-instance ToJSON FromRelayClientUpdateBundle where
-    toJSON (FromRelayClientUpdateBundle ns errs pdefs defs tas dd co) = object
-        [ "ns" .= toJSON ns
-        , "errs" .= toJSONList errs
-        , "pdefs" .= toJSONList pdefs
-        , "defs" .= toJSONList defs
-        , "tas" .= toJSONList tas
-        , "dd" .= toJSONList dd
-        , "co" .= toJSONList co
-        ]
+instance FromJSON a => FromJSON (SequenceOp a) where
+    parseJSON = parseTaggedJson soTaggedData $ \o -> case o of
+        SoAfterT -> \ref -> SoAfter <$> parseJSON ref
+        SoAbsentT -> const $ pure SoAbsent
 
-instance ToJSON FromRelayClientRootBundle where
-    toJSON (FromRelayClientRootBundle co) = toJSON co
+instance ToJSON FrcRootDigest where
+    toJSON (FrcRootDigest contOps) = toJSON $ Map.toList contOps
 
-instance ToJSON FromRelayClientSubBundle where
-    toJSON (FromRelayClientSubBundle errs ptuns tuns duns) = object
-      [ "errs" .= toJSON errs
-      , "ptuns" .= toJSON ptuns
-      , "tuns" .= toJSON tuns
-      , "duns" .= toJSON duns
+instance ToJSON FrcSubDigest where
+    toJSON (FrcSubDigest errs ptu tu du) = object
+      [ "errs" .= Map.toList errs
+      -- FIXME: These are MOS but the elm doesn't know that yet:
+      , "ptuns" .= Mos.toList ptu
+      , "tuns" .= Mos.toList tu
+      , "duns" .= Mos.toList du
       ]
 
-instance ToJSON FromRelayBundle where
-    toJSON = buildTaggedJson frBundleTaggedData $ \v -> case v of
-        Frcrb b -> toJSON b
-        Frcsb b -> toJSON b
-        Frcub b -> toJSON b
-        _ -> error "Unexpected provider error bundle"
+instance ToJSON TimeSeriesDataOp where
+    toJSON = buildTaggedJson tsDOpTaggedData $ \o -> case o of
+        OpSet t wvs i -> object ["time" .= t , "wvs" .= wvs , "interp" .= i]
+        OpRemove -> Null
 
-instance FromJSON ToRelayBundle where
-    parseJSON = parseTaggedJson trBundleTaggedData $ \case
-      TrbtClientSub -> fmap Trcsb . parseJSON
-      TrbtClientUpdate -> fmap Trcub . parseJSON
-      -- FIXME: there might be a better way to handle this condition:
-      _ -> error "Web client acted as provider"
+instance FromJSON TimeSeriesDataOp where
+    parseJSON = parseTaggedJson tsDOpTaggedData $ \o -> case o of
+        OpSetT -> withObject "OpSet" $ \s ->
+            OpSet <$> s .: "time" <*> s .: "wvs" <*> s .: "interp"
+        OpRemoveT -> const $ pure OpRemove
+
+instance ToJSON DataChange where
+    toJSON = buildTaggedJson dcTaggedData $ \c -> case c of
+        ConstChange att wvs -> object ["att" .= att, "wvs" .= wvs]
+        TimeChange tc -> toJSON $ Map.toList tc
+
+instance FromJSON DataChange where
+    parseJSON = parseTaggedJson dcTaggedData $ \t -> case t of
+        ConstChangeT -> withObject "ConstChange" $ \c -> ConstChange <$> c .: "att" <*> c .: "wvs"
+        TimeChangeT -> fmap (TimeChange . Map.fromList) . parseJSON
+
+instance ToJSON a => ToJSON (DefOp a) where
+    toJSON = buildTaggedJson defOpTaggedData $ \o -> case o of
+        OpDefine d -> toJSON d
+        OpUndefine -> Null
+
+instance ToJSON FrcUpdateDigest where
+    toJSON frcud = object
+      [ "ns" .= frcudNamespace frcud
+      , "pdefs" .= Map.toList (frcudPostDefs frcud)
+      , "defs" .= Map.toList (frcudDefinitions frcud)
+      , "tas" .= Map.toList (frcudTypeAssignments frcud)
+      , "co" .= Map.toList (Map.toList <$> frcudContOps frcud)
+      , "dd" .= unAssocList (frcudData frcud)
+      , "errs" .= Map.toList (frcudErrors frcud)
+      ]
+
+instance ToJSON FrDigest where
+    toJSON = buildTaggedJson frTaggedData $ \d -> case d of
+        Frcrd frcrd -> toJSON frcrd
+        Frcsd frcsd -> toJSON frcsd
+        Frcud frcud -> toJSON frcud
+        Frpd _ -> error "Unexpectedly received provider digest"
+        Frped _ -> error "Unexpectedly received provider error digest"
+
+instance FromJSON SubOp where
+    parseJSON = parseTaggedJson subOpTaggedData $ const . pure
+
+instance FromJSON DataDigest where
+    parseJSON = fmap alFromList . parseJSON
+
+instance FromJSON CreateOp where
+    parseJSON = withObject "CreateOp" $ \o -> OpCreate <$> o .: "args" <*> o .: "after"
+
+instance FromJSON TrDigest where
+    parseJSON = parseTaggedJson trTaggedData $ \d -> case d of
+        TrcsdT -> withObject "SubDigest" $ \sd -> Trcsd <$> (
+          TrcSubDigest
+          <$> (Map.fromList <$> sd .: "postTypes")
+          <*> (Map.fromList <$> sd .: "types")
+          <*> (Map.fromList <$> sd .: "data")
+          )
+        TrcudT -> withObject "UpdateDigest" $ \ud -> Trcud <$> (
+          TrcUpdateDigest
+          <$> ud .: "ns"
+          <*> ud .: "dd"
+          <*> (Map.fromList . (fmap $ fmap Map.fromList) <$> ud .: "creates")
+          <*> (Map.fromList . (fmap $ fmap Map.fromList) <$> ud .: "co")
+          )
+        TrprdT -> error "Unexpected provider root digest"
+        TrpdT -> error "Unexpected provider digest"

@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: lts-10.5
+resolver: lts-12.11
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -39,7 +39,7 @@ packages:
 - .
 - location:
     git: git@github.com:concert/clapi.git
-    commit: 02e4d065f7b83d4370a73f589417b95a6fa4b077
+    commit: 4ea426df7320d94c58a612089866b6aaf709c7b5
   extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
@@ -47,7 +47,7 @@ extra-deps:
 - attoparsec-binary-0.2
 - attoparsec-varword-0.1.0.0
 - bytestring-builder-varword-0.1.0.0
-- containers-0.5.8.1
+- containers-0.5.11.0
 - unagi-chan-0.4.0.0
 
 # Override default flag values for local packages and extra-deps

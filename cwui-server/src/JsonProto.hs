@@ -5,7 +5,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LB
 
 import Control.Monad (forever)
-import Clapi.Types (FromRelayBundle(..), ToRelayBundle(..), TimeStamped(..))
+import Clapi.Types (FrDigest(..), TrDigest(..), TimeStamped(..))
 import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev)
 import JsonConv ()
 
@@ -16,9 +16,9 @@ tt tag a = trace (tag ++ ": " ++ show a) a
 
 jsonProto ::
     Monad m => Protocol
-        FromRelayBundle
+        FrDigest
         B.ByteString
-        (TimeStamped ToRelayBundle)
+        (TimeStamped TrDigest)
         B.ByteString
         m ()
 jsonProto = forever $ waitThen jsonMash jsonUnmash
