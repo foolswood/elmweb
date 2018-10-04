@@ -187,7 +187,8 @@ decodeSubPath = JD.map Tagged <| decodePair decodeSeg decodePath
 
 decodeSubErrIdx : JD.Decoder SubErrorIndex
 decodeSubErrIdx = decodeTagged (Dict.fromList
-    [ ("p", JD.map SPathError decodeSubPath)
+    [ ("n", JD.map SNsError decodeNs)
+    , ("p", JD.map SPathError decodeSubPath)
     , ("t", JD.map STypeError decodeTypeName)
     , ("c", JD.map SPostTypeError decodeTypeName)
     ])

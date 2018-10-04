@@ -165,7 +165,8 @@ defWireType def = case def of
     ADSet subDef -> WtList <| defWireType subDef
 
 type SubErrorIndex
-  = SPathError SubPath
+  = SNsError Namespace
+  | SPathError SubPath
   | STypeError (Tagged Definition TypeName)
   | SPostTypeError (Tagged PostDefinition TypeName)
 
