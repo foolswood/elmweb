@@ -317,7 +317,7 @@ update msg model = case msg of
       in case ue of
         EeUpdate v ->
           let
-            newFs = CDict.update ns (Maybe.map <| formInsert p (Just v)) <| .nodeFs model
+            newFs = CDict.update ns (Just << formInsert p (Just v) << Maybe.withDefault formStoreEmpty) <| .nodeFs model
           in ({model | nodeFs = newFs}, Cmd.none)
         EeSubmit na -> case na of
             NaConst wvs -> case remoteStateLookup ns p <| latestState model of
