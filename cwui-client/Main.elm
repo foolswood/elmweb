@@ -343,14 +343,14 @@ update msg model = case msg of
                                 (Dict.insert tgt SoAbsent) ns p model
                           , updateCmd Dict.empty <| Dict.singleton p <| Dict.singleton tgt (Nothing, SoAbsent)
                           )
-                        NacCreate ref postArgs -> case postability of
+                        NacCreate ph ref postArgs -> case postability of
                             RemoteState.PostableLoaded _ pdef ->
                                 ( modifyChildPending
-                                    (\p -> {p | creates = CDict.insert phPh (ref, postArgs) <| .creates p})
+                                    (\p -> {p | creates = CDict.insert ph (ref, postArgs) <| .creates p})
                                     ns p
                                     {model | nodeFs = CDict.update ns (Maybe.map <| formInsert p Nothing) <| .nodeFs model}
                                 , updateCmd
-                                    (Dict.singleton p <| TD.singleton phPh (Nothing,
+                                    (Dict.singleton p <| TD.singleton ph (Nothing,
                                         { args = List.map2
                                             (\fieldDesc wvs -> Futility.zip (List.map defWireType <| Tuple.second fieldDesc) wvs)
                                             (.fieldDescs pdef) postArgs
@@ -389,10 +389,6 @@ modifySelection mod cssid model =
   in
   ( {model | childSelections = newChildSelections, pathSubs = newPathSubs}
   , subDiffToCmd (.pathSubs model) (.postTypeSubs model) newPathSubs (.postTypeSubs model))
-
--- FIXME: Using the same placeholder for everything
-phPh : Placeholder
-phPh = Tagged "ph"
 
 -- Subscriptions
 

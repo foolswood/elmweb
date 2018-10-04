@@ -29,7 +29,7 @@ type NaTimePoint
 type alias NaConstT = List WireValue
 type alias NaSeriesT = TimeSeries NaTimePoint
 type NaChildrenT
-  = NacCreate (Maybe (Either Placeholder Seg)) (List (List WireValue))
+  = NacCreate Placeholder (Maybe (Either Placeholder Seg)) (List (List WireValue))
   | NacMove Seg (Maybe Seg)
   | NacDelete Seg
   | NacSelect ChildSourceStateId Seg
@@ -194,7 +194,8 @@ type alias NeTimePoint =
 type alias NeConstT = List PartialEdit
 
 type alias NeChildCreate =
-  { ref : Maybe Seg
+  { desiredPlaceholder : String
+  , ref : Maybe Seg
   , vals : List NeConstT
   }
 

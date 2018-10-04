@@ -7,20 +7,22 @@ import Html.Attributes as HA
 import Dict exposing (Dict)
 import Json.Encode as JE
 import Tuple exposing (second)
+import Regex exposing (Regex)
 
 import Futility exposing (Either(..), zip, allGood)
+import Tagged.Tagged exposing (Tagged(..))
 import HtmlHelpers exposing (listEdit)
 import SequenceOps exposing (SeqOp(..), applySeqOps)
-import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace, Editable(..), PostDefinition)
+import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace, Editable(..), PostDefinition, Placeholder)
 import ClNodes exposing (Node(ContainerNode), ContainerNodeT)
-import Form exposing (FormState(..))
+import Form exposing (FormState(..), AtomState(AsEditing))
 import EditTypes exposing
   ( NodeEdit(NeChildren), EditEvent(..), NaChildrenT(..), PaChildrenT
   , NeChildrenT, emptyPartial, NeConstT, ChildSourceStateId)
 import RemoteState exposing (Valuespace, Postability(..))
 import Digests exposing (Cops)
 import DragAndDrop exposing (dragStartAttr, dragOverAttr, onDragStart, onDragEnter, onDrop, EffectAllowed(EaMove))
-import TupleViews exposing (viewConstTupleEdit, asSubmittable)
+import TupleViews exposing (viewConstTupleEdit, asSubmittable, textEditor)
 
 remoteChildSegs : Valuespace -> Path -> Maybe (List Seg)
 remoteChildSegs vs p = case Dict.get p <| .nodes vs of
@@ -57,7 +59,7 @@ rectifyEdits initialList cops edits =
 
 arrayActionStateUpdate : NaChildrenT -> NodeEdit -> NodeEdit
 arrayActionStateUpdate na ne = case na of
-    NacCreate _ _ -> case ne of
+    NacCreate _ _ _ -> case ne of
         NeChildren nec -> NeChildren {nec | create = Nothing}
         _ -> ne
     _ -> ne
@@ -129,14 +131,21 @@ viewArray cssid isSelected editable arrayDef postability recentCops n s mp =
             editForm = H.map
                 (\pcs -> EeUpdate <| {editState | create = Just {partialCreate | vals = pcs}})
                 <| H.div [] <| listEdit (Tuple.second) (uncurry viewConstTupleEdit) (zip atomDefs partialVals)
+            phEdit = H.map
+                (\ph -> EeUpdate <| {editState | create = Just {partialCreate | desiredPlaceholder = ph}})
+                <| textEditor phReStr (AsEditing <| .desiredPlaceholder partialCreate)
           in case allGood (uncurry asSubmittable) (zip atomDefs partialVals) of
             Just wvs ->
-              [ editForm
+              [ phEdit
+              , editForm
               , H.button
-                  [HE.onClick <| EeSubmit <| NacCreate (Maybe.map Right <| .ref partialCreate) wvs]
+                  [HE.onClick <| EeSubmit <| NacCreate
+                    (asPlaceholder <| .desiredPlaceholder partialCreate)
+                    (Maybe.map Right <| .ref partialCreate)
+                    wvs]
                   [H.text "Create"]
               ]
-            Nothing -> [editForm]
+            Nothing -> [phEdit, editForm]
         Nothing -> case editable of
             Editable ->
               let
@@ -148,7 +157,10 @@ viewArray cssid isSelected editable arrayDef postability recentCops n s mp =
                         PostableLoaded _ postDef ->
                           [ HE.onClick <| EeUpdate
                             { editState
-                            | create = Just {ref = mPrevSeg, vals = emptyPostDefPartial postDef}
+                            | create = Just
+                              { desiredPlaceholder = "ph"
+                              , ref = mPrevSeg
+                              , vals = emptyPostDefPartial postDef}
                             }
                           , HA.style [("background", "green")]
                           ]
@@ -187,3 +199,13 @@ viewArray cssid isSelected editable arrayDef postability recentCops n s mp =
             -- FIXME: Should be able to post to ReadOnly arrays
             ReadOnly -> List.map (viewSeg Dict.empty Dict.empty (always []) (always [])) rSegs
   in H.div [] content
+
+phReStr : String
+phReStr = "^[a-zA-Z0-9]\\w*$"
+
+placeholderRegex : Regex
+placeholderRegex = Regex.regex phReStr
+
+asPlaceholder : String -> Placeholder
+asPlaceholder s = Tagged <| if Regex.contains placeholderRegex s
+    then s else "unnamed"

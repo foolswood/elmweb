@@ -1,6 +1,6 @@
 module TupleViews exposing
-  ( viewWithRecent, viewWithRecentNoSubmission, timeViewer, timeEditor, pInfo
-  , viewConstTupleEdit, asSubmittable)
+  ( viewWithRecent, viewWithRecentNoSubmission, pInfo , viewConstTupleEdit
+  , asSubmittable, textEditor, timeViewer, timeEditor)
 
 import Html exposing (..)
 import Html.Attributes as HA exposing (..)
