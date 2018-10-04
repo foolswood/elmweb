@@ -1,8 +1,10 @@
-module PathManipulation exposing (splitBasename, appendSeg, canonicalise, asPath)
+module PathManipulation exposing
+  ( splitBasename, appendSeg, canonicalise, asPath, appendSegSp)
 
 import Regex exposing (Regex)
 
-import ClTypes exposing (Path, Seg)
+import Tagged.Tagged exposing (Tagged(..))
+import ClTypes exposing (Path, Seg, SubPath)
 
 s : String
 s = "/"
@@ -27,3 +29,6 @@ canonicalise p = if String.endsWith "/" p
 
 asPath : List Seg -> Path
 asPath segs = "/" ++ String.join "/" segs
+
+appendSegSp : SubPath -> Seg -> SubPath
+appendSegSp (Tagged (ns, p)) s = Tagged (ns, appendSeg p s)

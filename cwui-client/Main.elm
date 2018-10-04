@@ -18,7 +18,7 @@ import JsonFudge exposing (serialiseDigest, parseDigest)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
 import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault, Either(..))
-import PathManipulation exposing (appendSeg)
+import PathManipulation exposing (appendSeg, appendSegSp)
 import Digests exposing (Digest, DataChange(..), ToRelayDigest(..), TrcUpdateDigest, TrcSubDigest, Cops, seriesChangeCast, constChangeCast, TaOp, applyDigest, ntsCmp, SubOp(..))
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, requiredPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
@@ -258,10 +258,6 @@ rectifyEdits rs d editFormState =
             <| Dict.map (always <| Dict.map <| always Tuple.second) cops
       in CDict.update ns (Maybe.map go) fs
   in CDict.foldl rectifyNsEdits editFormState <| .nsds d
-
--- FIXME: Find this a home:
-appendSegSp : SubPath -> Seg -> SubPath
-appendSegSp (Tagged (ns, p)) s = Tagged (ns, appendSeg p s)
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = case msg of
