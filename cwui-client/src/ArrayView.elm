@@ -1,31 +1,26 @@
 module ArrayView exposing
-  ( viewArray, defaultChildChoice, remoteChildSegs, rectifyEdits
-  , arrayActionStateUpdate)
+  (viewArray, remoteChildSegs, rectifyEdits , arrayActionStateUpdate)
 
 import Html as H exposing (Html)
 import Html.Events as HE
 import Html.Attributes as HA
 import Dict exposing (Dict)
-import Set exposing (Set)
 import Json.Encode as JE
 import Tuple exposing (second)
 
-import Futility exposing (dictMapMaybe, Either(..), zip, allGood)
+import Futility exposing (Either(..), zip, allGood)
 import HtmlHelpers exposing (listEdit)
-import SequenceOps exposing (SeqOp(..), applySeqOps, inject)
+import SequenceOps exposing (SeqOp(..), applySeqOps)
 import ClTypes exposing (Path, Seg, ArrayDefinition, Namespace, Editable(..), PostDefinition)
 import ClNodes exposing (Node(ContainerNode), ContainerNodeT)
 import Form exposing (FormState(..))
-import EditTypes exposing (NodeEdit(NeChildren), EditEvent(..), NaChildrenT(..), PaChildrenT, NeChildrenT, emptyPartial, NeConstT, ChildSourceStateId)
+import EditTypes exposing
+  ( NodeEdit(NeChildren), EditEvent(..), NaChildrenT(..), PaChildrenT
+  , NeChildrenT, emptyPartial, NeConstT, ChildSourceStateId)
 import RemoteState exposing (Valuespace, Postability(..))
 import Digests exposing (Cops)
 import DragAndDrop exposing (dragStartAttr, dragOverAttr, onDragStart, onDragEnter, onDrop, EffectAllowed(EaMove))
 import TupleViews exposing (viewConstTupleEdit, asSubmittable)
-
-defaultChildChoice : Maybe (List Seg) -> Set Seg
-defaultChildChoice mSegs = case mSegs of
-    Just (seg :: _) -> Set.singleton seg
-    _ -> Set.empty
 
 remoteChildSegs : Valuespace -> Path -> Maybe (List Seg)
 remoteChildSegs vs p = case Dict.get p <| .nodes vs of

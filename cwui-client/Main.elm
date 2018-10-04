@@ -11,21 +11,22 @@ import Process
 
 import Cmp.Set as CSet exposing (CmpSet)
 import Cmp.Dict as CDict
-import Tagged.Tagged exposing (Tagged(..), tagCmp)
+import Tagged.Tagged exposing (Tagged(..))
 import Tagged.Set as TS exposing (TaggedSet)
 import Tagged.Dict as TD
 import JsonFudge exposing (serialiseDigest, parseDigest)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
-import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault, Either(..))
+import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault, Either(Right))
 import PathManipulation exposing (appendSeg, appendSegSp)
-import Digests exposing (Digest, DataChange(..), ToRelayDigest(..), TrcUpdateDigest, TrcSubDigest, Cops, seriesChangeCast, constChangeCast, TaOp, applyDigest, ntsCmp, SubOp(..))
-import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, requiredPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
+import Digests exposing (Digest, DataChange(..), ToRelayDigest(..), TrcUpdateDigest, TrcSubDigest, Cops, seriesChangeCast, constChangeCast, applyDigest, ntsCmp, SubOp(..))
+import RemoteState exposing (RemoteState, remoteStateEmpty, remoteStateLookup, requiredPostTypes, ByNs, Postability)
 import MonoTime
 import Layout exposing (BoundLayout(..), ChildSource(..))
 import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState)
 import TupleViews exposing (viewWithRecent)
-import ArrayView exposing (viewArray, defaultChildChoice, remoteChildSegs, arrayActionStateUpdate)
+-- FIXME: not using arrayActionStateUpdate - use or lose:
+import ArrayView exposing (viewArray, remoteChildSegs, arrayActionStateUpdate)
 import EditTypes exposing
   ( NodeEdit(NeChildren), EditEvent(..), mapEe, NodeAction(..), NaChildrenT(..)
   , NeConstT, constNeConv, seriesNeConv, childrenNeConv, constNaConv
@@ -97,9 +98,6 @@ getTsModel ns m = tsModelEmpty
 --     rts = List.map asSeriesInfo <| allTimeSeries ns <| latestState m
 --   in {tsm | series = rts}
 
-qualifySegs : Path -> Set Seg -> Array Path
-qualifySegs p = Array.fromList << List.map (appendSeg p) << Set.toList
-
 subPathDsid : SubPath -> DataSourceId
 subPathDsid (Tagged (ns, p)) = "path" :: ns :: String.split "/" (String.dropLeft 1 p)
 
@@ -115,7 +113,7 @@ cementedLayout rs bl cSels =
 requiredPaths : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> CmpSet SubPath (Seg, Path)
 requiredPaths rs bl cSels =
   let
-    layoutRequires = CSet.fromList tagCmp
+    layoutRequires = TS.fromList
         <| List.filterMap (Maybe.andThen dspAsPath << Result.toMaybe << dsidToDsp)
         <| Set.toList
         <| Layout.requiredDataSources
@@ -158,7 +156,7 @@ init =
       , nodeFs = initialNodeFs
       , pending = TD.empty
       }
-  in (initialModel, subDiffToCmd (CSet.empty tagCmp) TS.empty initialSubs TS.empty)
+  in (initialModel, subDiffToCmd TS.empty TS.empty initialSubs TS.empty)
 
 -- Update
 
@@ -182,7 +180,7 @@ subDiffToCmd oldP oldPt newP newPt =
     (dSos, ptSos) -> sendDigest <| Trcsd <| TrcSubDigest
         (CDict.fromList ntsCmp ptSos)
         (CDict.empty ntsCmp)
-        (CDict.fromList tagCmp dSos)
+        (TD.fromList dSos)
 
 type Msg
   = AddError DataErrorIndex String
@@ -280,25 +278,23 @@ update msg model = case msg of
         subCmd = subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs postTypeSubs
         queueSquashCmd = Task.perform (always SquashRecent) <| Process.sleep <| .keepRecent model
       in (newM, Cmd.batch [subCmd, queueSquashCmd])
-    SquashRecent ->
-        case .recent model of
-            ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
-            [] -> addDNsError "Tried to squash but no recent" model
+    SquashRecent -> case .recent model of
+        ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
+        [] -> addDNsError "Tried to squash but no recent" model
     SecondPassedTick -> ({model | timeNow = MonoTime.rightNow ()} , Cmd.none)
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
     ViewDebugInfo b -> ({model | showDebugInfo = b}, Cmd.none)
     LayoutUiEvent bl ->
-          let
-            pathSubs = requiredPaths (latestState model) bl (.childSelections model)
-          in
-            ( {model | layout = bl, pathSubs = pathSubs}
-            , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
+      let
+        pathSubs = requiredPaths (latestState model) bl (.childSelections model)
+      in
+        ( {model | layout = bl, pathSubs = pathSubs}
+        , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
     ClockUiEvent ns evt -> case evt of
-            EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
-            EeSubmit t ->
-              (model, sendDigest <| Trcud <| TrcUpdateDigest ns (transportCueDd t) Dict.empty Dict.empty)
+        EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
+        EeSubmit t -> (model , sendDigest <| Trcud <| TrcUpdateDigest ns (transportCueDd t) Dict.empty Dict.empty)
     TsUiEvent tsMsg -> case processTimeSeriesEvent tsMsg <| getTsModel (Tagged "FIXME") model of
         -- FIXME: Hard coded clock source
         TsemSeek t -> (model, sendDigest <| Trcud <| TrcUpdateDigest (Tagged "engine") (transportCueDd t) Dict.empty Dict.empty)
@@ -354,7 +350,7 @@ update msg model = case msg of
                                     ns p
                                     {model | nodeFs = CDict.update ns (Maybe.map <| formInsert p Nothing) <| .nodeFs model}
                                 , updateCmd
-                                    (Dict.singleton p <| CDict.singleton tagCmp phPh (Nothing,
+                                    (Dict.singleton p <| TD.singleton phPh (Nothing,
                                         { args = List.map2
                                             (\fieldDesc wvs -> Futility.zip (List.map defWireType <| Tuple.second fieldDesc) wvs)
                                             (.fieldDescs pdef) postArgs
@@ -372,7 +368,7 @@ modifyChildPending mod ns p model =
   let
     fillBlank mpac = case mpac of
         Just (PaChildren e) -> e
-        _ -> {childMods = Dict.empty, creates = CDict.empty tagCmp}
+        _ -> {childMods = Dict.empty, creates = TD.empty}
     paUpdate = Just << PaChildren << mod << fillBlank
   in {model | pending = CDict.update
     ns
@@ -386,7 +382,7 @@ modifySelection : (CmpSet SubPath (Seg, Path) -> CmpSet SubPath (Seg, Path)) -> 
 modifySelection mod cssid model =
   let
     newChildSelections = Dict.update
-        cssid (Just << mod << Maybe.withDefault (CSet.empty tagCmp))
+        cssid (Just << mod << Maybe.withDefault TS.empty)
         <| .childSelections model
     newPathSubs = requiredPaths
         (latestState model) (.layout model) newChildSelections
@@ -489,24 +485,6 @@ view m = div []
 
 viewErrors : List (Namespace, DataErrorIndex, List String) -> Html a
 viewErrors errs = ul [] (List.map (\s -> li [] [text <| toString s]) errs)
-
-pathEditView : Maybe SubPath -> FormState SubPath -> Html (EditEvent SubPath SubPath)
-pathEditView mp fs = case fs of
-    FsViewing -> case mp of
-        Nothing -> text "Attempting to view unfilled path"
-        Just p -> span [onClick <| EeUpdate p] [text <| toString p]
-    FsEditing sp ->
-      let
-        (partialNs, partialPath) = unSubPath sp
-        (Tagged nsSeg) = partialNs
-        buttonText = case mp of
-            Nothing -> "Set"
-            Just p -> "Replace " ++ (toString p)
-      in Html.span []
-        [ button [onClick <| EeSubmit sp] [text buttonText]
-        , input [value nsSeg, type_ "text", onInput <| \pns -> EeUpdate (Tagged (pns, partialPath))] []
-        , input [value partialPath, type_ "text", onInput <| EeUpdate << subPath partialNs] []
-        ]
 
 viewLoading : String -> Html a
 viewLoading s = text <| "Loading " ++ s ++ "..."
