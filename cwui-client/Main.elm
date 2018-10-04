@@ -447,10 +447,10 @@ view : Model -> Html Msg
 view m = div []
   [ viewErrors <| .errs m
   , button [onClick SwapViewMode] [text "switcheroo"]
-  , text <| "# Bundles: " ++ (toString <| .bundleCount m)
   , if .showDebugInfo m
       then div []
         [ button [onClick <| ViewDebugInfo False] [text "Hide debug"]
+        , text <| "# Bundles: " ++ (toString <| .bundleCount m)
         , DebugInfo.viewRemoteState <| latestState m
         ]
       else button [onClick <| ViewDebugInfo True] [text "Show debug"]
