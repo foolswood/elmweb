@@ -23,7 +23,7 @@ import Digests exposing (Digest, DataChange(..), ToRelayDigest(..), TrcUpdateDig
 import RemoteState exposing (RemoteState, remoteStateEmpty, NodeMap, TypeMap, TypeAssignMap, remoteStateLookup, requiredPostTypes, ByNs, Valuespace, Postability, allTimeSeries)
 import MonoTime
 import Layout exposing (BoundLayout(..), ChildSource(..))
-import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState, formUpdateEditing)
+import Form exposing (FormStore, formStoreEmpty, FormState(..), formState, formInsert, castFormState)
 import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, defaultChildChoice, remoteChildSegs, arrayActionStateUpdate)
 import EditTypes exposing
