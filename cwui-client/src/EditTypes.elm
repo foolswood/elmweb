@@ -104,6 +104,7 @@ type PartialEdit
   = PeEnum (Maybe Int)
   | PeTime PartialTime
   | PeString String
+  | PeInt (Maybe Int)
   | PeFloat (Maybe Float)
 
 pTimeConv : Conv PartialEdit PartialTime
@@ -130,6 +131,14 @@ pStringConv =
     _ -> Err "Not PeString"
   }
 
+pIntConv : Conv PartialEdit (Maybe Int)
+pIntConv =
+  { wrap = PeInt
+  , unwrap = \pe -> case pe of
+    PeInt i -> Ok i
+    _ -> Err "Not PeInt"
+  }
+
 pFloatConv : Conv PartialEdit (Maybe Float)
 pFloatConv =
   { wrap = PeFloat
@@ -147,6 +156,7 @@ asFull : (PartialEdit, AtomDef) -> Maybe WireValue
 asFull ped = case ped of
     (PeEnum mi, ADEnum _) -> Maybe.map WvWord32 mi
     (PeTime pt, ADTime bs) -> Maybe.map WvTime <| asFullTime bs pt
+    (PeInt mi, ADInt32 bs) -> Maybe.map WvInt32 mi
     (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
         [] -> Nothing
         _ -> Just <| WvString s
@@ -163,6 +173,8 @@ asPartial d mwv = case (d, mwv) of
     (ADEnum _, _) -> PeEnum Nothing
     (ADTime bs, Just (WvTime t)) -> PeTime <| asPartialTime bs <| Just t
     (ADTime bs, _) -> PeTime <| asPartialTime bs Nothing
+    (ADInt32 bs, Just (WvInt32 i)) -> PeInt <| Just i
+    (ADInt32 bs, _) -> PeInt Nothing
     -- FIXME: This is utter tat!
     _ -> PeEnum Nothing
 

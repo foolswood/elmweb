@@ -11,7 +11,10 @@ import ClTypes exposing
   ( Bounds, Attributee, Seg, WireValue, AtomDef(..), TupleDefinition, Time
   , Editable(..), Definition
   , asInt32, asInt64, asFloat, asDouble, asString, asTime, asWord32)
-import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial, fullPartial)
+import EditTypes exposing
+  ( EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv
+  , pIntConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial
+  , fullPartial)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
 import Digests exposing (ConstChangeT)
@@ -172,6 +175,7 @@ viewAtomEdit d =
     ADEnum opts -> castedView asWord32 pEnumConv <| enumEditor opts
     ADTime bounds -> castedView asTime pTimeConv <| timeEditor bounds
     ADString (reString, _) -> castedView asString pStringConv <| textEditor reString
+    ADInt32 bounds -> castedView asInt32 pIntConv <| intEditor bounds
     ADFloat bounds -> castedView asFloat pFloatConv <| floatEditor bounds
     ADDouble bounds -> castedView asDouble pFloatConv <| floatEditor bounds
     _ -> always <| text <| "Implement me: " ++ toString d
@@ -203,6 +207,20 @@ textEditor : String -> AtomState String String -> Html String
 textEditor reString aes = case aes of
     AsViewing upstream ev -> span [onClick ev] [textViewer reString upstream]
     AsEditing ev -> input [attribute "regex" reString, value ev, onInput identity] []
+
+intEditor : Bounds Int -> AtomState Int (Maybe Int) -> Html (Maybe Int)
+intEditor bounds aes = case aes of
+    AsViewing upstream ev -> span [onClick ev] [intViewer bounds upstream]
+    AsEditing ev ->
+      let
+        attrs =
+          [ type_ "number", onInput <| Result.toMaybe << String.toInt
+          , step "1"
+          ]
+          ++ maybeToList (Maybe.map (HA.min << toString) <| .minBound bounds)
+          ++ maybeToList (Maybe.map (HA.max << toString) <| .maxBound bounds)
+          ++ maybeToList (Maybe.map (value << toString) ev)
+      in input attrs []
 
 floatEditor : Bounds Float -> AtomState Float (Maybe Float) -> Html (Maybe Float)
 floatEditor bounds aes = case aes of
