@@ -156,7 +156,7 @@ applyDigest d rs =
     nsCorrectedVss = applyRootChanges vsEmpty d rs
     applyNsd ns nsd (ars, aerrs) = case CDict.get ns ars of
         Nothing ->
-            (ars, CDict.insert ns [(DGlobalError, ["Namespace missing from root"])] aerrs)
+            (ars, CDict.insert ns [(DNsError, ["Namespace missing from root"])] aerrs)
         Just vs -> let (newVs, es) = applyNsDigest nsd vs in
             (CDict.insert ns newVs ars, CDict.insert ns es aerrs)
     (appliedVss, errs) = CDict.foldl applyNsd (nsCorrectedVss, TD.empty) <| .nsds d

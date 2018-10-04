@@ -199,8 +199,8 @@ type Msg
   | TsUiEvent TsMsg
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
 
-addDGlobalError : String -> Model -> (Model, Cmd Msg)
-addDGlobalError msg m = ({m | errs = (Tagged "UI_INTERNAL", DGlobalError, [msg]) :: .errs m}, Cmd.none)
+addDNsError : String -> Model -> (Model, Cmd Msg)
+addDNsError msg m = ({m | errs = (Tagged "UI_INTERNAL", DNsError, [msg]) :: .errs m}, Cmd.none)
 
 latestState : Model -> RemoteState
 latestState m =
@@ -290,7 +290,7 @@ update msg model = case msg of
     SquashRecent ->
         case .recent model of
             ((d, s) :: remaining) -> ({model | state = s, recent = remaining}, Cmd.none)
-            [] -> addDGlobalError "Tried to squash but no recent" model
+            [] -> addDNsError "Tried to squash but no recent" model
     SecondPassedTick -> ({model | timeNow = MonoTime.rightNow ()} , Cmd.none)
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
@@ -321,7 +321,7 @@ update msg model = case msg of
           in ({model | nodeFs = newFs}, Cmd.none)
         EeSubmit na -> case na of
             NaConst wvs -> case remoteStateLookup ns p <| latestState model of
-                Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
+                Err msg -> addDNsError ("Error submitting: " ++ msg) model
                 Ok (_, def, _, _) -> case def of
                     TupleDef {types} ->
                       let
@@ -334,10 +334,10 @@ update msg model = case msg of
                           , nodeFs = CDict.update ns (Maybe.map <| formInsert p Nothing) <| .nodeFs model
                           }
                       in (newM, sendDigest <| Trcud d)
-                    _ -> addDGlobalError "Def type mismatch" model
-            NaSeries sops -> addDGlobalError "Series submit not implemented" model
+                    _ -> addDNsError "Def type mismatch" model
+            NaSeries sops -> addDNsError "Series submit not implemented" model
             NaChildren nac -> case remoteStateLookup ns p <| latestState model of
-                Err msg -> addDGlobalError ("Error submitting: " ++ msg) model
+                Err msg -> addDNsError ("Error submitting: " ++ msg) model
                 Ok (_, def, _, postability) ->
                   let
                     updateCmd creates sos = sendDigest <| Trcud <| TrcUpdateDigest ns Dict.empty creates sos
@@ -368,10 +368,10 @@ update msg model = case msg of
                                         }))
                                     Dict.empty
                                 )
-                            _ -> addDGlobalError "Create on unpostable type" model
+                            _ -> addDNsError "Create on unpostable type" model
                         NacSelect cssid seg -> modifySelection (CSet.insert (appendSegSp sp seg)) cssid model
                         NacDeselect cssid seg -> modifySelection (CSet.remove (appendSegSp sp seg)) cssid model
-                    _ -> addDGlobalError "Child modification on non-array" model
+                    _ -> addDNsError "Child modification on non-array" model
 
 modifyChildPending : (EditTypes.PaChildrenT -> EditTypes.PaChildrenT) -> Namespace -> Path -> Model -> Model
 modifyChildPending mod ns p model =
@@ -415,7 +415,7 @@ subscriptions model = Sub.batch
 eventFromNetwork : String -> Msg
 eventFromNetwork s = case parseDigest s of
     (Ok d) -> NetworkEvent d
-    (Err e) -> AddError DGlobalError (e ++ "  <-  " ++ s)
+    (Err e) -> AddError DNsError (e ++ "  <-  " ++ s)
 
 -- View
 

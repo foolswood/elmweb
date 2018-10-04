@@ -177,7 +177,7 @@ decodePath = JD.string
 
 decodeDataErrIdx : JD.Decoder DataErrorIndex
 decodeDataErrIdx = decodeTagged (Dict.fromList
-    [ ("g", JD.succeed DGlobalError)
+    [ ("n", JD.succeed DNsError)
     , ("p", JD.map DPathError decodePath)
     , ("t", JD.map2 DTimePointError decodePath decodeTpId)
     ])

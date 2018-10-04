@@ -170,6 +170,6 @@ type SubErrorIndex
   | SPostTypeError (Tagged PostDefinition TypeName)
 
 type DataErrorIndex
-  = DGlobalError
+  = DNsError
   | DPathError Path
   | DTimePointError Path TpId
