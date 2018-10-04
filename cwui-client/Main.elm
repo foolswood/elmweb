@@ -67,6 +67,7 @@ type alias Model =
   , bundleCount : Int
   , keepRecent : Float
   , timeNow : Float
+  , showDebugInfo : Bool
   -- Layout:
   , layout : BoundLayout ChildSourceStateId
   , childSelections : ChildSelections
@@ -151,6 +152,7 @@ init =
       , bundleCount = 0
       , keepRecent = 5000.0
       , timeNow = 0.0
+      , showDebugInfo = False
       , layout = initialLayout
       , childSelections = childSelections
       , clockFs = TD.empty
@@ -190,6 +192,7 @@ subDiffToCmd oldP oldPt newP newPt =
 type Msg
   = AddError DataErrorIndex String
   | SwapViewMode
+  | ViewDebugInfo Bool
   | NetworkEvent Digest
   | SquashRecent
   | SecondPassedTick
@@ -295,6 +298,7 @@ update msg model = case msg of
     SwapViewMode -> case .viewMode model of
         UmEdit -> ({model | viewMode = UmView}, Cmd.none)
         UmView -> ({model | viewMode = UmEdit}, Cmd.none)
+    ViewDebugInfo b -> ({model | showDebugInfo = b}, Cmd.none)
     LayoutUiEvent bl ->
           let
             pathSubs = requiredPaths (latestState model) bl (.childSelections model)
@@ -463,7 +467,12 @@ view m = div []
   [ viewErrors <| .errs m
   , button [onClick SwapViewMode] [text "switcheroo"]
   , text <| "# Bundles: " ++ (toString <| .bundleCount m)
-  , DebugInfo.viewRemoteState <| latestState m
+  , if .showDebugInfo m
+      then div []
+        [ button [onClick <| ViewDebugInfo False] [text "Hide debug"]
+        , DebugInfo.viewRemoteState <| latestState m
+        ]
+      else button [onClick <| ViewDebugInfo True] [text "Show debug"]
   , case .viewMode m of
     UmEdit -> Html.map LayoutUiEvent <| Layout.edit
         (text << toString)

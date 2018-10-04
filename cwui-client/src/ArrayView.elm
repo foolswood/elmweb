@@ -189,5 +189,6 @@ viewArray cssid isSelected editable arrayDef postability recentCops n s mp =
                         dragAttrsFor (\seg -> [addBtn <| Just seg, delBtn seg]))
                     allSegs
               in addBtn Nothing :: segViews
+            -- FIXME: Should be able to post to ReadOnly arrays
             ReadOnly -> List.map (viewSeg Dict.empty Dict.empty (always []) (always [])) rSegs
   in H.div [] content
