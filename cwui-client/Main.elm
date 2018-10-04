@@ -71,8 +71,6 @@ type alias Model =
   -- Layout:
   , layout : BoundLayout ChildSourceStateId
   , childSelections : ChildSelections
-  -- Special:
-  , clockFs : ByNs (FormState EditTypes.PartialTime)
   -- Data:
   , pathSubs : CmpSet SubPath (Seg, Path)
   , postTypeSubs : TaggedSet PostDefinition TypeName
@@ -80,11 +78,8 @@ type alias Model =
   , state : RemoteState
   , pending : Pendings
   , nodeFs : NodesFs
+  , clockFs : ByNs (FormState EditTypes.PartialTime)
   }
-
--- FIXME: Delete later
-type SpecialEvent
-  = SpeClock Namespace (EditEvent EditTypes.PartialTime Time)
 
 -- FIXME: Just always returns empty
 getTsModel : Namespace -> Model -> TsModel
@@ -197,8 +192,7 @@ type Msg
   | SquashRecent
   | SecondPassedTick
   | LayoutUiEvent (BoundLayout ChildSourceStateId)
-  -- FIXME: Get rid of special
-  | SpecialUiEvent SpecialEvent
+  | ClockUiEvent Namespace (EditEvent EditTypes.PartialTime Time)
   | TsUiEvent TsMsg
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
 
@@ -305,8 +299,7 @@ update msg model = case msg of
           in
             ( {model | layout = bl, pathSubs = pathSubs}
             , subDiffToCmd (.pathSubs model) (.postTypeSubs model) pathSubs (.postTypeSubs model))
-    SpecialUiEvent se -> case se of
-        SpeClock ns evt -> case evt of
+    ClockUiEvent ns evt -> case evt of
             EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
             EeSubmit t ->
               (model, sendDigest <| Trcud <| TrcUpdateDigest ns (transportCueDd t) Dict.empty Dict.empty)
@@ -493,7 +486,7 @@ view m = div []
             Ok (DsClock s) ->
               let
                 transp = transport s (latestState m) (.timeNow m)
-              in Html.map (SpecialUiEvent << SpeClock s) <| transportClockView transp <| CDict.getWithDefault FsViewing s <| .clockFs m
+              in Html.map (ClockUiEvent s) <| transportClockView transp <| CDict.getWithDefault FsViewing s <| .clockFs m
             Err msg -> Html.text msg)
         (cementedLayout (latestState m) (.layout m) (.childSelections m))
   ]
