@@ -131,7 +131,7 @@ encodeCreates = encodeCDict encodePlaceholder (encodePair encodeAttributee encod
 encodeSeqOp : SeqOp (Either Placeholder Seg) -> JE.Value
 encodeSeqOp op = case op of
     SoPresentAfter ref -> tagged '>' <| encodeNullable (encodeEither encodePlaceholder encodeSeg) ref
-    SoAbsent -> tagged '-' JE.null
+    SoAbsent -> tagged 'x' JE.null
 
 encodeCops : Cops (Either Placeholder Seg) -> JE.Value
 encodeCops = encodeDict encodeSeg <| encodePair encodeAttributee <| encodeSeqOp
@@ -393,7 +393,7 @@ decodeErr = decodePair decodeDataErrIdx (JD.list JD.string)
 decodeSeqOp : JD.Decoder (SeqOp Seg)
 decodeSeqOp = decodeTagged <| Dict.fromList
   [ (">", JD.map SoPresentAfter <| JD.nullable decodeSeg)
-  , ("-", JD.succeed SoAbsent)
+  , ("x", JD.succeed SoAbsent)
   ]
 
 decodeContOps : JD.Decoder (Cops Seg)
