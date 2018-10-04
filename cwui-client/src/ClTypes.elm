@@ -108,6 +108,16 @@ asTime wv = case wv of
     WvTime t -> Ok t
     _ -> Err "Not a Time"
 
+asInt32 : WireValue -> Result String Int
+asInt32 wv = case wv of
+    WvInt32 i -> Ok i
+    _ -> Err "Not an Int32"
+
+asInt64 : WireValue -> Result String Int
+asInt64 wv = case wv of
+    WvInt64 i -> Ok i
+    _ -> Err "Not an Int64"
+
 asWord32 : WireValue -> Result String Int
 asWord32 wv = case wv of
     WvWord32 w -> Ok w

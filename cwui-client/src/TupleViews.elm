@@ -7,7 +7,10 @@ import Html.Attributes as HA exposing (..)
 import Html.Events exposing (onInput, onClick)
 
 import Futility exposing (itemAtIndex, castMaybe, castList, replaceIdx, Either(..), maybeToList, zip, allGood, lastJust, last)
-import ClTypes exposing (Bounds, Attributee, Seg, WireValue, asFloat, asDouble, asString, asTime, AtomDef(..), TupleDefinition, Time, Editable(..), Definition, asWord32)
+import ClTypes exposing
+  ( Bounds, Attributee, Seg, WireValue, AtomDef(..), TupleDefinition, Time
+  , Editable(..), Definition
+  , asInt32, asInt64, asFloat, asDouble, asString, asTime, asWord32)
 import EditTypes exposing (EditEvent(..), NeConstT, NaConstT, pEnumConv, pTimeConv, pStringConv, pFloatConv, PartialEdit(..), PartialTime, asFull, emptyPartial, fullPartial)
 import Form exposing (AtomState(..), castAs, FormState(..))
 import ClNodes exposing (ConstDataNodeT)
@@ -110,6 +113,8 @@ viewAtom def wv =
   in case def of
     ADTime bounds -> castedView asTime <| timeViewer bounds
     ADEnum opts -> castedView asWord32 <| enumViewer opts
+    ADInt32 bounds -> castedView asInt32 <| intViewer bounds
+    ADInt64 bounds -> castedView asInt64 <| intViewer bounds
     ADFloat bounds -> castedView asFloat <| floatViewer bounds
     ADDouble bounds -> castedView asDouble <| floatViewer bounds
     ADString (reString, _) -> castedView asString <| textViewer reString
@@ -124,6 +129,9 @@ refViewer tn tgt = text tgt
 
 floatViewer : Bounds Float -> Float -> Html a
 floatViewer b f = text <| toString f
+
+intViewer : Bounds Int -> Int -> Html a
+intViewer b f = text <| toString f
 
 enumViewer : List String -> Int -> Html a
 enumViewer opts idx = text <| case itemAtIndex idx opts of
