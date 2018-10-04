@@ -358,7 +358,8 @@ update msg model = case msg of
                             RemoteState.PostableLoaded _ pdef ->
                                 ( modifyChildPending
                                     (\p -> {p | creates = CDict.insert phPh (ref, postArgs) <| .creates p})
-                                    ns p model
+                                    ns p
+                                    {model | nodeFs = CDict.update ns (Maybe.map <| formInsert p Nothing) <| .nodeFs model}
                                 , updateCmd
                                     (Dict.singleton p <| CDict.singleton tagCmp phPh (Nothing,
                                         { args = List.map2
