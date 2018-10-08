@@ -91,9 +91,6 @@ resolveChild getDsids resolveDynamic childSource =
             (instantiateTemplate (++) expandWildcards subLayout)
             (getDsids cssid)
 
-lAppend : a -> List a -> List a
-lAppend a l = l ++ [a]
-
 edit
    : (dynConfig -> Html dynConfig)-> BoundLayout dynConfig DataSourceId ChildSourceStateId
   -> Html (BoundLayout dynConfig DataSourceId ChildSourceStateId)
