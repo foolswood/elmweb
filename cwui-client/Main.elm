@@ -82,23 +82,17 @@ type alias Model =
   , pending : Pendings
   , nodeFs : NodesFs
   , clockFs : ByNs (FormState EditTypes.PartialTime)
+  , seriesStates : Dict SeriesStateId TsModel
   }
 
 -- FIXME: Just always returns empty
-getTsModel : SeriesStateId -> Model -> TsModel
-getTsModel ssid m = tsModelEmpty
---   let
---     tsm = Maybe.withDefault tsModelEmpty <| CDict.get ns <| .timelines m
---     -- FIXME: Ignores recents and just shows the latest (and reuses path as label):
---     asPointInfo ts = {ts | points = Dict.map
---         (\t tp -> {base = (t, tp), recents = [], fs = FsViewing, mp = Nothing})
---         <| .points ts}
+-- getSeriesInfo : DataSourceId -> Model -> TimeSeries.SeriesInfo
+-- getSeriesInfo dsid m =
 --     asSeriesInfo (p, n, d, e) =
 --       { path = p, editable = e, def = d, label = p
 --       , transience = Transience.TSteady , series = asPointInfo <| .values n
 --       , changedTimes = Dict.empty}
 --     rts = List.map asSeriesInfo <| allTimeSeries ns <| latestState m
---   in {tsm | series = rts}
 
 subPathDsid : SubPath -> DataSourceId
 subPathDsid (Tagged (ns, p)) = "path" :: ns :: String.split "/" (String.dropLeft 1 p)
@@ -161,6 +155,7 @@ init =
       , state = initialState
       , nodeFs = initialNodeFs
       , pending = TD.empty
+      , seriesStates = Dict.empty
       }
   in (initialModel, subDiffToCmd TS.empty TS.empty initialSubs TS.empty)
 
@@ -301,7 +296,7 @@ update msg model = case msg of
     ClockUiEvent ns evt -> case evt of
         EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
         EeSubmit t -> (model , sendDigest <| Trcud <| TrcUpdateDigest ns (transportCueDd t) Dict.empty Dict.empty)
-    TsUiEvent ssid tsMsg -> case processTimeSeriesEvent tsMsg <| getTsModel ssid model of
+    TsUiEvent ssid tsMsg -> case processTimeSeriesEvent tsMsg <| getWithDefault tsModelEmpty ssid <| .seriesStates model of
         -- FIXME: Hard coded clock source
         TsemSeek t -> (model, sendDigest <| Trcud <| TrcUpdateDigest (Tagged "engine") (transportCueDd t) Dict.empty Dict.empty)
         -- FIXME: Does nothing
@@ -474,7 +469,9 @@ view m = div []
             rTransp = transport (Tagged "engine") (latestState m) (.timeNow m)
           in case rTransp of
             Ok transp -> Html.map (TsUiEvent ssid) <| viewTimeSeries
-                (getTsModel ssid m) transp
+                (getWithDefault tsModelEmpty ssid <| .seriesStates m)
+                [] -- (List.map (getSeriesInfo m) dsids)
+                transp
             Err msg -> Html.text <| toString msg)
         (\dsid cssid -> case dsidToDsp dsid of
             Ok (DsPath sp) -> Html.map (NodeUiEvent sp) <| viewPath

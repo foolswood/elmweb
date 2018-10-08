@@ -63,8 +63,7 @@ type alias SeriesInfo =
   }
 
 type alias TsModel =
-  { series : List SeriesInfo
-  , vZoom : Float
+  { vZoom : Float
   , hZoom : Float
   , viewport : Viewport
   , selectedTps : Dict Path (Set TpId)
@@ -72,8 +71,7 @@ type alias TsModel =
 
 tsModelEmpty : TsModel
 tsModelEmpty =
-  { series = []
-  , vZoom = 1.0
+  { vZoom = 1.0
   , hZoom = 1.0
   , viewport = Viewport 0 0
   , selectedTps = Dict.empty
@@ -96,8 +94,8 @@ toEm f = toString f ++ "em"
 mapEm : List Float -> String
 mapEm = String.join " " << List.map toEm
 
-viewTimeSeries : TsModel -> Transport -> Html TsMsg
-viewTimeSeries s transp =
+viewTimeSeries : TsModel -> List SeriesInfo -> Transport -> Html TsMsg
+viewTimeSeries tsm series transp =
   let
     controlsHeight = 2.0
     labelWidth = 8.0
@@ -107,12 +105,12 @@ viewTimeSeries s transp =
         , ("position", "sticky"), ("left", "0px"), ("top", "0px")
         , ("z-index", "5"), ("background", "lightgray")
         ]]
-      [ H.map HZoom <| viewTimeScale <| .hZoom s
-      , H.map VZoom <| viewTimeScale <| .vZoom s
+      [ H.map HZoom <| viewTimeScale <| .hZoom tsm
+      , H.map VZoom <| viewTimeScale <| .vZoom tsm
       ]
-    ticks = H.map PlayheadSet <| viewTicks controlsHeight labelWidth (.hZoom s) (.left <| .viewport s) (250, 0)
+    ticks = H.map PlayheadSet <| viewTicks controlsHeight labelWidth (.hZoom tsm) (.left <| .viewport tsm) (250, 0)
     controls = div [] [scaleControl, ticks]
-    seriesHeights = getHeights (.vZoom s) <| .series s
+    seriesHeights = getHeights (.vZoom tsm) series
     totalHeight = controlsHeight + List.sum seriesHeights
     rowStyles =
       [ gridStyle
@@ -128,17 +126,17 @@ viewTimeSeries s transp =
         [style dgStyles]
         <| List.map
             (\si -> H.map (eitherToEvent <| .path si) <| viewTsData
-                (.editable si) (.def si) (.hZoom s) (.series si)
+                (.editable si) (.def si) (.hZoom tsm) (.series si)
                 (.changedTimes si) <| Maybe.withDefault Set.empty <|
-                    Dict.get (.path si) <| .selectedTps s)
-            <| .series s
+                    Dict.get (.path si) <| .selectedTps tsm)
+            series
     labelGrid = div
       [ style <| rowStyles ++
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
         , ("background", "gray"), ("z-index", "4")
         ]]
-      <| List.map (\si -> viewTsLabel (.label si) (.transience si)) <| .series s
-    playhead = viewPlayhead totalHeight labelWidth (.hZoom s) transp
+      <| List.map (\si -> viewTsLabel (.label si) (.transience si)) series
+    playhead = viewPlayhead totalHeight labelWidth (.hZoom tsm) transp
   in div
     [ style [("height", "200px"), ("overflow", "auto"), ("position", "relative")]
     , onScrollEm SetViewport
@@ -382,7 +380,7 @@ viewPlayhead height offset scale transp =
 
 type TsExternalMsg
   = TsemUpdate TsModel
-  | TsemPointChange Path TpId NaTimePoint
+  | TsemEdit Path TsEditEvt
   | TsemSeek Time
 
 processTimeSeriesEvent : TsMsg -> TsModel -> TsExternalMsg
@@ -402,13 +400,14 @@ processTimeSeriesEvent evt m = case evt of
           in
             if Set.isEmpty nps then Nothing else Just nps
       in TsemUpdate {m | selectedTps = Dict.update p newSelectedTps <| .selectedTps m}
-    TsEdit path tpEdit -> case tpEdit of
-        EeUpdate (t, tpid, v) ->
-          let
-            updateSeries = TimeSeries.update tpid (\tpi -> {tpi | fs = FsEditing v})
-          in TsemUpdate {m | series = updateSeriesInfo path updateSeries <| .series m}
-        -- FIXME: Submission should do something!
-        EeSubmit (tpid, v) -> TsemPointChange path tpid v
+    TsEdit path tpEdit -> TsemEdit path tpEdit
+-- FIXME: Rest of this file move somewhere else?:
+--         EeUpdate (t, tpid, v) ->
+--           let
+--             updateSeries = TimeSeries.update tpid (\tpi -> {tpi | fs = FsEditing v})
+--           in TsemUpdate {m | series = updateSeriesInfo path updateSeries <| .series m}
+--         -- FIXME: Submission should do something!
+--         EeSubmit (tpid, v) -> TsemPointChange path tpid v
 
 updateSeriesInfo
    : Path -> (TimeSeries PointInfo -> TimeSeries PointInfo)
