@@ -70,7 +70,7 @@ type alias Model =
   , timeNow : Float
   , showDebugInfo : Bool
   -- Layout:
-  , layout : BoundLayout ChildSourceStateId
+  , layout : BoundLayout ChildSourceStateId DataSourceId
   , childSelections : ChildSelections
   -- Data:
   , pathSubs : CmpSet SubPath (Seg, Path)
@@ -101,7 +101,9 @@ getTsModel ns m = tsModelEmpty
 subPathDsid : SubPath -> DataSourceId
 subPathDsid (Tagged (ns, p)) = "path" :: ns :: String.split "/" (String.dropLeft 1 p)
 
-cementedLayout : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> Layout.ConcreteBoundLayout
+cementedLayout
+   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId
+  -> ChildSelections -> Layout.ConcreteBoundLayout DataSourceId
 cementedLayout rs bl cSels =
   let
     cssidSelected cssid = List.map subPathDsid <| CSet.toList <| getWithDefault TS.empty cssid cSels
@@ -110,7 +112,9 @@ cementedLayout rs bl cSels =
     cssidSelected
     bl
 
-requiredPaths : RemoteState -> BoundLayout ChildSourceStateId -> ChildSelections -> CmpSet SubPath (Seg, Path)
+requiredPaths
+   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId
+  -> ChildSelections -> CmpSet SubPath (Seg, Path)
 requiredPaths rs bl cSels =
   let
     layoutRequires = TS.fromList
@@ -189,7 +193,7 @@ type Msg
   | NetworkEvent Digest
   | SquashRecent
   | SecondPassedTick
-  | LayoutUiEvent (BoundLayout ChildSourceStateId)
+  | LayoutUiEvent (BoundLayout ChildSourceStateId DataSourceId)
   | ClockUiEvent Namespace (EditEvent EditTypes.PartialTime Time)
   | TsUiEvent TsMsg
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
@@ -423,7 +427,7 @@ dsidToDsp dsid = case dsid of
 dropCssid : ChildSourceStateId
 dropCssid = ["drop"]
 
-dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> List (BoundLayout ChildSourceStateId)
+dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> List (BoundLayout ChildSourceStateId DataSourceId)
 dynamicLayout rs dsid seriesCssid = case dsidToDsp dsid of
     Ok (DsPath sp) ->
       let
