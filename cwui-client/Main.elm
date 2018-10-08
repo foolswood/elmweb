@@ -58,6 +58,8 @@ type alias NodesFs = ByNs NodeFs
 type alias Pending = Dict Path PendingActions
 type alias Pendings = ByNs Pending
 
+type alias SeriesStateId = Int
+
 type alias ChildSelection = CmpSet SubPath (Seg, Path)
 type alias ChildSelections = Dict ChildSourceStateId ChildSelection
 
@@ -70,7 +72,7 @@ type alias Model =
   , timeNow : Float
   , showDebugInfo : Bool
   -- Layout:
-  , layout : BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId
+  , layout : BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId SeriesStateId
   , childSelections : ChildSelections
   -- Data:
   , pathSubs : CmpSet SubPath (Seg, Path)
@@ -83,8 +85,8 @@ type alias Model =
   }
 
 -- FIXME: Just always returns empty
-getTsModel : Namespace -> Model -> TsModel
-getTsModel ns m = tsModelEmpty
+getTsModel : SeriesStateId -> Model -> TsModel
+getTsModel ssid m = tsModelEmpty
 --   let
 --     tsm = Maybe.withDefault tsModelEmpty <| CDict.get ns <| .timelines m
 --     -- FIXME: Ignores recents and just shows the latest (and reuses path as label):
@@ -102,8 +104,8 @@ subPathDsid : SubPath -> DataSourceId
 subPathDsid (Tagged (ns, p)) = "path" :: ns :: String.split "/" (String.dropLeft 1 p)
 
 cementedLayout
-   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId
-  -> ChildSelections -> Layout.ConcreteBoundLayout DataSourceId ChildSourceStateId
+   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId ssid
+  -> ChildSelections -> Layout.ConcreteBoundLayout DataSourceId ChildSourceStateId ssid
 cementedLayout rs bl cSels =
   let
     cssidSelected cssid = List.map subPathDsid <| CSet.toList <| getWithDefault TS.empty cssid cSels
@@ -113,7 +115,7 @@ cementedLayout rs bl cSels =
     bl
 
 requiredPaths
-   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId
+   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId ssid
   -> ChildSelections -> CmpSet SubPath (Seg, Path)
 requiredPaths rs bl cSels =
   let
@@ -138,7 +140,7 @@ init =
         , BlView ["path", "engine", "types"] ["clients"]
         , BlContainer <| CsTemplate ["clients"] <| BlView [] dropCssid
         , BlView ["clock", "engine"] dropCssid
-        , BlSeries ["series"]
+        , BlSeries 0 ["series"]
         ]
     childSelections = Dict.empty
     initialState = remoteStateEmpty
@@ -193,9 +195,9 @@ type Msg
   | NetworkEvent Digest
   | SquashRecent
   | SecondPassedTick
-  | LayoutUiEvent (BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId)
+  | LayoutUiEvent (BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId SeriesStateId)
   | ClockUiEvent Namespace (EditEvent EditTypes.PartialTime Time)
-  | TsUiEvent TsMsg
+  | TsUiEvent SeriesStateId TsMsg
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
 
 addDNsError : String -> Model -> (Model, Cmd Msg)
@@ -299,7 +301,7 @@ update msg model = case msg of
     ClockUiEvent ns evt -> case evt of
         EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
         EeSubmit t -> (model , sendDigest <| Trcud <| TrcUpdateDigest ns (transportCueDd t) Dict.empty Dict.empty)
-    TsUiEvent tsMsg -> case processTimeSeriesEvent tsMsg <| getTsModel (Tagged "FIXME") model of
+    TsUiEvent ssid tsMsg -> case processTimeSeriesEvent tsMsg <| getTsModel ssid model of
         -- FIXME: Hard coded clock source
         TsemSeek t -> (model, sendDigest <| Trcud <| TrcUpdateDigest (Tagged "engine") (transportCueDd t) Dict.empty Dict.empty)
         -- FIXME: Does nothing
@@ -427,7 +429,9 @@ dsidToDsp dsid = case dsid of
 dropCssid : ChildSourceStateId
 dropCssid = ["drop"]
 
-dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> List (BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId)
+dynamicLayout
+   : RemoteState -> DataSourceId -> ChildSourceStateId
+  -> List (BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId a)
 dynamicLayout rs dsid seriesCssid = case dsidToDsp dsid of
     Ok (DsPath sp) ->
       let
@@ -460,16 +464,17 @@ view m = div []
       else button [onClick <| ViewDebugInfo True] [text "Show debug"]
   , case .viewMode m of
     UmEdit -> Html.map LayoutUiEvent <| Layout.edit
+        0
         (text << toString)
         (.layout m)
     UmView -> Layout.view
-        (\dsids ->
+        (\ssid dsids ->
           let
             -- FIXME: Hard coded clock source
             rTransp = transport (Tagged "engine") (latestState m) (.timeNow m)
           in case rTransp of
-            Ok transp -> Html.map TsUiEvent <| viewTimeSeries
-                (getTsModel (Tagged "engine") m) transp
+            Ok transp -> Html.map (TsUiEvent ssid) <| viewTimeSeries
+                (getTsModel ssid m) transp
             Err msg -> Html.text <| toString msg)
         (\dsid cssid -> case dsidToDsp dsid of
             Ok (DsPath sp) -> Html.map NodeUiEvent <| viewPath
