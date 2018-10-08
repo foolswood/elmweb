@@ -70,7 +70,7 @@ type alias Model =
   , timeNow : Float
   , showDebugInfo : Bool
   -- Layout:
-  , layout : BoundLayout ChildSourceStateId DataSourceId
+  , layout : BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId
   , childSelections : ChildSelections
   -- Data:
   , pathSubs : CmpSet SubPath (Seg, Path)
@@ -102,8 +102,8 @@ subPathDsid : SubPath -> DataSourceId
 subPathDsid (Tagged (ns, p)) = "path" :: ns :: String.split "/" (String.dropLeft 1 p)
 
 cementedLayout
-   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId
-  -> ChildSelections -> Layout.ConcreteBoundLayout DataSourceId
+   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId
+  -> ChildSelections -> Layout.ConcreteBoundLayout DataSourceId ChildSourceStateId
 cementedLayout rs bl cSels =
   let
     cssidSelected cssid = List.map subPathDsid <| CSet.toList <| getWithDefault TS.empty cssid cSels
@@ -113,7 +113,7 @@ cementedLayout rs bl cSels =
     bl
 
 requiredPaths
-   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId
+   : RemoteState -> BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId
   -> ChildSelections -> CmpSet SubPath (Seg, Path)
 requiredPaths rs bl cSels =
   let
@@ -193,7 +193,7 @@ type Msg
   | NetworkEvent Digest
   | SquashRecent
   | SecondPassedTick
-  | LayoutUiEvent (BoundLayout ChildSourceStateId DataSourceId)
+  | LayoutUiEvent (BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId)
   | ClockUiEvent Namespace (EditEvent EditTypes.PartialTime Time)
   | TsUiEvent TsMsg
   | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
@@ -427,7 +427,7 @@ dsidToDsp dsid = case dsid of
 dropCssid : ChildSourceStateId
 dropCssid = ["drop"]
 
-dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> List (BoundLayout ChildSourceStateId DataSourceId)
+dynamicLayout : RemoteState -> DataSourceId -> ChildSourceStateId -> List (BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId)
 dynamicLayout rs dsid seriesCssid = case dsidToDsp dsid of
     Ok (DsPath sp) ->
       let

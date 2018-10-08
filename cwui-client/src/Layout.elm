@@ -14,29 +14,29 @@ import HtmlHelpers exposing (listEdit)
 import Form exposing (FormState(..), formState, FormStore, formInsert)
 import EditTypes exposing (EditEvent(..), mapEe, DataSourceSeg, DataSourceId, ChildSourceStateSeg, ChildSourceStateId)
 
-type BoundLayout dynConfig dsid
-  = BlContainer (ChildSource dynConfig dsid)
-  | BlView dsid ChildSourceStateId
+type BoundLayout dynConfig dsid cssid
+  = BlContainer (ChildSource dynConfig dsid cssid)
+  | BlView dsid cssid
   -- FIXME: Should have a DataSourceId (or something more strongly typed maybe)
   -- for getting the time series state in the event handler:
-  | BlSeries ChildSourceStateId
+  | BlSeries cssid
 
-type ChildSource dynConfig dsid
-  = CsFixed (List (BoundLayout dynConfig dsid))
+type ChildSource dynConfig dsid cssid
+  = CsFixed (List (BoundLayout dynConfig dsid cssid))
   | CsTemplate
-        ChildSourceStateId
-        (BoundLayout dynConfig dsid)
+        cssid
+        (BoundLayout dynConfig dsid cssid)
   | CsDynamic dsid dynConfig
 
-type ConcreteBoundLayout dsid
-  = CblContainer (List (ConcreteBoundLayout dsid))
-  | CblView dsid ChildSourceStateId
+type ConcreteBoundLayout dsid cssid
+  = CblContainer (List (ConcreteBoundLayout dsid cssid))
+  | CblView dsid cssid
   | CblSeries (List dsid)
 
 cement
-   : (ChildSource dynConfig dsid -> List (BoundLayout dynConfig dsid))
-  -> (ChildSourceStateId -> List dsid)
-  -> BoundLayout dynConfig dsid -> ConcreteBoundLayout dsid
+   : (ChildSource dynConfig dsid cssid -> List (BoundLayout dynConfig dsid cssid))
+  -> (cssid -> List dsid)
+  -> BoundLayout dynConfig dsid cssid -> ConcreteBoundLayout dsid cssid
 cement expandContainer stateDataSources l = case l of
     BlContainer childSource -> CblContainer <| List.map
         (cement expandContainer stateDataSources)
@@ -46,8 +46,8 @@ cement expandContainer stateDataSources l = case l of
 
 view
    : (List dsid -> Html a)
-  -> (dsid -> ChildSourceStateId -> Html a)
-  -> ConcreteBoundLayout dsid -> Html a
+  -> (dsid -> cssid -> Html a)
+  -> ConcreteBoundLayout dsid cssid -> Html a
 view viewSeries viewData =
   let
     go cl = case cl of
@@ -66,9 +66,9 @@ expandWildcards dsid =
 
 instantiateTemplate
    : (dsid -> dsid -> dsid)
-  -> (dsid -> ChildSourceStateId -> ChildSourceStateId)
-  -> BoundLayout dynConfig dsid -> dsid
-  -> BoundLayout dynConfig dsid
+  -> (dsid -> cssid -> cssid)
+  -> BoundLayout dynConfig dsid cssid -> dsid
+  -> BoundLayout dynConfig dsid cssid
 instantiateTemplate joinDsids expander bl dsid = case bl of
     BlContainer cs -> BlContainer <| case cs of
         CsFixed subLs -> CsFixed <| List.map (flip (instantiateTemplate joinDsids expander) dsid) subLs
@@ -80,8 +80,9 @@ instantiateTemplate joinDsids expander bl dsid = case bl of
 
 resolveChild
    : (ChildSourceStateId -> List DataSourceId)
-  -> (DataSourceId -> dynConfig -> List (BoundLayout dynConfig DataSourceId))
-  -> ChildSource dynConfig DataSourceId -> List (BoundLayout dynConfig DataSourceId)
+  -> (DataSourceId -> dynConfig -> List (BoundLayout dynConfig DataSourceId ChildSourceStateId))
+  -> ChildSource dynConfig DataSourceId ChildSourceStateId
+  -> List (BoundLayout dynConfig DataSourceId ChildSourceStateId)
 resolveChild getDsids resolveDynamic childSource =
     case childSource of
         CsFixed subLayouts -> subLayouts
@@ -94,8 +95,8 @@ lAppend : a -> List a -> List a
 lAppend a l = l ++ [a]
 
 edit
-   : (dynConfig -> Html dynConfig)-> BoundLayout dynConfig DataSourceId
-  -> Html (BoundLayout dynConfig DataSourceId)
+   : (dynConfig -> Html dynConfig)-> BoundLayout dynConfig DataSourceId ChildSourceStateId
+  -> Html (BoundLayout dynConfig DataSourceId ChildSourceStateId)
 edit dynEdit =
   let
     go bl = H.div []
@@ -125,7 +126,7 @@ edit dynEdit =
       ]
   in go
 
-emptyBlFromStr : String -> BoundLayout dynConfig DataSourceId
+emptyBlFromStr : String -> BoundLayout dynConfig DataSourceId ChildSourceStateId
 emptyBlFromStr s = case s of
     "container" -> BlContainer <| CsFixed []
     "view" -> BlView [] ["default"]
@@ -141,7 +142,7 @@ blStrOpts bl =
     asOpt s = H.option [HA.value s, HA.selected <| s == selected] [H.text s]
   in List.map asOpt ["container", "childControl", "view"]
 
-requiredDataSources : ConcreteBoundLayout DataSourceId -> Set DataSourceId
+requiredDataSources : ConcreteBoundLayout DataSourceId cssid -> Set DataSourceId
 requiredDataSources =
   let
     go cbl acc = case cbl of
