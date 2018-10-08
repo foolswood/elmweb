@@ -198,7 +198,7 @@ type Msg
   | LayoutUiEvent (BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId SeriesStateId)
   | ClockUiEvent Namespace (EditEvent EditTypes.PartialTime Time)
   | TsUiEvent SeriesStateId TsMsg
-  | NodeUiEvent (SubPath, EditEvent NodeEdit NodeAction)
+  | NodeUiEvent SubPath (EditEvent NodeEdit NodeAction)
 
 addDNsError : String -> Model -> (Model, Cmd Msg)
 addDNsError msg m = ({m | errs = (Tagged "UI_INTERNAL", DNsError, [msg]) :: .errs m}, Cmd.none)
@@ -306,7 +306,7 @@ update msg model = case msg of
         TsemSeek t -> (model, sendDigest <| Trcud <| TrcUpdateDigest (Tagged "engine") (transportCueDd t) Dict.empty Dict.empty)
         -- FIXME: Does nothing
         _ -> (model, Cmd.none)
-    NodeUiEvent (sp, ue) ->
+    NodeUiEvent sp ue ->
       let
         (ns, p) = unSubPath sp
       in case ue of
@@ -477,7 +477,7 @@ view m = div []
                 (getTsModel ssid m) transp
             Err msg -> Html.text <| toString msg)
         (\dsid cssid -> case dsidToDsp dsid of
-            Ok (DsPath sp) -> Html.map NodeUiEvent <| viewPath
+            Ok (DsPath sp) -> Html.map (NodeUiEvent sp) <| viewPath
                 (.childSelections m) (.nodeFs m) (.state m) (.recent m)
                 (.pending m) cssid sp
             Ok (DsClock s) ->
@@ -497,7 +497,7 @@ viewLoading s = text <| "Loading " ++ s ++ "..."
 viewPath
    : Dict ChildSourceStateId (CmpSet SubPath (Seg, Path)) -> NodesFs -> RemoteState -> List (Digest, RemoteState) -> Pendings
   -> ChildSourceStateId -> SubPath
-  -> Html (SubPath, EditEvent NodeEdit NodeAction)
+  -> Html (EditEvent NodeEdit NodeAction)
 viewPath childSelections nodeFs baseState recent pending cssid sp =
   let
     (ns, p) = unSubPath sp
@@ -540,7 +540,7 @@ viewPath childSelections nodeFs baseState recent pending cssid sp =
                 recentCops recentDums
       in appendMaybe finalView completeViews
     contents = finalise <| List.foldl viewDigestAfter (viewerFor baseState, [], [], [], False) recent
-  in Html.map (\e -> (subPath ns p, e)) <| div [] contents
+  in div [] contents
 
 viewCasted : (b -> Html r) -> Result String b -> Html r
 viewCasted h r = case r of
