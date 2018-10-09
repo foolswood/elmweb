@@ -82,7 +82,7 @@ type alias Model =
   , pending : Pendings
   , nodeFs : NodesFs
   , clockFs : ByNs (FormState EditTypes.PartialTime)
-  , seriesStates : Dict SeriesStateId TsModel
+  , seriesStates : Dict SeriesStateId (TsModel DataSourceId)
   }
 
 -- FIXME: Just always returns empty
@@ -192,7 +192,7 @@ type Msg
   | SecondPassedTick
   | LayoutUiEvent (BoundLayout ChildSourceStateId DataSourceId ChildSourceStateId SeriesStateId)
   | ClockUiEvent Namespace (EditEvent EditTypes.PartialTime Time)
-  | TsUiEvent SeriesStateId TsMsg
+  | TsUiEvent SeriesStateId (TsMsg DataSourceId)
   | NodeUiEvent SubPath (EditEvent NodeEdit NodeAction)
 
 addDNsError : String -> Model -> (Model, Cmd Msg)

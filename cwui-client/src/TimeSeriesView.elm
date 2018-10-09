@@ -8,7 +8,7 @@ import CSS exposing (emPx, keyFramed, applyKeyFramed)
 
 import ClTypes exposing
   ( TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime
-  , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded, Path
+  , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded
   , Editable(..))
 import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
@@ -37,13 +37,13 @@ type alias TpUpdateT = (Time, TpId, NeTimePoint)
 type alias TpCompleteT = (TpId, NaTimePoint)
 type alias TsEditEvt = EditEvent TpUpdateT TpCompleteT
 
-type TsMsg
+type TsMsg seriesId
   = VZoom Float
   | HZoom Float
   | SetViewport Viewport
   | PlayheadSet Time
-  | ToggleSelection Path TpId
-  | TsEdit Path TsEditEvt
+  | ToggleSelection seriesId TpId
+  | TsEdit seriesId TsEditEvt
 
 type alias PointInfo =
   { base : (Time, TimePoint)
@@ -52,8 +52,8 @@ type alias PointInfo =
   , mp : Maybe NaTimePoint
   }
 
-type alias SeriesInfo =
-  { path : Path
+type alias SeriesInfo seriesId =
+  { id : seriesId
   , editable : Editable
   , def : TupleDefinition
   , label : String
@@ -62,14 +62,14 @@ type alias SeriesInfo =
   , changedTimes : ChangedTimes
   }
 
-type alias TsModel =
+type alias TsModel seriesId =
   { vZoom : Float
   , hZoom : Float
   , viewport : Viewport
-  , selectedTps : Dict Path (Set TpId)
+  , selectedTps : Dict seriesId (Set TpId)
   }
 
-tsModelEmpty : TsModel
+tsModelEmpty : TsModel seriesId
 tsModelEmpty =
   { vZoom = 1.0
   , hZoom = 1.0
@@ -94,7 +94,7 @@ toEm f = toString f ++ "em"
 mapEm : List Float -> String
 mapEm = String.join " " << List.map toEm
 
-viewTimeSeries : TsModel -> List SeriesInfo -> Transport -> Html TsMsg
+viewTimeSeries : TsModel comparable -> List (SeriesInfo comparable) -> Transport -> Html (TsMsg comparable)
 viewTimeSeries tsm series transp =
   let
     controlsHeight = 2.0
@@ -125,10 +125,10 @@ viewTimeSeries tsm series transp =
     dataGrid = div
         [style dgStyles]
         <| List.map
-            (\si -> H.map (eitherToEvent <| .path si) <| viewTsData
+            (\si -> H.map (eitherToEvent <| .id si) <| viewTsData
                 (.editable si) (.def si) (.hZoom tsm) (.series si)
                 (.changedTimes si) <| Maybe.withDefault Set.empty <|
-                    Dict.get (.path si) <| .selectedTps tsm)
+                    Dict.get (.id si) <| .selectedTps tsm)
             series
     labelGrid = div
       [ style <| rowStyles ++
@@ -378,12 +378,12 @@ viewPlayhead height offset scale transp =
         []
   in applyKeyFramed <| keyFramed kfd h
 
-type TsExternalMsg
-  = TsemUpdate TsModel
-  | TsemEdit Path TsEditEvt
+type TsExternalMsg seriesId
+  = TsemUpdate (TsModel seriesId)
+  | TsemEdit seriesId TsEditEvt
   | TsemSeek Time
 
-processTimeSeriesEvent : TsMsg -> TsModel -> TsExternalMsg
+processTimeSeriesEvent : TsMsg comparable -> TsModel comparable -> TsExternalMsg comparable
 processTimeSeriesEvent evt m = case evt of
     VZoom z -> TsemUpdate {m | vZoom = z}
     HZoom z -> TsemUpdate {m | hZoom = z}
@@ -410,10 +410,10 @@ processTimeSeriesEvent evt m = case evt of
 --         EeSubmit (tpid, v) -> TsemPointChange path tpid v
 
 updateSeriesInfo
-   : Path -> (TimeSeries PointInfo -> TimeSeries PointInfo)
-  -> List SeriesInfo -> List SeriesInfo
+   : seriesId -> (TimeSeries PointInfo -> TimeSeries PointInfo)
+  -> List (SeriesInfo seriesId) -> List (SeriesInfo seriesId)
 updateSeriesInfo p op series = case series of
-    (s :: remainder) -> if .path s == p
+    (s :: remainder) -> if .id s == p
         then {s | series = op <| .series s} :: remainder
         else s :: updateSeriesInfo p op remainder
     [] -> []
