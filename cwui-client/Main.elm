@@ -305,10 +305,11 @@ update msg model = case msg of
         EeUpdate tp -> ({model | clockFs = CDict.insert ns (FsEditing tp) <| .clockFs model}, Cmd.none)
         EeSubmit t -> (model , sendDigest <| Trcud <| TrcUpdateDigest ns (transportCueDd t) Dict.empty Dict.empty)
     TsUiEvent ssid tsMsg -> case processTimeSeriesEvent tsMsg <| getWithDefault tsModelEmpty ssid <| .seriesStates model of
+        TsemUpdate newModel -> ({model | seriesStates = Dict.insert ssid newModel <| .seriesStates model}, Cmd.none)
         -- FIXME: Hard coded clock source
         TsemSeek t -> (model, sendDigest <| Trcud <| TrcUpdateDigest (Tagged "engine") (transportCueDd t) Dict.empty Dict.empty)
         -- FIXME: Does nothing
-        _ -> (model, Cmd.none)
+        TsemEdit _ _ -> (model, Cmd.none)
     NodeUiEvent sp ue ->
       let
         (ns, p) = unSubPath sp
