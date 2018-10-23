@@ -1,6 +1,6 @@
 module TimeSeries exposing
   ( TimeSeries, empty, nonEmpty, get, insert, remove, update, singleton, fold
-  , times)
+  , times, map)
 
 import Dict exposing (Dict)
 
@@ -46,16 +46,19 @@ update tpid op ts = case get tpid ts of
 singleton : TpId -> Time -> a -> TimeSeries a
 singleton tpid t a = insert tpid t a empty
 
+withTpId : (Time -> TpId -> a -> b) -> BiMap TpId Time -> Time -> a -> b
+withTpId f tpIds t a = case BiMap.getPri t tpIds of
+    Just tpid -> f t tpid a
+    -- This can't happen (due to the BiMap having a tpid for every time)
+    -- but I can't express it in the type system so I have to make
+    -- something up
+    Nothing -> f t 0 a
+
 fold : (Time -> TpId -> a -> acc -> acc) -> acc -> TimeSeries a -> acc
-fold f acc {points, tpIds} =
-  let
-    withTpId t a = case BiMap.getPri t tpIds of
-        Just tpid -> f t tpid a
-        -- This can't happen (due to the BiMap having a tpid for every time)
-        -- but I can't express it in the type system so I have to make
-        -- something up
-        Nothing -> f t 0 a
-  in Dict.foldl withTpId acc points
+fold f acc {points, tpIds} = Dict.foldl (withTpId f tpIds) acc points
 
 times : TimeSeries a -> List Time
 times {points} = Dict.keys points
+
+map : (Time -> TpId -> a -> b) -> TimeSeries a -> TimeSeries b
+map f {points, tpIds} = {points = Dict.map (withTpId f tpIds) points, tpIds = tpIds}

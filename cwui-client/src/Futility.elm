@@ -11,6 +11,16 @@ allGood f l = case l of
     [] -> Just []
     (x :: xs) -> Maybe.andThen (\y -> Maybe.map (\ys -> y :: ys) <| allGood f xs) <| f x
 
+allGoodR : (a -> Result e b) -> List a -> Result e (List b)
+allGoodR f =
+  let
+    go acc l = case l of
+        [] -> Ok acc
+        (a :: rest) -> case f a of
+            Err e -> Err e
+            Ok b -> go (acc ++ [b]) rest
+  in go []
+
 itemAtIndex : Int -> List a -> Maybe a
 itemAtIndex idx l = List.head (List.drop idx l)
 

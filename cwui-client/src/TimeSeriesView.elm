@@ -383,7 +383,8 @@ type TsExternalMsg seriesId
   | TsemEdit seriesId TsEditEvt
   | TsemSeek Time
 
-processTimeSeriesEvent : TsMsg comparable -> TsModel comparable -> TsExternalMsg comparable
+processTimeSeriesEvent
+   : TsMsg comparable -> TsModel comparable -> TsExternalMsg comparable
 processTimeSeriesEvent evt m = case evt of
     VZoom z -> TsemUpdate {m | vZoom = z}
     HZoom z -> TsemUpdate {m | hZoom = z}

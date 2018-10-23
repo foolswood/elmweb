@@ -17,7 +17,7 @@ import Tagged.Dict as TD
 import JsonFudge exposing (serialiseDigest, parseDigest)
 import ClTypes exposing (..)
 import ClNodes exposing (..)
-import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault, Either(Right))
+import Futility exposing (castList, castMaybe, appendMaybe, dictMapMaybe, getWithDefault, Either(Right), allGoodR)
 import PathManipulation exposing (appendSeg, appendSegSp)
 import Digests exposing (Digest, DataChange(..), ToRelayDigest(..), TrcUpdateDigest, TrcSubDigest, Cops, seriesChangeCast, constChangeCast, applyDigest, ntsCmp, SubOp(..))
 import RemoteState exposing (RemoteState, remoteStateEmpty, remoteStateLookup, requiredPostTypes, ByNs, Postability)
@@ -85,14 +85,22 @@ type alias Model =
   , seriesStates : Dict SeriesStateId (TsModel DataSourceId)
   }
 
--- FIXME: Just always returns empty
--- getSeriesInfo : DataSourceId -> Model -> TimeSeries.SeriesInfo
--- getSeriesInfo dsid m =
---     asSeriesInfo (p, n, d, e) =
---       { path = p, editable = e, def = d, label = p
---       , transience = Transience.TSteady , series = asPointInfo <| .values n
---       , changedTimes = Dict.empty}
---     rts = List.map asSeriesInfo <| allTimeSeries ns <| latestState m
+getSeriesInfo : Model -> DataSourceId -> Result String (TimeSeriesView.SeriesInfo DataSourceId)
+getSeriesInfo m dsid =
+  let
+    -- FIXME: This doesn't do anything with recents, pending or editing:
+    asPtInfo = TimeSeries.map (\t tpid pt -> {base = (t, pt), recents = [], fs = FsViewing, mp = Nothing})
+    asSeriesInfo (n, d, e, p) = case (n, d) of
+        (TimeSeriesNode tsn, TupleDef td) -> Ok
+          { id = dsid, editable = e, def = td, label = toString dsid
+          , transience = Transience.TSteady, series = asPtInfo <| .values tsn
+          , changedTimes = Dict.empty}
+        _ -> Err <| "Not a time series: " ++ toString d
+  -- FIXME: Guessed transience and empty changedTimes:
+  in Debug.log "gsi" <| Result.andThen
+    asSeriesInfo
+    <| Result.andThen ((\(ns, p) -> remoteStateLookup ns p <| latestState m) << unSubPath)
+    <| Result.andThen (Result.fromMaybe "dsp wasn't a path" << dspAsPath) <| dsidToDsp dsid
 
 subPathDsid : SubPath -> DataSourceId
 subPathDsid (Tagged (ns, p)) = "path" :: ns :: String.split "/" (String.dropLeft 1 p)
@@ -136,7 +144,7 @@ init =
         , BlView ["clock", "engine"] dropCssid
         , BlSeries 0 ["series"]
         ]
-    childSelections = Dict.empty
+    childSelections = Dict.singleton ["series"] <| TS.singleton <| Tagged ("engine", "/elems/stereo/stamp/params/gain")
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialLayout childSelections
     initialModel =
@@ -467,12 +475,12 @@ view m = div []
           let
             -- FIXME: Hard coded clock source
             rTransp = transport (Tagged "engine") (latestState m) (.timeNow m)
-          in case rTransp of
-            Ok transp -> Html.map (TsUiEvent ssid) <| viewTimeSeries
+            rSeries = allGoodR (getSeriesInfo m) dsids
+          in case (rTransp, rSeries) of
+            (Ok transp, Ok series) -> Html.map (TsUiEvent ssid) <| viewTimeSeries
                 (getWithDefault tsModelEmpty ssid <| .seriesStates m)
-                [] -- (List.map (getSeriesInfo m) dsids)
-                transp
-            Err msg -> Html.text <| toString msg)
+                series transp
+            other -> Html.text <| toString other)
         (\dsid cssid -> case dsidToDsp dsid of
             Ok (DsPath sp) -> Html.map (NodeUiEvent sp) <| viewPath
                 (.childSelections m) (.nodeFs m) (.state m) (.recent m)

@@ -304,8 +304,8 @@ decodeWv =
 
 decodeInterpolation : JD.Decoder Interpolation
 decodeInterpolation = decodeTagged <| Dict.fromList
-  [ ("C", JD.succeed IConstant)
-  , ("L", JD.succeed ILinear)
+  [ ("c", JD.succeed IConstant)
+  , ("l", JD.succeed ILinear)
   ]
 
 decodeTpId : JD.Decoder TpId
@@ -408,11 +408,11 @@ decodeConstChange = JD.map2 (\atts (wts, wvs) -> (atts, wts, wvs))
 
 decodeTsdo : JD.Decoder TimeSeriesDataOp
 decodeTsdo = decodeTagged <| Dict.fromList <|
-  [ ("s", JD.map3 (\t (wts, wvs) i -> OpSet t wts wvs i)
+  [ ("=", JD.map3 (\t (wts, wvs) i -> OpSet t wts wvs i)
         (JD.field "time" decodeTime)
         (JD.map List.unzip <| JD.field "wvs" <| JD.list decodeWv)
         (JD.field "interp" decodeInterpolation))
-  , ("r", JD.succeed OpRemove)
+  , ("-", JD.succeed OpRemove)
   ]
 
 decodeDataChange : JD.Decoder DataChange
@@ -420,7 +420,7 @@ decodeDataChange = decodeTagged <| Dict.fromList
   [ ("c", JD.map ConstChange decodeConstChange)
   , ("t", JD.map TimeChange <| decodeDict
         decodeTpId
-        <| JD.map2 (,) (JD.nullable decodeAttributee) decodeTsdo)
+        <| decodePair (JD.nullable decodeAttributee) decodeTsdo)
   ]
 
 decodeData : JD.Decoder DataDigest

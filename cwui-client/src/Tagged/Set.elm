@@ -1,4 +1,4 @@
-module Tagged.Set exposing (TaggedSet, empty, fromList)
+module Tagged.Set exposing (TaggedSet, empty, fromList, singleton)
 
 import Cmp.Set as CmpSet exposing (CmpSet)
 import Set exposing (Set)
@@ -12,3 +12,6 @@ empty = CmpSet.empty tagCmp
 
 fromList : List (Tagged phantom comparable) -> TaggedSet phantom comparable
 fromList = CmpSet.fromList tagCmp
+
+singleton : Tagged phantom comparable -> TaggedSet phantom comparable
+singleton = CmpSet.singleton tagCmp
