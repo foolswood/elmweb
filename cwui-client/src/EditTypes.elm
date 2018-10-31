@@ -157,6 +157,7 @@ asFull ped = case ped of
     (PeEnum mi, ADEnum _) -> Maybe.map WvWord32 mi
     (PeTime pt, ADTime bs) -> Maybe.map WvTime <| asFullTime bs pt
     (PeInt mi, ADInt32 bs) -> Maybe.map WvInt32 mi
+    (PeFloat mf, ADFloat bs) -> Maybe.map WvFloat mf
     (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
         [] -> Nothing
         _ -> Just <| WvString s
@@ -175,6 +176,8 @@ asPartial d mwv = case (d, mwv) of
     (ADTime bs, _) -> PeTime <| asPartialTime bs Nothing
     (ADInt32 bs, Just (WvInt32 i)) -> PeInt <| Just i
     (ADInt32 bs, _) -> PeInt Nothing
+    (ADFloat bs, Just (WvFloat f)) -> PeFloat <| Just f
+    (ADFloat bs, _) -> PeFloat Nothing
     -- FIXME: This is utter tat!
     _ -> PeEnum Nothing
 
