@@ -89,17 +89,31 @@ getSeriesInfo : Model -> DataSourceId -> Result String (TimeSeriesView.SeriesInf
 getSeriesInfo m dsid =
   let
     -- FIXME: This doesn't do anything with recents, pending or editing:
-    asPtInfo = TimeSeries.map (\t tpid pt -> {base = (t, pt), recents = [], fs = FsViewing, mp = Nothing})
-    asSeriesInfo (n, d, e, p) = case (n, d) of
+    asPtInfo fs =
+      let
+        nes = case fs of
+            FsViewing -> TimeSeries.empty
+            FsEditing nes -> nes
+        getFs tpid = Maybe.withDefault FsViewing <|
+            Maybe.map (FsEditing << Tuple.second) <| TimeSeries.get tpid nes
+      in TimeSeries.map (\t tpid pt ->
+        { base = (t, pt) , recents = [] , fs = getFs tpid , mp = Nothing})
+    asSeriesInfo ((n, d, e, p), fs) = case (n, d) of
         (TimeSeriesNode tsn, TupleDef td) -> Ok
           { id = dsid, editable = e, def = td, label = toString dsid
-          , transience = Transience.TSteady, series = asPtInfo <| .values tsn
+          , transience = Transience.TSteady, series = asPtInfo fs <| .values tsn
           , changedTimes = Dict.empty}
         _ -> Err <| "Not a time series: " ++ toString d
+    getSeriesFs ns p =
+        (castFormState <| .unwrap seriesNeConv)
+        <| Maybe.withDefault FsViewing <| Maybe.map (formState p) (CDict.get ns <| .nodeFs m)
+    getDataFor subpath = let (ns, p) = unSubPath subpath in Result.map2 (,)
+        (remoteStateLookup ns p <| latestState m)
+        (getSeriesFs ns p)
   -- FIXME: Guessed transience and empty changedTimes:
-  in Debug.log "gsi" <| Result.andThen
+  in Result.andThen
     asSeriesInfo
-    <| Result.andThen ((\(ns, p) -> remoteStateLookup ns p <| latestState m) << unSubPath)
+    <| Result.andThen getDataFor
     <| Result.andThen (Result.fromMaybe "dsp wasn't a path" << dspAsPath) <| dsidToDsp dsid
 
 subPathDsid : SubPath -> DataSourceId
