@@ -127,7 +127,7 @@ applyNsDigest : NsDigest -> Valuespace -> (Valuespace, List (DataErrorIndex, Lis
 applyNsDigest d rs =
   let
     newTm = applyDefOps (.defs d) <| .types rs
-    newPtm = Debug.log "PdApplied" <| applyDefOps (Debug.log "newdefs" <| .postDefs d) <| .postTypes rs
+    newPtm = applyDefOps (.postDefs d) <| .postTypes rs
     newTam = applyTypeMsgs (.taOps d) <| .tyAssns rs
     (dataErrs, dataAppliedNm) = ddApply (.dops d) <| .nodes rs
     (contErrs, newNm) = applyCms (.cops d) dataAppliedNm

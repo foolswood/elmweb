@@ -85,17 +85,19 @@ type alias Model =
   , seriesStates : Dict SeriesStateId (TsModel DataSourceId)
   }
 
-getSeriesInfo : Model -> DataSourceId -> Result String (TimeSeriesView.SeriesInfo DataSourceId)
+getSeriesInfo
+   : Model -> DataSourceId
+  -> Result String (TimeSeriesView.SeriesInfo DataSourceId)
 getSeriesInfo m dsid =
   let
     -- FIXME: This doesn't do anything with recents, pending or editing:
     asPtInfo fs =
       let
         nes = case fs of
-            FsViewing -> TimeSeries.empty
+            FsViewing -> Dict.empty
             FsEditing nes -> nes
         getFs tpid = Maybe.withDefault FsViewing <|
-            Maybe.map (FsEditing << Tuple.second) <| TimeSeries.get tpid nes
+            Maybe.map FsEditing <| Dict.get tpid nes
       in TimeSeries.map (\t tpid pt ->
         { base = (t, pt) , recents = [] , fs = getFs tpid , mp = Nothing})
     asSeriesInfo ((n, d, e, p), fs) = case (n, d) of
@@ -323,7 +325,23 @@ update msg model = case msg of
         -- FIXME: Hard coded clock source
         TsemSeek t -> (model, sendDigest <| Trcud <| TrcUpdateDigest (Tagged "engine") (transportCueDd t) Dict.empty Dict.empty)
         -- FIXME: Does nothing
-        TsemEdit _ _ -> (model, Cmd.none)
+        TsemEdit seriesId tsee -> case Result.andThen (Result.fromMaybe "not a path" << dspAsPath) <| dsidToDsp seriesId of
+            Err msg -> addDNsError ("bad series dsid: " ++ toString seriesId) model
+            Ok sp ->
+              let
+                (ns, p) = unSubPath sp
+              in case tsee of
+                EeUpdate (t, tpid, netp) ->
+                  ( { model
+                    | nodeFs = CDict.update
+                        ns
+                        -- FIXME: Update existing mapping!
+                        ( Just << formInsert p (Just <| EditTypes.NeSeries <| Dict.singleton tpid netp) <<
+                            Maybe.withDefault formStoreEmpty)
+                        <| .nodeFs model
+                    }
+                  , Cmd.none)
+                EeSubmit _ -> addDNsError "Not implemented" model
     NodeUiEvent sp ue ->
       let
         (ns, p) = unSubPath sp
@@ -515,14 +533,15 @@ viewLoading : String -> Html a
 viewLoading s = text <| "Loading " ++ s ++ "..."
 
 viewPath
-   : Dict ChildSourceStateId (CmpSet SubPath (Seg, Path)) -> NodesFs -> RemoteState -> List (Digest, RemoteState) -> Pendings
+   : Dict ChildSourceStateId (CmpSet SubPath (Seg, Path)) -> NodesFs
+  -> RemoteState -> List (Digest, RemoteState) -> Pendings
   -> ChildSourceStateId -> SubPath
   -> Html (EditEvent NodeEdit NodeAction)
 viewPath childSelections nodeFs baseState recent pending cssid sp =
   let
     (ns, p) = unSubPath sp
     viewerFor s = case remoteStateLookup ns p s of
-        Err err -> Debug.log ("Lookup failed: " ++ err) Nothing
+        Err err -> Nothing
         Ok (n, def, ed, post) ->
             Just <| \fs mPending recentCops recentDums -> viewNode
                 -- FIXME: Awkwardly overcomplicated:
@@ -537,13 +556,16 @@ viewPath childSelections nodeFs baseState recent pending cssid sp =
         rsGet nsdSub = Maybe.andThen (Dict.get p << nsdSub) <| CDict.get ns <| .nsds d
         newRecentCops = appendMaybe (rsGet .cops) recentCops
         newRecentDums = appendMaybe (rsGet .dops) recentDums
-        -- FIXME: Highlight colour thing fairly rubbish, doesn't deactivate controls etc.
+        -- FIXME: Highlight colour thing fairly rubbish, doesn't deactivate
+        -- controls etc.
         newCompleteView highlightCol partialViewer = bordered highlightCol <|
             partialViewer FsViewing Nothing recentCops recentDums
         newCompleteViews ls = appendMaybe
             (Maybe.map (newCompleteView ls) mPartialViewer) completeViews
       in case rsGet .taOps of
-            Nothing -> (mPartialViewer, newRecentCops, newRecentDums, completeViews, typeChanged)
+            Nothing ->
+              ( mPartialViewer, newRecentCops, newRecentDums, completeViews
+              , typeChanged)
             Just tn -> (viewerFor s, [], [], newCompleteViews "red", True)
     finalise (mPartialViewer, recentCops, recentDums, completeViews, typeChanged) =
       let

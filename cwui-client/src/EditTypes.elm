@@ -8,7 +8,7 @@ import SequenceOps exposing (SeqOp)
 import Cmp.Dict exposing (CmpDict)
 import Futility exposing (Conv, Either)
 import Tagged.Tagged exposing (Tagged)
-import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireValue(..), Bounds, Placeholder)
+import ClTypes exposing (WireValue, Seg, Interpolation, Time, AtomDef(..), WireValue(..), Bounds, Placeholder, TpId)
 import TimeSeries exposing (TimeSeries)
 
 -- FIXME: The source seg/id types kinda suck
@@ -202,7 +202,7 @@ type alias NeChildCreate =
   , vals : List NeConstT
   }
 
-type alias NeSeriesT = TimeSeries NeTimePoint
+type alias NeSeriesT = Dict TpId NeTimePoint
 
 type alias NeChildrenT =
   { create : Maybe NeChildCreate

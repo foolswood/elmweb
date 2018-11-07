@@ -133,7 +133,7 @@ viewTimeSeries tsm series transp =
     labelGrid = div
       [ style <| rowStyles ++
         [ ("position", "sticky"), ("left", "0px"), ("width", toEm labelWidth)
-        , ("background", "gray"), ("z-index", "4")
+        , ("background", "gray"), ("z-index", "4"), ("overflow", "hidden")
         ]]
       <| List.map (\si -> viewTsLabel (.label si) (.transience si)) series
     playhead = viewPlayhead totalHeight labelWidth (.hZoom tsm) transp
