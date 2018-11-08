@@ -92,8 +92,8 @@ encodeAttributee : Maybe Attributee -> JE.Value
 encodeAttributee = encodeNullable JE.string
 
 encodeInterpolation i = case i of
-    IConstant -> tagged 'C' (JE.list [])
-    ILinear -> tagged 'L' (JE.list [])
+    IConstant -> tagged 'c' (JE.list [])
+    ILinear -> tagged 'l' (JE.list [])
 
 encodeDict : (comparable -> JE.Value) -> (v -> JE.Value) -> Dict comparable v -> JE.Value
 encodeDict ek ev d = JE.list <| List.map (encodePair ek ev) <| Dict.toList d
@@ -103,12 +103,12 @@ encodeCDict ek ev d = JE.list <| List.map (encodePair ek ev) <| CDict.toList d
 
 encodeTsdo : TimeSeriesDataOp -> JE.Value
 encodeTsdo tsdo = case tsdo of
-    OpSet t wts wvs i -> tagged 's' <| JE.object
+    OpSet t wts wvs i -> tagged '=' <| JE.object
       [ ("time", encodeTime t)
       , ("wvs", JE.list <| List.map2 encodeWv wts wvs)
       , ("interp", encodeInterpolation i)
       ]
-    OpRemove -> tagged 'r' JE.null
+    OpRemove -> tagged '-' JE.null
 
 encodeDataChange : DataChange -> JE.Value
 encodeDataChange dc = case dc of

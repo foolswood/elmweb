@@ -32,3 +32,13 @@ formInsert : comparable -> Maybe v -> FormStore comparable v -> FormStore compar
 formInsert k mv fs = case mv of
     Just v -> Dict.insert k (FsEditing v) fs
     Nothing -> Dict.remove k fs
+
+formUpdate
+   : comparable -> (FormState v -> FormState v)
+  -> FormStore comparable v -> FormStore comparable v
+formUpdate k f =
+  let
+    g v = case f <| Maybe.withDefault FsViewing v of
+        FsViewing -> Nothing
+        FsEditing a -> Just <| FsEditing a
+  in Dict.update k g

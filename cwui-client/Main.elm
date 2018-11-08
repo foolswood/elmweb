@@ -330,18 +330,42 @@ update msg model = case msg of
             Ok sp ->
               let
                 (ns, p) = unSubPath sp
+                withSeries f fs = FsEditing <| EditTypes.NeSeries <| case fs of
+                    FsEditing (EditTypes.NeSeries v) -> f v
+                    _ -> f Dict.empty
+                updateEditSeries f = CDict.update
+                    ns
+                    (Just << Form.formUpdate p (withSeries f) << Maybe.withDefault formStoreEmpty)
+                    <| .nodeFs model
               in case tsee of
                 EeUpdate (t, tpid, netp) ->
                   ( { model
-                    | nodeFs = CDict.update
-                        ns
-                        -- FIXME: Update existing mapping!
-                        ( Just << formInsert p (Just <| EditTypes.NeSeries <| Dict.singleton tpid netp) <<
-                            Maybe.withDefault formStoreEmpty)
-                        <| .nodeFs model
+                    -- FIXME: Modify existing series:
+                    | nodeFs = updateEditSeries <| Dict.insert tpid netp
                     }
                   , Cmd.none)
-                EeSubmit _ -> addDNsError "Not implemented" model
+                -- FIXME: Pending not implemented!
+                EeSubmit (tpid, natp) ->
+                  let
+                    newNodeFs = updateEditSeries <| Dict.remove tpid
+                    sendTpUpdate =
+                        sendDigest << Trcud << (\dd -> TrcUpdateDigest ns dd Dict.empty Dict.empty)
+                        << Dict.singleton p << TimeChange << Dict.singleton tpid
+                  in case natp of
+                    EditTypes.NatpSet {time, interpolation, wvs} ->
+                      ( {model | nodeFs = newNodeFs}, sendTpUpdate
+                        ( Nothing
+                        , Digests.OpSet
+                            time
+                            -- FIXME: Commonality with the constant edit one, and shonky error handling
+                            (case remoteStateLookup ns p <| latestState model of
+                                Ok (_, TupleDef {types}, _, _) -> List.map (defWireType << Tuple.second) types
+                                _ -> [])
+                            wvs
+                            interpolation
+                        )
+                      )
+                    EditTypes.NatpAbsent -> ({model | nodeFs = newNodeFs}, sendTpUpdate (Nothing, Digests.OpRemove))
     NodeUiEvent sp ue ->
       let
         (ns, p) = unSubPath sp
@@ -366,6 +390,7 @@ update msg model = case msg of
                           }
                       in (newM, sendDigest <| Trcud d)
                     _ -> addDNsError "Def type mismatch" model
+            -- FIXME: This comes out a different way in the end and shouldn't be in this sum type:
             NaSeries sops -> addDNsError "Series submit not implemented" model
             NaChildren nac -> case remoteStateLookup ns p <| latestState model of
                 Err msg -> addDNsError ("Error submitting: " ++ msg) model
