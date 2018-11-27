@@ -178,6 +178,7 @@ viewAtomEdit d =
     ADInt32 bounds -> castedView asInt32 pIntConv <| intEditor bounds
     ADFloat bounds -> castedView asFloat pFloatConv <| floatEditor bounds
     ADDouble bounds -> castedView asDouble pFloatConv <| floatEditor bounds
+    ADRef refTy -> castedView asString pStringConv <| textEditor ".*"
     _ -> always <| text <| "Implement me: " ++ toString d
 
 enumEditor : List String -> AtomState Int (Maybe Int) -> Html (Maybe Int)

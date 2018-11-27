@@ -152,6 +152,8 @@ asFullTime _ pt = case pt of
     (Just s, Just f) -> Just (s, f)
     _ -> Nothing
 
+pathRe = Regex.regex "^(/[0-9a-zA-Z_]+)+$"
+
 asFull : (PartialEdit, AtomDef) -> Maybe WireValue
 asFull ped = case ped of
     (PeEnum mi, ADEnum _) -> Maybe.map WvWord32 mi
@@ -159,6 +161,9 @@ asFull ped = case ped of
     (PeInt mi, ADInt32 bs) -> Maybe.map WvInt32 mi
     (PeFloat mf, ADFloat bs) -> Maybe.map WvFloat mf
     (PeString s, ADString (_, re)) -> case Regex.find (Regex.AtMost 1) re s of
+        [] -> Nothing
+        _ -> Just <| WvString s
+    (PeString s, ADRef _) -> case Regex.find (Regex.AtMost 1) pathRe s of
         [] -> Nothing
         _ -> Just <| WvString s
     _ -> Nothing
@@ -178,6 +183,8 @@ asPartial d mwv = case (d, mwv) of
     (ADInt32 bs, _) -> PeInt Nothing
     (ADFloat bs, Just (WvFloat f)) -> PeFloat <| Just f
     (ADFloat bs, _) -> PeFloat Nothing
+    (ADRef _, Just (WvString s)) -> PeString s
+    (ADRef _, _) -> PeString ""
     -- FIXME: This is utter tat!
     _ -> PeEnum Nothing
 
