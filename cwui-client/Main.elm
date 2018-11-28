@@ -29,9 +29,9 @@ import TupleViews exposing (viewWithRecent)
 import ArrayView exposing (viewArray, remoteChildSegs, arrayActionStateUpdate)
 import EditTypes exposing
   ( NodeEdit(NeChildren), EditEvent(..), mapEe, NodeAction(..), NaChildrenT(..)
-  , NeConstT, constNeConv, seriesNeConv, childrenNeConv, constNaConv
-  , seriesNaConv, childrenNaConv, constPaConv , seriesPaConv, childrenPaConv
-  , PendingActions(..), ChildSourceStateId, DataSourceId)
+  , NaSelectionT(..), NeConstT, constNeConv, seriesNeConv, childrenNeConv
+  , constNaConv, seriesNaConv, childrenNaConv, constPaConv, seriesPaConv
+  , childrenPaConv, PendingActions(..), ChildSourceStateId, DataSourceId)
 import SequenceOps exposing (SeqOp(..))
 import Transience
 import TransportTracker exposing (transportSubs, transport, transportCueDd)
@@ -429,6 +429,9 @@ update msg model = case msg of
                         NacSelect cssid seg -> modifySelection (CSet.insert (appendSegSp sp seg)) cssid model
                         NacDeselect cssid seg -> modifySelection (CSet.remove (appendSegSp sp seg)) cssid model
                     _ -> addDNsError "Child modification on non-array" model
+            NaSelectionChange (NaSelectionT cssid seg selected) ->
+              let action = if selected then CSet.insert else CSet.remove
+              in modifySelection (action <| appendSegSp sp seg) cssid model
 
 modifyChildPending : (EditTypes.PaChildrenT -> EditTypes.PaChildrenT) -> Namespace -> Path -> Model -> Model
 modifyChildPending mod ns p model =
@@ -632,14 +635,20 @@ viewNode isSelected editable def postability node recentCops recentDums formStat
             recentDums (viewWithRecent editable d)
         _ -> withCasts seriesChangeCast seriesNeConv seriesPaConv seriesNaConv (.unwrap seriesNodeConv)
             recentDums (\rs n fs mp -> Html.text <| toString (rs, n, fs, mp))
-    StructDef d -> viewStruct d
+    StructDef d -> Html.map (EeSubmit << NaSelectionChange) <| viewStruct cssid isSelected d
     ArrayDef d -> withCasts
         Ok childrenNeConv childrenPaConv childrenNaConv
         (.unwrap childrenNodeConv) recentCops
         (\r n fs mp -> viewArray cssid isSelected editable d postability recentCops n fs mp)
 
-viewStruct : StructDefinition -> Html a
-viewStruct structDef =
+segChooserWidget2
+  : ChildSourceStateId -> (Seg -> Bool) -> Seg -> Html NaSelectionT
+segChooserWidget2 cssid isSelected seg = if isSelected seg
+    then Html.b [onClick <| NaSelectionT cssid seg False] [Html.text seg]
+    else Html.span [onClick <| NaSelectionT cssid seg True] [Html.text seg]
+
+viewStruct : ChildSourceStateId -> (Seg -> Bool) -> StructDefinition -> Html NaSelectionT
+viewStruct cssid isSelected structDef =
   let
-    iw {name} = Html.li [] [Html.text name]
+    iw {name} = Html.li [] [segChooserWidget2 cssid isSelected name]
   in Html.ol [] <| List.map iw <| .childDescs structDef

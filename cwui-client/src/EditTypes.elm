@@ -35,10 +35,13 @@ type NaChildrenT
   | NacSelect ChildSourceStateId Seg
   | NacDeselect ChildSourceStateId Seg
 
+type NaSelectionT = NaSelectionT ChildSourceStateId Seg Bool
+
 type NodeAction
   = NaConst NaConstT
   | NaSeries NaSeriesT
   | NaChildren NaChildrenT
+  | NaSelectionChange NaSelectionT
 
 constNaConv : Conv NodeAction NaConstT
 constNaConv =
