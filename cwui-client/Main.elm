@@ -169,6 +169,8 @@ init =
             , BlContainer <| CsTemplate ["etc", "*", "*"] <| BlView [] dropCssid
             ]
           ]
+        , BlView ["path", "engine", "connections", "outs"] ["globOuts"]
+        , BlContainer <| CsTemplate ["globOuts"] <| BlView [] dropCssid
         -- Transport:
         , BlView ["path", "engine", "transport", "state"] dropCssid
         , BlView ["clock", "engine"] dropCssid
