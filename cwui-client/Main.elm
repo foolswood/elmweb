@@ -153,19 +153,33 @@ init =
     relayNs = Tagged "relay"
     initialNodeFs = TD.empty
     initialLayout = BlContainer <| CsFixed
-        [ BlView ["path", "engine", "kinds"] dropCssid
-        , BlView ["path", "engine", "types", "amp"] dropCssid
-        , BlView ["path", "engine", "types"] ["clients"]
-        , BlContainer <| CsTemplate ["clients"] <| BlView [] dropCssid
+        -- Kinds:
+        [ BlView ["path", "engine", "kinds"] ["kindLoad"]
+        , BlContainer <| CsTemplate ["kindLoad"] <| BlView ["loaded"] dropCssid
+        -- Types:
+        , BlView ["path", "engine", "types"] ["typeLoad"]
+        , BlContainer <| CsTemplate ["typeLoad"] <| BlView [] dropCssid
+        -- Elems:
+        , BlView ["path", "engine", "elems"] ["elemTy"]
+        , BlContainer <| CsTemplate ["elemTy"] <| BlContainer <| CsFixed
+          [ BlView [] ["et", "*"]
+          , BlContainer <| CsTemplate ["et", "*"] <| BlContainer <| CsFixed
+            [ BlView ["params"] ["series"]
+            , BlView ["connections", "outs"] ["etc", "*", "*"]
+            , BlContainer <| CsTemplate ["etc", "*", "*"] <| BlView [] dropCssid
+            ]
+          ]
+        -- Transport:
+        , BlView ["path", "engine", "transport", "state"] dropCssid
         , BlView ["clock", "engine"] dropCssid
         , BlSeries 0 ["series"]
         ]
-    childSelections = Dict.singleton ["series"] <| TS.singleton <| Tagged ("engine", "/elems/stereo/stamp/params/gain")
+    childSelections = Dict.empty
     initialState = remoteStateEmpty
     initialSubs = requiredPaths initialState initialLayout childSelections
     initialModel =
       { errs = []
-      , viewMode = UmEdit
+      , viewMode = UmView
       , bundleCount = 0
       , keepRecent = 5000.0
       , timeNow = 0.0
