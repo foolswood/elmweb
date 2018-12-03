@@ -188,6 +188,8 @@ asPartial d mwv = case (d, mwv) of
     (ADFloat bs, _) -> PeFloat Nothing
     (ADRef _, Just (WvString s)) -> PeString s
     (ADRef _, _) -> PeString ""
+    (ADString _, Just (WvString s)) -> PeString s
+    (ADString _, _) -> PeString ""
     -- FIXME: This is utter tat!
     _ -> PeEnum Nothing
 
