@@ -126,7 +126,7 @@ viewTimeSeries tsm series transp =
         [style dgStyles]
         <| List.map
             (\si -> H.map (eitherToEvent <| .id si) <| viewTsData
-                (.editable si) (.def si) (.hZoom tsm) (.series si)
+                (.editable si) (.def si) (.left (.viewport tsm) - labelWidth) (.hZoom tsm) (.series si)
                 (.changedTimes si) <| Maybe.withDefault Set.empty <|
                     Dict.get (.id si) <| .selectedTps tsm)
             series
@@ -151,8 +151,8 @@ viewTimeScale s = input
   , value <| toString s, onInput <| Maybe.withDefault s << Result.toMaybe << String.toFloat]
   []
 
-onClickPosEm : (Float -> Float -> evt) -> Attribute evt
-onClickPosEm e =
+onClickPosEm : String -> (Float -> Float -> evt) -> Attribute evt
+onClickPosEm clickType e =
   let
     pd = JD.map (\v -> toFloat v / emPx ()) JD.int
   in on "click" <| JD.map2 e (JD.field "clientX" pd) (JD.field "clientY" pd)
@@ -165,6 +165,9 @@ onScrollEm e =
     (\t l -> e <| Viewport t l)
     (JD.at ["target", "scrollTop"] pd)
     (JD.at ["target", "scrollLeft"] pd)
+
+posToTime : Float -> Float -> Float -> Float -> Time
+posToTime offset scale x y = fromFloat <| (x + offset) / scale
 
 viewTicks : Float -> Float -> Float -> Float -> Time -> Html Time
 viewTicks height leftMargin scale scrollOffset maxTime =
@@ -184,14 +187,14 @@ viewTicks height leftMargin scale scrollOffset maxTime =
           , ("background", "white"), ("height", toEm height)
           , ("width", toString ((maxFloatTime * scale) + 5) ++ "em")
           ]
-      , onClickPosEm (\x _ -> fromFloat ((x + scrollOffset - leftMargin) / scale))
+      , onClickPosEm "click" <| posToTime (scrollOffset - leftMargin) scale
       ]
       <| List.map viewTick ticks]
 
 viewTsData
-   : Editable -> TupleDefinition -> Float -> TimeSeries PointInfo -> ChangedTimes
+   : Editable -> TupleDefinition -> Float -> Float -> TimeSeries PointInfo -> ChangedTimes
    -> Set TpId -> Html (Either TpId TsEditEvt)
-viewTsData editable td scale ts cts selected =
+viewTsData editable td offset scale ts cts selected =
   let
     tFloat = (*) scale << fromTime
     lefts = List.map tFloat <| TimeSeries.times ts
@@ -202,7 +205,14 @@ viewTsData editable td scale ts cts selected =
       ]
     prePoint = div [] []
     contentGrid = div
-      [style <| ("height", "100%") :: ("overflow", "hidden") :: colStyles]
+      [ style <| ("height", "100%") :: ("overflow", "hidden") :: colStyles
+      , onClickPosEm "dblclick" <| \x y ->
+        let
+          t = posToTime offset scale x y
+          (_, frac) = t
+          wvs = Maybe.withDefault [] <| Maybe.map (.wvs << Tuple.second << .base << Tuple.second) <| TimeSeries.get 0 ts
+        in Right <| EeSubmit (frac, NatpSet {time = t, interpolation = IConstant, wvs = wvs})
+      ]
       <| prePoint :: TimeSeries.fold (\t tpid pi acc -> acc ++ [H.map Left <| viewPointMarker tpid pi]) [] ts
     asHighlight start mDuration (hlStarts, prevEnd) = case mDuration of
         Nothing -> (toEm ((tFloat start) - prevEnd) :: "1fr" :: hlStarts, prevEnd)
