@@ -155,7 +155,7 @@ onClickPosEm : String -> (Float -> Float -> evt) -> Attribute evt
 onClickPosEm clickType e =
   let
     pd = JD.map (\v -> toFloat v / emPx ()) JD.int
-  in on "click" <| JD.map2 e (JD.field "clientX" pd) (JD.field "clientY" pd)
+  in on clickType <| JD.map2 e (JD.field "clientX" pd) (JD.field "clientY" pd)
 
 onScrollEm : (Viewport -> evt) -> Attribute evt
 onScrollEm e =
