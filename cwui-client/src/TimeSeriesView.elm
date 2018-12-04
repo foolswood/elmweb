@@ -198,7 +198,7 @@ viewTsData editable td offset scale ts cts selected =
   let
     tFloat = (*) scale << fromTime
     lefts = List.map tFloat <| TimeSeries.times ts
-    widths = Tuple.first <| List.foldl (\l (ws, prev) -> (ws ++ [l - prev], prev + l)) ([], 0.0) lefts
+    widths = Tuple.first <| List.foldl (\l (ws, prev) -> (ws ++ [l - prev], l)) ([], 0.0) lefts
     colStyles =
       [ gridStyle
       , ("grid-template-columns", mapEm widths ++ " 1fr")
