@@ -19,13 +19,13 @@ import Network.Socket.ByteString (send, recv)
 import Clapi.TH (segq, pathq)
 import Clapi.Types
   ( Path, Seg, Namespace(..), Placeholder(..), isChildOf
-  , Time(..), InterpolationLimit(..), Interpolation(..), Editable(..), TimeStamped(..)
+  , Time(..), InterpolationLimit(..), Interpolation(..), Editability(..), TimeStamped(..)
   , FrDigest(..), TrDigest(..), TrpDigest(..), trpdEmpty, FrpDigest(..)
-  , Definition, structDef, arrayDef, tupleDef
-  , unbounded, TreeType(..)
+  , SomeDefinition, DefName, structDef, arrayDef, tupleDef
+  , unbounded, ttTime, ttInt32
   , alFromList, alToMap
   , TimeSeriesDataOp(..), DataChange(..), DefOp(..)
-  , WireValue(..), (<|$|>)
+  , someWv, WireType(..), castWireValue
   )
 import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev, (<<->), runProtocolIO)
 import Clapi.SerialisationProtocol (serialiser)
@@ -34,12 +34,12 @@ import Clapi.Serialisation.Digests ()
 ns :: Seg
 ns = [segq|example|]
 
-initialDefs :: Map (Tagged Definition Seg) Definition
+initialDefs :: Map DefName SomeDefinition
 initialDefs = Map.fromList $ fmap (first Tagged) $
   [ ( [segq|delay|]
-    , tupleDef "How long to delay responses" (alFromList [([segq|t|], TtTime)]) ILUninterpolated)
+    , tupleDef "How long to delay responses" (alFromList [([segq|t|], ttTime)]) ILUninterpolated)
   , ( [segq|tsi|]
-    , tupleDef "Timeseries of ints" (alFromList [([segq|i|], TtInt32 unbounded)]) ILLinear)
+    , tupleDef "Timeseries of ints" (alFromList [([segq|i|], ttInt32 unbounded)]) ILLinear)
   , ( [segq|arr|]
     , arrayDef "Editable array of times" Nothing (Tagged [segq|delay|]) Editable)
   , ( ns
@@ -55,10 +55,10 @@ initDigest :: DummyApiState -> TrpDigest
 initDigest das = (trpdEmpty $ Namespace ns)
   { trpdDefinitions = OpDefine <$> initialDefs
   , trpdData = alFromList
-    [ ([pathq|/delay|], ConstChange Nothing [WireValue $ dasDelay das])
+    [ ([pathq|/delay|], ConstChange Nothing [someWv WtTime $ dasDelay das])
     , ( [pathq|/tsi|]
       , TimeChange $ Map.singleton 24
-        (Nothing, OpSet (Time 1 0) [WireValue (64 :: Int32)] ILinear))
+        (Nothing, OpSet (Time 1 0) [someWv WtInt32 64] ILinear))
     ]
   }
 
@@ -71,7 +71,7 @@ data DummyApiState = DummyApiState
 getHandler :: MonadFail m => Path -> DataChange -> DummyApiState -> m DummyApiState
 getHandler p
   | p == [pathq|/delay|] = \dc -> case dc of
-    ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <|$|> dwv
+    ConstChange _ [dwv] -> \das -> (\d -> das {dasDelay = d}) <$> castWireValue dwv
     _ -> const $ fail "Unexpected number of wvs"
   | isChildOf p [pathq|/arr|] = const pure
   | otherwise = const $ const $ fail "No handler"

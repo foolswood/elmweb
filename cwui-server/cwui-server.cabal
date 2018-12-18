@@ -25,7 +25,9 @@ library
                      , blaze-builder
                      , bytestring
                      , containers
+                     , constraints
                      , text
+                     , template-haskell
                      , vector
                      , clapi-hs
 
