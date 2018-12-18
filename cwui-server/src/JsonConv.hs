@@ -10,55 +10,54 @@
   , TemplateHaskell
   , TypeApplications
   , TypeSynonymInstances
+  , GADTs
 #-}
 module JsonConv () where
 
 import Prelude hiding (fail)
 import Control.Monad.Fail (MonadFail(..))
 
+import Language.Haskell.TH (Type(ConT))
+import Data.Constraint (Dict(..))
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import Data.Aeson (
     FromJSON(..), ToJSON(..), Value, withArray, Value(..),
     withObject, (.:), object, (.=))
 import Data.Aeson.Types (Parser)
-import Data.Maybe (fromJust)
 import qualified Data.Vector as Vec
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
-import Data.Proxy
 import qualified Data.ByteString as BS
-import Data.Word
-import Data.Int
 
 import Blaze.ByteString.Builder (toByteString)
 import Data.Attoparsec.ByteString (parseOnly, endOfInput)
 
 import Data.Map.Mos as Mos
+import qualified Data.Map.Mol as Mol
 import Clapi.Types.Path (Path, Seg, unSeg, segP, Namespace, Placeholder)
 import qualified Clapi.Types.Path as Path
-import Clapi.Types.WireTH (mkWithWtProxy)
+import Clapi.Types.WireTH (mkGetWtConstraint)
 import Clapi.TaggedData
 import Clapi.Serialisation
   ( interpolationTaggedData , dataErrIndexTaggedData, subErrIndexTaggedData
   , Encodable(..) , ilTaggedData, defTaggedData, frTaggedData, trTaggedData
   , soTaggedData, dcTaggedData, tsDOpTaggedData, defOpTaggedData
   , subOpTaggedData, TrDigestType(..), SeqOpType(..), DataChangeType(..)
-  , TsDOpT(..))
+  , TsDOpT(..), parser)
 import Clapi.Types
   ( Time(..), Interpolation(..), InterpolationType(..), InterpolationLimit(..)
-  , TimeStamped(..) , DataErrorIndex(..) , SubErrorIndex(..) , Editable(..)
-  , Attributee(..) , WireValue(..) , Wireable, WireType(..), wireValueWireType
-  , Tag, mkTag, unTag , (<|$|>) , Definition(..) , ArrayDefinition(..)
-  , StructDefinition(..) , TupleDefinition(..) , PostDefinition(..)
-  , unAssocList, alFromList, TreeType , FrDigest(..), TrDigest(..)
+  , TimeStamped(..), DataErrorIndex(..), SubErrorIndex(..), Editability(..)
+  , Attributee(..), WireValue(..), SomeWireValue(..), WireType(..)
+  , SomeWireType(..), someWv, Tag, mkTag, unTag, Definition(..)
+  , SomeDefinition(..), PostDefinition(..)
+  , unAssocList, alFromList, SomeTreeType, FrDigest(..), TrDigest(..)
   , FrcRootDigest(..), FrcSubDigest(..) , FrcUpdateDigest(..), DataChange(..)
   , TimeSeriesDataOp(..), DefOp(..), SubOp(..), CreateOp(..), TrcSubDigest(..)
-  , TrcUpdateDigest(..), DataDigest)
+  , TrcUpdateDigest(..), DataDigest, withWireValue, withWireType)
 import Clapi.Types.SequenceOps (SequenceOp(..))
-import Clapi.TextSerialisation (ttToText)
-import Clapi.Util (proxyF, proxyF3)
+import Clapi.TextSerialisation (ttToText_)
 
 parseTaggedJson :: TaggedData e a -> (e -> Value -> Parser a) -> Value -> Parser a
 parseTaggedJson td p = withArray "Tagged" (handleTagged . Vec.toList)
@@ -104,38 +103,36 @@ deriving instance FromJSON Placeholder
 deriving instance ToJSON Attributee
 deriving instance FromJSON Attributee
 
-mkWithWtProxy "withJsonWtProxy" [''Wireable, ''ToJSON, ''FromJSON]
+mkGetWtConstraint "getWtToJson" $ ConT ''ToJSON
+mkGetWtConstraint "getWtFromJson" $ ConT ''FromJSON
 
-instance FromJSON WireType where
+instance FromJSON SomeWireType where
     parseJSON v = parseJSON v >>= wtFromString
       where
         -- FIXME: Much the same as a test helper in Clapi
         wtFromString =
           either fail return . parseOnly (parser <* endOfInput) . encodeUtf8
 
-instance ToJSON WireType where
+instance ToJSON (WireType a) where
     toJSON = toJSON . wtToText
       where
         wtToText = either error (decodeUtf8 . toByteString) . builder
 
-instance FromJSON WireValue where
-    parseJSON = withObject "WireValue" $ \o -> do
-        t <- o .: "type"
-        v <- o .: "val"
-        withJsonWtProxy t go v
-      where
-        go :: forall a. (Wireable a, FromJSON a) => Proxy a -> Value -> Parser WireValue
-        go _ = fmap WireValue . parseJSON @a
+instance ToJSON SomeWireType where
+    toJSON = withWireType toJSON
 
-instance ToJSON WireValue where
-    -- This isn't a trick you can pull here, could do it before because a was Encodable
-    toJSON wv =
-      let
-        wt = wireValueWireType wv
-        wvj :: forall a. (Wireable a, ToJSON a) => Proxy a -> Value
-        wvj _ = fromJust $ toJSON @a <|$|> wv
-        wtjv = withJsonWtProxy wt wvj
-      in object ["type" .= toJSON wt, "val" .= wtjv]
+instance FromJSON SomeWireValue where
+    parseJSON = withObject "WireValue" $ \o -> do
+        SomeWireType wt <- o .: "type"
+        case getWtFromJson wt of
+            Dict -> someWv wt <$> o .: "val"
+
+instance ToJSON (WireValue a) where
+    toJSON (WireValue wt a) = case getWtToJson wt of
+        Dict -> object ["type" .= toJSON wt, "val" .= toJSON a]
+
+instance ToJSON SomeWireValue where
+    toJSON = withWireValue toJSON
 
 instance FromJSON Time where
     parseJSON = withArray "Time" (\v -> case Vec.toList v of
@@ -170,7 +167,7 @@ instance ToJSON DataErrorIndex where
         PathError p -> toJSON p
         TimePointError p tpid -> object ["path" .= p, "tpid" .= tpid]
 
-instance ToJSON Editable where
+instance ToJSON Editability where
     toJSON l = toJSON $ case l of
         Editable -> ("rw" :: String)
         ReadOnly -> "ro"
@@ -182,23 +179,11 @@ instance ToJSON SubErrorIndex where
         TypeSubError ns tn -> object ["ns" .= ns, "tn" .= tn]
         PathSubError ns p -> toJSON (ns, p)
 
-instance ToJSON StructDefinition where
-    toJSON (StructDefinition doc al) = object ["doc" .= doc, "stls" .= (asStl <$> unAssocList al)]
-      where
-        asStl (s, (tn, l)) = object ["seg" .= s, "tn" .= tn, "ed" .= l]
-
 instance ToJSON InterpolationLimit where
     toJSON = buildTaggedJson ilTaggedData $ const $ toJSON (Nothing :: Maybe Text)
 
-instance ToJSON TreeType where
-    toJSON = toJSON . ttToText
-
-instance ToJSON TupleDefinition where
-    toJSON (TupleDefinition doc types interpLim) = object
-        ["doc" .= doc, "types" .= typeOs, "il" .= interpLim]
-      where
-        typeOs = asTypeO <$> unAssocList types
-        asTypeO (s, tt) = object ["seg" .= s, "ty" .= tt]
+instance ToJSON SomeTreeType where
+    toJSON = toJSON . ttToText_
 
 instance ToJSON PostDefinition where
     toJSON (PostDefinition doc args) = object ["doc" .= doc, "args" .= typeOs]
@@ -206,15 +191,27 @@ instance ToJSON PostDefinition where
         typeOs = asTypeO <$> unAssocList args
         asTypeO (s, tts) = object ["seg" .= s, "tys" .= toJSONList tts]
 
-instance ToJSON ArrayDefinition where
-    toJSON (ArrayDefinition doc ptn cTn cEd) =
-      object ["doc" .= doc, "ptn" .= ptn, "ctn" .= cTn, "ced" .= cEd]
-
-instance ToJSON Definition where
-    toJSON = buildTaggedJson defTaggedData $ \v -> case v of
-        TupleDef d -> toJSON d
-        StructDef d -> toJSON d
-        ArrayDef d -> toJSON d
+instance ToJSON SomeDefinition where
+    toJSON = buildTaggedJson defTaggedData $ \(SomeDefinition d) -> case d of
+        TupleDef doc tys ilimit -> object
+          [ "doc" .= doc
+          , "types" .= (
+            (\(s, tt) -> object ["seg" .= s, "ty" .= tt])
+            <$> unAssocList tys)
+          , "il" .= ilimit
+          ]
+        StructDef doc al -> object
+          [ "doc" .= doc
+          , "stls" .= (
+            (\(s, (tn, l)) -> object ["seg" .= s, "tn" .= tn, "ed" .= l])
+            <$> unAssocList al)
+          ]
+        ArrayDef doc ptn cTn cEd -> object
+          [ "doc" .= doc
+          , "ptn" .= ptn
+          , "ctn" .= cTn
+          , "ced" .= cEd
+          ]
 
 instance ToJSON a => ToJSON (SequenceOp a) where
     toJSON = buildTaggedJson soTaggedData $ \o -> case o of
@@ -272,7 +269,7 @@ instance ToJSON FrcUpdateDigest where
       , "tas" .= Map.toList (frcudTypeAssignments frcud)
       , "co" .= Map.toList (Map.toList <$> frcudContOps frcud)
       , "dd" .= unAssocList (frcudData frcud)
-      , "errs" .= Map.toList (frcudErrors frcud)
+      , "errs" .= Mol.toList (frcudErrors frcud)
       ]
 
 instance ToJSON FrDigest where
