@@ -1,11 +1,15 @@
-{-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
+{-# LANGUAGE
+    QuasiQuotes
+  , OverloadedStrings
+  , GADTs
+  , DataKinds
+#-}
 
 import Prelude hiding (fail)
 
 import Data.Bifunctor (first)
 import qualified Data.Map as Map
 import Data.Map (Map)
-import Data.Int
 import Data.Tagged (Tagged(..))
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Chan.Unagi as Q
@@ -20,12 +24,13 @@ import Clapi.TH (segq, pathq)
 import Clapi.Types
   ( Path, Seg, Namespace(..), Placeholder(..), isChildOf
   , Time(..), InterpolationLimit(..), Interpolation(..), Editability(..), TimeStamped(..)
-  , FrDigest(..), TrDigest(..), TrpDigest(..), trpdEmpty, FrpDigest(..)
+  , FrDigest(..), TrDigest(..), TrpDigest, trpdEmpty, FrpDigest
   , SomeDefinition, DefName, structDef, arrayDef, tupleDef
   , unbounded, ttTime, ttInt32
   , alFromList, alToMap
   , TimeSeriesDataOp(..), DataChange(..), DefOp(..)
   , someWv, WireType(..), castWireValue
+  , SomeFrDigest(..), SomeTrDigest(..)
   )
 import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev, (<<->), runProtocolIO)
 import Clapi.SerialisationProtocol (serialiser)
@@ -53,7 +58,7 @@ initialDefs = Map.fromList $ fmap (first Tagged) $
 
 initDigest :: DummyApiState -> TrpDigest
 initDigest das = (trpdEmpty $ Namespace ns)
-  { trpdDefinitions = OpDefine <$> initialDefs
+  { trpdDefs = OpDefine <$> initialDefs
   , trpdData = alFromList
     [ ([pathq|/delay|], ConstChange Nothing [someWv WtTime $ dasDelay das])
     , ( [pathq|/tsi|]
@@ -81,7 +86,7 @@ apiProto das = sendRev (initDigest das) >> steadyState das
   where
     steadyState das = waitThen fwd rev
     handlerFor acc (p, v) = getHandler p v acc
-    fwd (FrpDigest tgtNs dd _creates cops) =
+    fwd (Frpd tgtNs dd _creates cops) =
       let
         cops' = (fmap . fmap . fmap . fmap) (either unPlaceholder id) cops
       in do
@@ -93,17 +98,18 @@ apiProto das = sendRev (initDigest das) >> steadyState das
         sendRev trpd
         steadyState das
 
-fwdProviderProto :: Monad m => Protocol FrDigest FrpDigest TrDigest TrpDigest m ()
+fwdProviderProto :: Monad m => Protocol SomeFrDigest FrpDigest SomeTrDigest TrpDigest m ()
 fwdProviderProto = waitThen fwd rev
   where
-    fwd d = case d of
-        Frpd pd -> do
-            sendFwd pd
+    fwd :: Monad m => SomeFrDigest -> Protocol SomeFrDigest FrpDigest SomeTrDigest TrpDigest m ()
+    fwd (SomeFrDigest d) = case d of
+        Frpd {} -> do
+            sendFwd d
             fwdProviderProto
-        Frcrd _ -> fwdProviderProto
+        Frcrd {} -> fwdProviderProto
         _ -> return ()
     rev d = do
-        sendRev $ Trpd d
+        sendRev $ SomeTrDigest d
         fwdProviderProto
 
 -- Convert a time to a number of microseconds
