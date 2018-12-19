@@ -39,7 +39,7 @@ packages:
 - .
 - location:
     git: git@github.com:concert/clapi.git
-    commit: d1c034f7c1b71d0d28dbd12efe3dfaa2a60da143
+    commit: f5667b123183e41b429256be77441c00673ff81e
   extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)

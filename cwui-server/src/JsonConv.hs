@@ -11,6 +11,7 @@
   , TypeApplications
   , TypeSynonymInstances
   , GADTs
+  , DataKinds
 #-}
 module JsonConv () where
 
@@ -42,7 +43,7 @@ import Clapi.Types.WireTH (mkGetWtConstraint)
 import Clapi.TaggedData
 import Clapi.Serialisation
   ( interpolationTaggedData , dataErrIndexTaggedData, subErrIndexTaggedData
-  , Encodable(..) , ilTaggedData, defTaggedData, frTaggedData, trTaggedData
+  , Encodable(..) , ilTaggedData, defTaggedData, strTaggedData
   , soTaggedData, dcTaggedData, tsDOpTaggedData, defOpTaggedData
   , subOpTaggedData, TrDigestType(..), SeqOpType(..), DataChangeType(..)
   , TsDOpT(..), parser)
@@ -53,9 +54,10 @@ import Clapi.Types
   , SomeWireType(..), someWv, Tag, mkTag, unTag, Definition(..)
   , SomeDefinition(..), PostDefinition(..)
   , unAssocList, alFromList, SomeTreeType, FrDigest(..), TrDigest(..)
-  , FrcRootDigest(..), FrcSubDigest(..) , FrcUpdateDigest(..), DataChange(..)
-  , TimeSeriesDataOp(..), DefOp(..), SubOp(..), CreateOp(..), TrcSubDigest(..)
-  , TrcUpdateDigest(..), DataDigest, withWireValue, withWireType)
+  , DataChange(..)
+  , TimeSeriesDataOp(..), DefOp(..), SubOp(..), CreateOp(..), TrcSubDigest
+  , DataDigest, withWireValue, withWireType
+  , SomeTrDigest(..), SomeFrDigest(..), withFrDigest)
 import Clapi.Types.SequenceOps (SequenceOp(..))
 import Clapi.TextSerialisation (ttToText_)
 
@@ -223,18 +225,6 @@ instance FromJSON a => FromJSON (SequenceOp a) where
         SoAfterT -> \ref -> SoAfter <$> parseJSON ref
         SoAbsentT -> const $ pure SoAbsent
 
-instance ToJSON FrcRootDigest where
-    toJSON (FrcRootDigest contOps) = toJSON $ Map.toList contOps
-
-instance ToJSON FrcSubDigest where
-    toJSON (FrcSubDigest errs ptu tu du) = object
-      [ "errs" .= Map.toList errs
-      -- FIXME: These are MOS but the elm doesn't know that yet:
-      , "ptuns" .= Mos.toList ptu
-      , "tuns" .= Mos.toList tu
-      , "duns" .= Mos.toList du
-      ]
-
 instance ToJSON TimeSeriesDataOp where
     toJSON = buildTaggedJson tsDOpTaggedData $ \o -> case o of
         OpSet t wvs i -> object ["time" .= t , "wvs" .= wvs , "interp" .= i]
@@ -261,24 +251,28 @@ instance ToJSON a => ToJSON (DefOp a) where
         OpDefine d -> toJSON d
         OpUndefine -> Null
 
-instance ToJSON FrcUpdateDigest where
-    toJSON frcud = object
-      [ "ns" .= frcudNamespace frcud
-      , "pdefs" .= Map.toList (frcudPostDefs frcud)
-      , "defs" .= Map.toList (frcudDefinitions frcud)
-      , "tas" .= Map.toList (frcudTypeAssignments frcud)
-      , "co" .= Map.toList (Map.toList <$> frcudContOps frcud)
-      , "dd" .= unAssocList (frcudData frcud)
-      , "errs" .= Mol.toList (frcudErrors frcud)
-      ]
+instance ToJSON (FrDigest o a) where
+    toJSON = \case
+        Frcud ns pdefs defs tas dd co errs -> object
+          [ "ns" .= ns
+          , "pdefs" .= Map.toList pdefs
+          , "defs" .= Map.toList defs
+          , "tas" .= Map.toList tas
+          , "co" .= Map.toList (Map.toList <$> co)
+          , "dd" .= unAssocList dd
+          , "errs" .= Mol.toList errs
+          ]
+        Frcsd errs ptu tu du -> object
+          [ "errs" .= Map.toList errs
+          , "ptuns" .= Mos.toList ptu
+          , "tuns" .= Mos.toList tu
+          , "duns" .= Mos.toList du
+          ]
+        Frcrd cops -> toJSON $ Map.toList cops
+        _ -> error "Unexpected provider digest"
 
-instance ToJSON FrDigest where
-    toJSON = buildTaggedJson frTaggedData $ \d -> case d of
-        Frcrd frcrd -> toJSON frcrd
-        Frcsd frcsd -> toJSON frcsd
-        Frcud frcud -> toJSON frcud
-        Frpd _ -> error "Unexpectedly received provider digest"
-        Frped _ -> error "Unexpectedly received provider error digest"
+instance ToJSON SomeFrDigest where
+    toJSON = withFrDigest toJSON
 
 instance FromJSON SubOp where
     parseJSON = parseTaggedJson subOpTaggedData $ const . pure
@@ -289,16 +283,17 @@ instance FromJSON DataDigest where
 instance FromJSON CreateOp where
     parseJSON = withObject "CreateOp" $ \o -> OpCreate <$> o .: "args" <*> o .: "after"
 
-instance FromJSON TrDigest where
-    parseJSON = parseTaggedJson trTaggedData $ \d -> case d of
-        TrcsdT -> withObject "SubDigest" $ \sd -> Trcsd <$> (
-          TrcSubDigest
+instance FromJSON SomeTrDigest where
+    parseJSON = parseTaggedJson strTaggedData $ \case
+        TrcsdT -> withObject "SubDigest" $ (\sd -> SomeTrDigest <$> (
+          Trcsd
           <$> (Map.fromList <$> sd .: "postTypes")
           <*> (Map.fromList <$> sd .: "types")
           <*> (Map.fromList <$> sd .: "data")
-          )
-        TrcudT -> withObject "UpdateDigest" $ \ud -> Trcud <$> (
-          TrcUpdateDigest
+          :: Parser TrcSubDigest
+          ) :: Parser SomeTrDigest)
+        TrcudT -> withObject "UpdateDigest" $ \ud -> SomeTrDigest <$> (
+          Trcud
           <$> ud .: "ns"
           <*> ud .: "dd"
           <*> (Map.fromList . (fmap $ fmap Map.fromList) <$> ud .: "creates")
