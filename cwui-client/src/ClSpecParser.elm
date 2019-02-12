@@ -9,13 +9,22 @@ type alias ConstraintParser = (String, (String -> Result String AtomDef))
 constraintParsers : List (ConstraintParser)
 constraintParsers =
   let
-    timeBounds s = if String.isEmpty s
+    parseBounds fromStr s = if String.isEmpty s
         then Ok {minBound = Nothing, maxBound = Nothing}
-        else Err "Bounds not implemented"
-    enumOpts = Ok << String.split ","
-    intBounds = timeBounds
-    floatBounds = timeBounds
+        else case String.split ":" s of
+            [minStr, maxStr] ->
+              let
+                fromMStr ms = case ms of
+                    "" -> Ok Nothing
+                    js -> Result.map Just <| fromStr js
+                asBounds minB maxB = {minBound = minB, maxBound = maxB}
+              in Result.map2 asBounds (fromMStr minStr) (fromMStr maxStr)
+            _ -> Err <| "Invalid bounds: " ++ s
+    timeBounds = parseBounds (always <| Err "Not implemented")
+    intBounds = parseBounds String.toInt
+    floatBounds = parseBounds String.toFloat
     cRegex s = Ok (s, regex s)
+    enumOpts = Ok << String.split ","
     parsePath s = Ok s
     parseTypeName s = case String.split ":" s of
         [ns, seg] -> Ok (ns, seg)
