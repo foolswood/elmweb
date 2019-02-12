@@ -44,7 +44,7 @@ import Clapi.TaggedData
 import Clapi.Serialisation
   ( interpolationTaggedData , dataErrIndexTaggedData, subErrIndexTaggedData
   , Encodable(..) , ilTaggedData, defTaggedData, strTaggedData
-  , soTaggedData, dcTaggedData, tsDOpTaggedData, defOpTaggedData
+  , soTaggedData, dcTaggedData, tsDOpTaggedData, defOpTaggedData, frTaggedData
   , subOpTaggedData, TrDigestType(..), SeqOpType(..), DataChangeType(..)
   , TsDOpT(..), parser)
 import Clapi.Types
@@ -252,7 +252,7 @@ instance ToJSON a => ToJSON (DefOp a) where
         OpUndefine -> Null
 
 instance ToJSON (FrDigest o a) where
-    toJSON = \case
+    toJSON = buildTaggedJson frTaggedData $ \case
         Frcud ns pdefs defs tas dd co errs -> object
           [ "ns" .= ns
           , "pdefs" .= Map.toList pdefs
