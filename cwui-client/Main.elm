@@ -128,7 +128,7 @@ cementedLayout rs bl cSels =
   let
     cssidSelected cssid = List.map subPathDsid <| CSet.toList <| getWithDefault TS.empty cssid cSels
   in Layout.cement
-    (Layout.resolveChild cssidSelected (dynamicLayout rs))
+    (Layout.resolveChild cssidSelected (dynamicLayout rs) (List.head << List.reverse))
     cssidSelected
     bl
 

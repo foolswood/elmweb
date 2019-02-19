@@ -51,7 +51,7 @@ view viewSeries viewData =
     label mLabel = case mLabel of
         Nothing -> identity
         Just label -> \child -> H.div
-            [HA.style [("outline", "solid"), ("display", "flex")]]
+            [HA.style [("outline", "solid"), ("margin", "0.3em")]]
             [H.small [] [H.text label], child]
     go mLabel cl = label mLabel <| case cl of
         CblContainer subLs -> H.div [] <| List.map (uncurry go) subLs
@@ -84,17 +84,18 @@ instantiateTemplate joinDsids expander bl dsid = case bl of
 resolveChild
    : (ChildSourceStateId -> List DataSourceId)
   -> (DataSourceId -> dynConfig -> List (BoundLayout dynConfig DataSourceId ChildSourceStateId ssid))
+  -> (DataSourceId -> Maybe String)
   -> ChildSource dynConfig DataSourceId ChildSourceStateId ssid
   -> List (Maybe String, BoundLayout dynConfig DataSourceId ChildSourceStateId ssid)
-resolveChild getDsids resolveDynamic childSource =
+resolveChild getDsids resolveDynamic label childSource =
   let
     unlabelled = List.map <| \l -> (Nothing, l)
   in
     case childSource of
         CsFixed subLayouts -> subLayouts
         CsDynamic dsid a -> unlabelled <| resolveDynamic dsid a
-        CsTemplate cssid subLayout -> unlabelled <| List.map
-            (instantiateTemplate (++) expandWildcards subLayout)
+        CsTemplate cssid subLayout -> List.map
+            (\dsid -> (label dsid, instantiateTemplate (++) expandWildcards subLayout dsid))
             (getDsids cssid)
 
 edit
