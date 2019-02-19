@@ -20,7 +20,7 @@ type BoundLayout dynConfig dsid cssid ssid
   | BlSeries ssid cssid
 
 type ChildSource dynConfig dsid cssid ssid
-  = CsFixed (List (BoundLayout dynConfig dsid cssid ssid))
+  = CsFixed (List (Maybe String, BoundLayout dynConfig dsid cssid ssid))
   | CsTemplate
         cssid
         (BoundLayout dynConfig dsid cssid ssid)
@@ -50,7 +50,7 @@ view viewSeries viewData =
   let
     label mLabel = case mLabel of
         Nothing -> identity
-        Just label -> \child -> H.div [] [H.text label, child]
+        Just label -> \child -> H.div [HA.style [("outline", "solid")]] [H.small [] [H.text label], child]
     go mLabel cl = label mLabel <| case cl of
         CblContainer subLs -> H.div [] <| List.map (uncurry go) subLs
         CblView dsid cssid -> viewData dsid cssid
@@ -72,7 +72,7 @@ instantiateTemplate
   -> BoundLayout dynConfig dsid cssid ssid
 instantiateTemplate joinDsids expander bl dsid = case bl of
     BlContainer cs -> BlContainer <| case cs of
-        CsFixed subLs -> CsFixed <| List.map (flip (instantiateTemplate joinDsids expander) dsid) subLs
+        CsFixed subLs -> CsFixed <| List.map (Tuple.mapSecond <| flip (instantiateTemplate joinDsids expander) dsid) subLs
         CsTemplate subCssid subL -> CsTemplate (expander dsid subCssid) subL
         CsDynamic subDsid a -> CsDynamic (joinDsids dsid subDsid) a
     BlView subDsid subCssid -> BlView
@@ -85,10 +85,13 @@ resolveChild
   -> ChildSource dynConfig DataSourceId ChildSourceStateId ssid
   -> List (Maybe String, BoundLayout dynConfig DataSourceId ChildSourceStateId ssid)
 resolveChild getDsids resolveDynamic childSource =
-    List.map (\l -> (Nothing, l)) <| case childSource of
+  let
+    unlabelled = List.map <| \l -> (Nothing, l)
+  in
+    case childSource of
         CsFixed subLayouts -> subLayouts
-        CsDynamic dsid a -> resolveDynamic dsid a
-        CsTemplate cssid subLayout -> List.map
+        CsDynamic dsid a -> unlabelled <| resolveDynamic dsid a
+        CsTemplate cssid subLayout -> unlabelled <| List.map
             (instantiateTemplate (++) expandWildcards subLayout)
             (getDsids cssid)
 
@@ -103,7 +106,10 @@ edit ssid dynEdit =
             BlContainer childSource -> H.map BlContainer
               <| case childSource of
                 CsFixed subLayouts -> H.map CsFixed
-                    <| H.div [] <| listEdit identity go subLayouts
+                    <| H.div [] <| listEdit
+                        identity
+                        (\(mL, l) -> H.map (\newL -> (mL, newL)) <| go l)
+                        subLayouts
                 CsDynamic dsid a -> H.div []
                   [ H.map (\newDsid -> CsDynamic newDsid a) <| editDsid dsid
                   , H.map (\newA -> CsDynamic dsid newA) <| dynEdit a

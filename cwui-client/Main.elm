@@ -154,27 +154,27 @@ init =
     initialNodeFs = TD.empty
     initialLayout = BlContainer <| CsFixed
         -- Kinds:
-        [ BlView ["path", "engine", "kinds"] ["kindLoad"]
-        , BlContainer <| CsTemplate ["kindLoad"] <| BlView ["loaded"] dropCssid
+        [ (Just "Available Kinds", BlView ["path", "engine", "kinds"] ["kindLoad"])
+        , (Just "Kind Loading", BlContainer <| CsTemplate ["kindLoad"] <| BlView ["loaded"] dropCssid)
         -- Types:
-        , BlView ["path", "engine", "types"] ["typeLoad"]
-        , BlContainer <| CsTemplate ["typeLoad"] <| BlView [] dropCssid
+        , (Just "Loaded Kinds", BlView ["path", "engine", "types"] ["typeLoad"])
+        , (Just "Kind Instances", BlContainer <| CsTemplate ["typeLoad"] <| BlView [] dropCssid)
         -- Elems:
-        , BlView ["path", "engine", "elems"] ["elemTy"]
-        , BlContainer <| CsTemplate ["elemTy"] <| BlContainer <| CsFixed
-          [ BlView [] ["et", "*"]
-          , BlContainer <| CsTemplate ["et", "*"] <| BlContainer <| CsFixed
-            [ BlView ["params"] ["series"]
-            , BlView ["connections", "outs"] ["etc", "*", "*"]
-            , BlContainer <| CsTemplate ["etc", "*", "*"] <| BlView [] dropCssid
-            ]
-          ]
-        , BlView ["path", "engine", "connections", "outs"] ["globOuts"]
-        , BlContainer <| CsTemplate ["globOuts"] <| BlView [] dropCssid
+        , (Just "Type Instances", BlView ["path", "engine", "elems"] ["elemTy"])
+        , (Just "Elements", BlContainer <| CsTemplate ["elemTy"] <| BlContainer <| CsFixed
+          [ (Just "Instances", BlView [] ["et", "*"])
+          , (Just "Detail", BlContainer <| CsTemplate ["et", "*"] <| BlContainer <| CsFixed
+            [ (Just "Parameters", BlView ["params"] ["series"])
+            , (Just "Outputs", BlView ["connections", "outs"] ["etc", "*", "*"])
+            , (Just "Something", BlContainer <| CsTemplate ["etc", "*", "*"] <| BlView [] dropCssid)
+            ])
+          ])
+        , (Just "Global Outs", BlView ["path", "engine", "connections", "outs"] ["globOuts"])
+        , (Just "Global Out Connections", BlContainer <| CsTemplate ["globOuts"] <| BlView [] dropCssid)
         -- Transport:
-        , BlView ["path", "engine", "transport", "state"] dropCssid
-        , BlView ["clock", "engine"] dropCssid
-        , BlSeries 0 ["series"]
+        , (Just "Transport state", BlView ["path", "engine", "transport", "state"] dropCssid)
+        , (Just "Clock time", BlView ["clock", "engine"] dropCssid)
+        , (Nothing, BlSeries 0 ["series"])
         ]
     childSelections = Dict.empty
     initialState = remoteStateEmpty
