@@ -50,7 +50,9 @@ view viewSeries viewData =
   let
     label mLabel = case mLabel of
         Nothing -> identity
-        Just label -> \child -> H.div [HA.style [("outline", "solid")]] [H.small [] [H.text label], child]
+        Just label -> \child -> H.div
+            [HA.style [("outline", "solid"), ("display", "flex")]]
+            [H.small [] [H.text label], child]
     go mLabel cl = label mLabel <| case cl of
         CblContainer subLs -> H.div [] <| List.map (uncurry go) subLs
         CblView dsid cssid -> viewData dsid cssid

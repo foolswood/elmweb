@@ -166,7 +166,7 @@ init =
           , (Just "Detail", BlContainer <| CsTemplate ["et", "*"] <| BlContainer <| CsFixed
             [ (Just "Parameters", BlView ["params"] ["series"])
             , (Just "Outputs", BlView ["connections", "outs"] ["etc", "*", "*"])
-            , (Just "Something", BlContainer <| CsTemplate ["etc", "*", "*"] <| BlView [] dropCssid)
+            , (Just "Output Connections", BlContainer <| CsTemplate ["etc", "*", "*"] <| BlView [] dropCssid)
             ])
           ])
         , (Just "Global Outs", BlView ["path", "engine", "connections", "outs"] ["globOuts"])
