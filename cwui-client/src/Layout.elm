@@ -109,15 +109,15 @@ edit ssid dynEdit =
             BlContainer childSource -> H.map BlContainer
               <| case childSource of
                 CsFixed subLayouts -> H.map CsFixed
-                    <| H.div [] <| listEdit
+                    <| H.div [HA.style [("outline", "solid"), ("margin", "0.5em")]] <| listEdit
                         identity
                         (\(mL, l) -> H.map (\newL -> (mL, newL)) <| go l)
                         subLayouts
-                CsDynamic dsid a -> H.div []
+                CsDynamic dsid a -> H.div [HA.style [("outline", "dotted")]]
                   [ H.map (\newDsid -> CsDynamic newDsid a) <| editDsid dsid
                   , H.map (\newA -> CsDynamic dsid newA) <| dynEdit a
                   ]
-                CsTemplate cssid subL -> H.div []
+                CsTemplate cssid subL -> H.div [HA.style [("outline", "dashed"), ("margin", "0.3em")]]
                   [ H.map
                       (\newCssid -> CsTemplate newCssid subL)
                       <| editCssid cssid
@@ -159,13 +159,19 @@ requiredDataSources =
   in flip go Set.empty
 
 -- FIXME: Rest of this is abject tat
-editDsid : DataSourceId -> Html DataSourceId
-editDsid dsid = H.input
+labelledPathInput : String -> List String -> Html (List String)
+labelledPathInput lbl dsid = H.span []
+  [ H.small [] [H.text lbl]
+  , H.input
     [HA.value <| String.join "/" dsid, HE.onInput <| String.split "/"]
     []
+  ]
+
+editDsid : DataSourceId -> Html DataSourceId
+editDsid = labelledPathInput "Data:"
 
 editCssid : ChildSourceStateId -> Html ChildSourceStateId
-editCssid = editDsid
+editCssid = labelledPathInput "Child:"
 
 dataDerivedChildSourceState : DataSourceId -> ChildSourceStateId
 dataDerivedChildSourceState dsid = "dataDerived" :: dsid
