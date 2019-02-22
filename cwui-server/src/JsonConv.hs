@@ -43,12 +43,12 @@ import Clapi.Types.WireTH (mkGetWtConstraint)
 import Clapi.TaggedData
 import Clapi.Serialisation
   ( interpolationTaggedData , dataErrIndexTaggedData, subErrIndexTaggedData
-  , Encodable(..) , ilTaggedData, defTaggedData, strTaggedData
+  , Encodable(..) , itTaggedData, defTaggedData, strTaggedData
   , soTaggedData, dcTaggedData, tsDOpTaggedData, defOpTaggedData, frTaggedData
   , subOpTaggedData, TrDigestType(..), SeqOpType(..), DataChangeType(..)
   , TsDOpT(..), parser)
 import Clapi.Types
-  ( Time(..), Interpolation(..), InterpolationType(..), InterpolationLimit(..)
+  ( Time(..), Interpolation(..), InterpolationType(..)
   , TimeStamped(..), DataErrorIndex(..), SubErrorIndex(..), Editability(..)
   , Attributee(..), WireValue(..), SomeWireValue(..), WireType(..)
   , SomeWireType(..), someWv, Tag, mkTag, unTag, Definition(..)
@@ -181,8 +181,8 @@ instance ToJSON SubErrorIndex where
         TypeSubError ns tn -> object ["ns" .= ns, "tn" .= tn]
         PathSubError ns p -> toJSON (ns, p)
 
-instance ToJSON InterpolationLimit where
-    toJSON = buildTaggedJson ilTaggedData $ const $ toJSON (Nothing :: Maybe Text)
+instance ToJSON InterpolationType where
+    toJSON = buildTaggedJson itTaggedData (const $ toJSON (Nothing :: Maybe Text))
 
 instance ToJSON SomeTreeType where
     toJSON = toJSON . ttToText_

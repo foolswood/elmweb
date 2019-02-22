@@ -44,10 +44,10 @@ type Editable
   = ReadOnly
   | Editable
 
-type InterpolationLimit
-  = ILUninterpolated
-  | ILConstant
+type InterpolationType
+  = ILConstant
   | ILLinear
+type alias InterpolationLimit = Maybe InterpolationType
 
 type Interpolation
   = IConstant

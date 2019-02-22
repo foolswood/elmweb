@@ -646,7 +646,7 @@ viewNode isSelected editable def postability node recentCops recentDums formStat
             (castFormState (.unwrap neConv) formState) (castMaybe (.unwrap pConv) maybeNas))
   in case def of
     TupleDef d -> case .interpLim d of
-        ILUninterpolated -> withCasts
+        Nothing -> withCasts
             constChangeCast constNeConv constPaConv constNaConv (.unwrap constNodeConv)
             recentDums (viewWithRecent editable d)
         _ -> withCasts seriesChangeCast seriesNeConv seriesPaConv seriesNaConv (.unwrap seriesNodeConv)

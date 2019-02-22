@@ -9,7 +9,7 @@ import Tagged.Tagged exposing (Tagged(..))
 import ClTypes exposing
   ( Namespace, Placeholder, Path, Time, Interpolation(..), TpId, Seg
   , Attributee , TypeName, typeName, Editable(..), Definition(..)
-  , PostDefinition, AtomDef , InterpolationLimit(..) , ChildDescription
+  , PostDefinition, AtomDef, InterpolationType(..), ChildDescription
   , WireValue(..), WireType(..), SubPath, typeNameGetNs, typeNameGetSeg
   , SubErrorIndex(..), DataErrorIndex(..))
 import ClSpecParser exposing (parseAtomDef)
@@ -215,12 +215,11 @@ decodeAtomDef =
         Err s -> JD.fail s
   in JD.andThen pd JD.string
 
-decodeInterpolationLimit : JD.Decoder InterpolationLimit
-decodeInterpolationLimit =
+decodeInterpolationType : JD.Decoder InterpolationType
+decodeInterpolationType =
   let
     iltd = Dict.fromList
-      [ ("U", JD.succeed ILUninterpolated)
-      , ("C", JD.succeed ILConstant)
+      [ ("C", JD.succeed ILConstant)
       , ("L", JD.succeed ILLinear)
       ]
   in decodeTagged iltd
@@ -237,7 +236,7 @@ defTagDecoders = Dict.fromList
       (\d ts il -> TupleDef {doc = d, types = ts, interpLim = il})
       decodeDocField
       (JD.field "types" (JD.list (JD.map2 (,) (JD.field "seg" decodeSeg) (JD.field "ty" decodeAtomDef))))
-      (JD.field "il" decodeInterpolationLimit)
+      (JD.field "il" <| JD.nullable decodeInterpolationType)
     )
   , ("S", JD.map2
       (\d cds -> StructDef {doc = d, childDescs = cds})

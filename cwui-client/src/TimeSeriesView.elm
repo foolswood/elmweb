@@ -8,8 +8,8 @@ import CSS exposing (emPx, keyFramed, applyKeyFramed)
 
 import ClTypes exposing
   ( TpId, Time, Attributee, WireValue, Interpolation(..), fromFloat, fromTime
-  , TupleDefinition, InterpolationLimit(..), AtomDef(ADTime), unbounded
-  , Editable(..))
+  , TupleDefinition, InterpolationLimit, InterpolationType(..)
+  , AtomDef(ADTime), unbounded, Editable(..))
 import ClNodes exposing (TimePoint, TimeSeriesNodeT)
 import TimeSeries exposing (TimeSeries)
 import TimeSeriesDiff exposing (ChangedTimes)
@@ -349,9 +349,9 @@ interpolationEditor il pi =
         Just ILinear -> "linear"
         Nothing -> ""
     modeOptStrs= case il of
-        ILConstant -> ["constant"]
-        ILLinear -> ["constant", "linear"]
-        ILUninterpolated -> []
+        Just ILConstant -> ["constant"]
+        Just ILLinear -> ["constant", "linear"]
+        Nothing -> []
     modeOpt s = H.option [HA.value s, HA.selected <| currentModeStr == s] [H.text s]
     unsetOpt = H.option [HA.hidden True, HA.selected <| String.isEmpty currentModeStr] [H.text "<unset>"]
   in H.select [onInput <| toInterp] <| unsetOpt :: List.map modeOpt modeOptStrs

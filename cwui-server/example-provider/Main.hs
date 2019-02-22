@@ -23,7 +23,7 @@ import Network.Socket.ByteString (send, recv)
 import Clapi.TH (segq, pathq)
 import Clapi.Types
   ( Path, Seg, Namespace(..), Placeholder(..), isChildOf
-  , Time(..), InterpolationLimit(..), Interpolation(..), Editability(..), TimeStamped(..)
+  , Time(..), InterpolationType(..), Interpolation(..), Editability(..), TimeStamped(..)
   , FrDigest(..), TrDigest(..), TrpDigest, trpdEmpty, FrpDigest
   , SomeDefinition, DefName, structDef, arrayDef, tupleDef
   , unbounded, ttTime, ttInt32
@@ -42,9 +42,9 @@ ns = [segq|example|]
 initialDefs :: Map DefName SomeDefinition
 initialDefs = Map.fromList $ fmap (first Tagged) $
   [ ( [segq|delay|]
-    , tupleDef "How long to delay responses" (alFromList [([segq|t|], ttTime)]) ILUninterpolated)
+    , tupleDef "How long to delay responses" (alFromList [([segq|t|], ttTime)]) Nothing)
   , ( [segq|tsi|]
-    , tupleDef "Timeseries of ints" (alFromList [([segq|i|], ttInt32 unbounded)]) ILLinear)
+    , tupleDef "Timeseries of ints" (alFromList [([segq|i|], ttInt32 unbounded)]) $ Just ItLinear)
   , ( [segq|arr|]
     , arrayDef "Editable array of times" Nothing (Tagged [segq|delay|]) Editable)
   , ( ns

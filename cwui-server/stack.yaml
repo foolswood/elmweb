@@ -38,8 +38,8 @@ resolver: lts-12.11
 packages:
 - .
 - location:
-    git: git@github.com:concert/clapi.git
-    commit: f5667b123183e41b429256be77441c00673ff81e
+    git: git@gitlab.com:concert/clapi.git
+    commit: c9b73ba3810f5acae7678b7ed1661db223f793d2
   extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
