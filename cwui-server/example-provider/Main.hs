@@ -20,46 +20,48 @@ import System.Clock (Clock(Monotonic), getTime, toNanoSecs)
 import Network.Simple.TCP (connect, Socket, SockAddr)
 import Network.Socket.ByteString (send, recv)
 
-import Clapi.TH (segq, pathq)
+import Clapi.TH (n, pathq)
 import Clapi.Types
-  ( Path, Seg, Namespace(..), Placeholder(..), isChildOf
+  ( Path, Namespace, Placeholder(..), isChildOf
   , Time(..), InterpolationType(..), Interpolation(..), Editability(..), TimeStamped(..)
   , FrDigest(..), TrDigest(..), TrpDigest, trpdEmpty, FrpDigest
   , SomeDefinition, DefName, structDef, arrayDef, tupleDef
   , unbounded, ttTime, ttInt32
-  , alFromList, alToMap
   , TimeSeriesDataOp(..), DataChange(..), DefOp(..)
   , someWv, WireType(..), castWireValue
   , SomeFrDigest(..), SomeTrDigest(..)
+  , castName
+  , OrderedContOps, ContOps
   )
+import qualified Clapi.Types.AssocList as AL
 import Clapi.Protocol (Protocol, waitThen, sendFwd, sendRev, (<<->), runProtocolIO)
 import Clapi.SerialisationProtocol (serialiser)
 import Clapi.Serialisation.Digests ()
 
-ns :: Seg
-ns = [segq|example|]
+ns :: Namespace
+ns = [n|example|]
 
 initialDefs :: Map DefName SomeDefinition
-initialDefs = Map.fromList $ fmap (first Tagged) $
-  [ ( [segq|delay|]
-    , tupleDef "How long to delay responses" (alFromList [([segq|t|], ttTime)]) Nothing)
-  , ( [segq|tsi|]
-    , tupleDef "Timeseries of ints" (alFromList [([segq|i|], ttInt32 unbounded)]) $ Just ItLinear)
-  , ( [segq|arr|]
-    , arrayDef "Editable array of times" Nothing (Tagged [segq|delay|]) Editable)
-  , ( ns
-    , structDef "Example API for client testing" $ alFromList
-      [ ([segq|delay|], (Tagged [segq|delay|], Editable))
-      , ([segq|tsi|], (Tagged [segq|tsi|], Editable))
-      , ([segq|arr|], (Tagged [segq|arr|], Editable))
+initialDefs = Map.fromList
+  [ ( [n|delay|]
+    , tupleDef "How long to delay responses" (AL.fromList [([n|t|], ttTime)]) Nothing)
+  , ( [n|tsi|]
+    , tupleDef "Timeseries of ints" (AL.fromList [([n|i|], ttInt32 unbounded)]) $ Just ItLinear)
+  , ( [n|arr|]
+    , arrayDef "Editable array of times" Nothing [n|delay|] Editable)
+  , ( castName ns
+    , structDef "Example API for client testing" $ AL.fromList
+      [ ([n|delay|], ([n|delay|], Editable))
+      , ([n|tsi|], ([n|tsi|], Editable))
+      , ([n|arr|], ([n|arr|], Editable))
       ]
     )
   ]
 
 initDigest :: DummyApiState -> TrpDigest
-initDigest das = (trpdEmpty $ Namespace ns)
+initDigest das = (trpdEmpty ns)
   { trpdDefs = OpDefine <$> initialDefs
-  , trpdData = alFromList
+  , trpdData = AL.fromList
     [ ([pathq|/delay|], ConstChange Nothing [someWv WtTime $ dasDelay das])
     , ( [pathq|/tsi|]
       , TimeChange $ Map.singleton 24
@@ -86,13 +88,17 @@ apiProto das = sendRev (initDigest das) >> steadyState das
   where
     steadyState das = waitThen fwd rev
     handlerFor acc (p, v) = getHandler p v acc
-    fwd (Frpd tgtNs dd _creates cops) =
+    fwd (Frpd tgtNs dd _creates orderedCops) =
       let
-        cops' = (fmap . fmap . fmap . fmap) (either unPlaceholder id) cops
+        cops = mapContOpKey (either castName id) $ unOrder orderedCops
+        unOrder :: Ord i => OrderedContOps i -> ContOps i
+        unOrder = fmap AL.toMap
+        mapContOpKey :: Ord j => (i -> j) -> ContOps i -> ContOps j
+        mapContOpKey f = fmap (Map.mapKeys f . (fmap . fmap . fmap) f)
       in do
-        das' <- foldM (\acc pv -> lift $ handlerFor acc pv) das $ Map.toList $ alToMap dd
+        das' <- foldM (\acc pv -> lift $ handlerFor acc pv) das $ Map.toList $ AL.toMap dd
         sendFwd $ Delayed (dasDelay das') $
-          (trpdEmpty tgtNs) {trpdData = dd, trpdContOps = cops'}
+          (trpdEmpty tgtNs) {trpdData = dd, trpdContOps = cops}
         steadyState das'
     rev trpd = do
         sendRev trpd

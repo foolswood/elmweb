@@ -37,7 +37,9 @@ import Data.Attoparsec.ByteString (parseOnly, endOfInput)
 
 import Data.Map.Mos as Mos
 import qualified Data.Map.Mol as Mol
-import Clapi.Types.Path (Path, Seg, unSeg, segP, Namespace, Placeholder)
+import Clapi.Types.Path (Path)
+import Clapi.Types.Name
+  ( Name, unName, nameP, mkName, Namespace, Placeholder)
 import qualified Clapi.Types.Path as Path
 import Clapi.Types.WireTH (mkGetWtConstraint)
 import Clapi.TaggedData
@@ -53,11 +55,12 @@ import Clapi.Types
   , Attributee(..), WireValue(..), SomeWireValue(..), WireType(..)
   , SomeWireType(..), someWv, Tag, mkTag, unTag, Definition(..)
   , SomeDefinition(..), PostDefinition(..)
-  , unAssocList, alFromList, SomeTreeType, FrDigest(..), TrDigest(..)
+  , SomeTreeType, FrDigest(..), TrDigest(..)
   , DataChange(..)
   , TimeSeriesDataOp(..), DefOp(..), SubOp(..), CreateOp(..), TrcSubDigest
   , DataDigest, withWireValue, withWireType
   , SomeTrDigest(..), SomeFrDigest(..), withFrDigest)
+import qualified Clapi.Types.AssocList as AL
 import Clapi.Types.SequenceOps (SequenceOp(..))
 import Clapi.TextSerialisation (ttToText_)
 
@@ -85,22 +88,16 @@ instance ToJSON Tag where
     toJSON = toJSON . decodeUtf8 . BS.singleton . unTag
 
 instance FromJSON Path where
-    parseJSON v = parseJSON v >>= Path.fromText segP
+    parseJSON v = parseJSON v >>= Path.fromText nameP
 
 instance ToJSON Path where
-    toJSON = toJSON . Path.toText unSeg
+    toJSON = toJSON . Path.toText unName
 
-instance FromJSON Seg where
-    parseJSON v = parseJSON v >>= Path.mkSeg
+instance FromJSON (Name a) where
+    parseJSON v = parseJSON v >>= mkName
 
-instance ToJSON Seg where
-    toJSON = toJSON . Path.unSeg
-
-deriving instance ToJSON Namespace
-deriving instance FromJSON Namespace
-
-deriving instance ToJSON Placeholder
-deriving instance FromJSON Placeholder
+instance ToJSON (Name a) where
+    toJSON = toJSON . unName
 
 deriving instance ToJSON Attributee
 deriving instance FromJSON Attributee
@@ -190,7 +187,7 @@ instance ToJSON SomeTreeType where
 instance ToJSON PostDefinition where
     toJSON (PostDefinition doc args) = object ["doc" .= doc, "args" .= typeOs]
       where
-        typeOs = asTypeO <$> unAssocList args
+        typeOs = asTypeO <$> AL.unAssocList args
         asTypeO (s, tts) = object ["seg" .= s, "tys" .= toJSONList tts]
 
 instance ToJSON SomeDefinition where
@@ -199,14 +196,14 @@ instance ToJSON SomeDefinition where
           [ "doc" .= doc
           , "types" .= (
             (\(s, tt) -> object ["seg" .= s, "ty" .= tt])
-            <$> unAssocList tys)
+            <$> AL.unAssocList tys)
           , "il" .= ilimit
           ]
         StructDef doc al -> object
           [ "doc" .= doc
           , "stls" .= (
             (\(s, (tn, l)) -> object ["seg" .= s, "tn" .= tn, "ed" .= l])
-            <$> unAssocList al)
+            <$> AL.unAssocList al)
           ]
         ArrayDef doc ptn cTn cEd -> object
           [ "doc" .= doc
@@ -258,8 +255,8 @@ instance ToJSON (FrDigest o a) where
           , "pdefs" .= Map.toList pdefs
           , "defs" .= Map.toList defs
           , "tas" .= Map.toList tas
-          , "co" .= Map.toList (Map.toList <$> co)
-          , "dd" .= unAssocList dd
+          , "co" .= Map.toList (AL.unAssocList <$> co)
+          , "dd" .= AL.unAssocList dd
           , "errs" .= Mol.toList errs
           ]
         Frcsd errs ptu tu du -> object
@@ -268,7 +265,7 @@ instance ToJSON (FrDigest o a) where
           , "tuns" .= Mos.toList tu
           , "duns" .= Mos.toList du
           ]
-        Frcrd cops -> toJSON $ Map.toList cops
+        Frcrd cops -> toJSON $ AL.unAssocList cops
         _ -> error "Unexpected provider digest"
 
 instance ToJSON SomeFrDigest where
@@ -278,10 +275,10 @@ instance FromJSON SubOp where
     parseJSON = parseTaggedJson subOpTaggedData $ const . pure
 
 instance FromJSON DataDigest where
-    parseJSON = fmap alFromList . parseJSON
+    parseJSON = fmap AL.fromList . parseJSON
 
 instance FromJSON CreateOp where
-    parseJSON = withObject "CreateOp" $ \o -> OpCreate <$> o .: "args" <*> o .: "after"
+    parseJSON = withObject "CreateOp" $ \o -> OpCreate <$> o .: "args"
 
 instance FromJSON SomeTrDigest where
     parseJSON = parseTaggedJson strTaggedData $ \case
