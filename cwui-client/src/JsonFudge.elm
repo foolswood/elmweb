@@ -219,8 +219,8 @@ decodeInterpolationType : JD.Decoder InterpolationType
 decodeInterpolationType =
   let
     iltd = Dict.fromList
-      [ ("C", JD.succeed ILConstant)
-      , ("L", JD.succeed ILLinear)
+      [ ("c", JD.succeed ILConstant)
+      , ("l", JD.succeed ILLinear)
       ]
   in decodeTagged iltd
 
